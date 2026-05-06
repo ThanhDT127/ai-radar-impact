@@ -55,10 +55,20 @@ class GeminiClient:
                 model=MODEL_ID,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.1,  # Low temp for consistent classification
-                    max_output_tokens=1024,
+                    temperature=0.1,      # Low temp for consistent classification
+                    max_output_tokens=4096,
+                    response_mime_type="application/json",  # Prevent Unicode escaping + ensure valid JSON
                 ),
             )
+
+            # Check for truncation
+            candidates = response.candidates or []
+            if candidates:
+                finish_reason = candidates[0].finish_reason
+                # finish_reason 2 = MAX_TOKENS (truncated)
+                if hasattr(finish_reason, "value") and finish_reason.value == 2:
+                    logger.warning("Gemini response truncated (MAX_TOKENS) for '%s'", title[:50])
+
             raw_text = response.text or ""
             return self._parse_response(raw_text)
 
@@ -68,14 +78,14 @@ class GeminiClient:
 
     def _parse_response(self, raw_text: str) -> AnalysisResult:
         """Parse Gemini JSON response into AnalysisResult."""
-        # Strip markdown code fences if present
+        # Strip markdown code fences if present (response_mime_type usually avoids this)
         text = re.sub(r"```(?:json)?\s*", "", raw_text).strip()
         text = text.rstrip("`").strip()
 
         try:
             data = json.loads(text)
         except json.JSONDecodeError as e:
-            logger.warning("Failed to parse Gemini JSON response: %s | raw: %s", e, text[:200])
+            logger.warning("Failed to parse Gemini JSON response: %s | raw: %s", e, text[:300])
             return AnalysisResult(error=f"JSON parse error: {e}", raw_response={"raw": raw_text})
 
         return AnalysisResult(
