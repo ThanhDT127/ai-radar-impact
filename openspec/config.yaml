@@ -1,20 +1,162 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  # AI Impact Radar — Project Context
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  ## Mô tả dự án
+  AI Impact Radar là nền tảng intelligence nội bộ giúp doanh nghiệp:
+  - Thu thập thông tin từ nhiều nguồn bên ngoài (web, RSS, API, GitHub, pháp lý)
+  - Phân tích, tóm tắt và đánh giá mức độ tác động đến từng phòng ban, vai trò, quy trình
+  - Phân phối insight đến đúng người qua dashboard, email digest, Teams alert
+  - Cung cấp chatbot Q&A grounded trên dữ liệu đã xử lý (Phase 2)
+
+  ## Tech Stack
+
+  ### Backend
+  - Language: Python 3.12+
+  - Framework: FastAPI (REST API)
+  - ORM: SQLAlchemy 2.x (async)
+  - Scheduler: APScheduler (nhúng trong backend, không cần Redis riêng ở Phase 1)
+  - Validation: Pydantic v2
+  - Auth: JWT-based (local auth Phase 1, SSO optional sau)
+
+  ### Frontend
+  - Framework: React (Vite + React — không dùng Next.js)
+  - Language: TypeScript
+  - HTTP client: TanStack Query (React Query)
+  - State management: Zustand (nhẹ, đủ dùng cho solo dev)
+  - Styling: Vanilla CSS / CSS Modules (không dùng Tailwind)
+  - Routing: React Router v6
+
+  ### Database
+  - Primary: PostgreSQL 16+
+  - Extension: pgvector (Phase 2 — semantic search và chatbot retrieval)
+  - Raw storage: Filesystem local (Phase 1), object storage sau nếu cần
+
+  ### AI / LLM
+  - Primary model: Google Gemini Flash 2.0 (classify, summarize, impact mapping)
+  - Fallback model: DeepSeek V3 (OpenAI-compatible API, rẻ hơn khi scale)
+  - Grounding strategy: prompt engineering bám nguồn, không suy diễn ngoài nội dung
+  - Không publish insight nếu LLM output thiếu confidence hoặc không có source
+
+  ### Automation & Delivery
+  - n8n: dùng cho email digest (trigger theo lịch, gọi backend API, render template, gửi SMTP)
+  - Email: SMTP / SendGrid — ưu tiên làm trước ở Phase 1
+  - Teams: Webhook (Phase 1), Bot (Phase 2)
+  - Delivery rule: cấu hình qua Admin UI — không hardcode
+
+  ### DevOps / Infra
+  - Local dev: Docker Compose (backend + postgres + n8n)
+  - Logging: Python logging chuẩn, stdout + file
+  - Health check: GET /api/v1/health
+  - Deployment Phase 1: VPS / server nội bộ
+
+  ## Domain Knowledge
+
+  ### Taxonomy chính
+  Topics: AI, Technology, Data, Software Process, Security, Legal/Compliance,
+  Content/Marketing, Service/Platform, Market/Competitor, Internal Governance
+
+  Event types: New release, Policy change, Regulation update, Security alert,
+  Deprecation, Trend signal, Community discussion, Research update, Operational incident
+
+  Nature: Risk, Opportunity, Compliance, Informational, Watchlist
+
+  Trust tier: Very High, High, Medium, Low, Unverified
+
+  Impact label: Critical, High, Medium, Low, Watch
+
+  ### Source tier
+  - Tier A (Official): vendor chính thức, government, regulatory — có thể sinh insight trực tiếp
+  - Tier B (Professional): nguồn chuyên môn uy tín — có thể sinh insight nếu rõ ràng
+  - Tier C (Community): HN, Reddit, SO — chỉ làm signal/watchlist, không alert critical
+  - Tier D (Internal): SOP, danh mục tool nội bộ — dùng để map impact, không broadcast
+
+  ### Người dùng (RBAC)
+  - Admin: full quyền quản trị nguồn, rule, taxonomy, xem logs
+  - Executive: dashboard executive, top risks/opportunities
+  - Manager: dashboard team, insight liên quan team, nhận digest
+  - Specialist (Dev/Legal/Data/Content): insight theo domain, chatbot, feedback
+  - Ops/DevOps: job logs, health monitor — không sửa insight
+
+  ### Pipeline luồng chính
+  Source → Connector → RawDocument → Normalizer → NormalizedDocument
+  → Classifier + Summarizer (LLM) → Trust/Impact Scoring (Rule+LLM)
+  → Insight Repository → Delivery Rule Engine → Email/Teams (via n8n)
+  → User Dashboard + Chatbot → Feedback Loop
+
+  ## Architecture modules
+  M1: Source Management (CRUD nguồn, crawl schedule, trust tier)
+  M2: Ingestion (scheduler + connectors: RSS, Web, GitHub API, Gov)
+  M3: Normalization (clean HTML, dedup fingerprint, metadata extract)
+  M4: AI Analysis (classify topic/event_type, summarize short/medium, trust/impact score)
+  M5: Insight Repository (lưu insight curated, link source, department mapping)
+  M6: Dashboard (React frontend — overview, list, detail, admin)
+  M7: Delivery (n8n email + Teams webhook, delivery rule engine, delivery log)
+  M8: Chatbot/Search (Phase 2 — vector retrieval, grounded Q&A)
+  M9: Feedback (useful/not-useful, reason code, quality analytics)
+  M10: Admin & Governance (RBAC, audit log, taxonomy config, health/ops)
+
+  ## API Conventions
+  - Base path: /api/v1/
+  - Auth: Bearer JWT trong Authorization header
+  - Pagination: ?page=&size= → response { page, size, total, items: [] }
+  - Error format: { error: string, detail: string, code: string }
+  - Timestamps: ISO 8601 UTC (e.g. "2026-05-04T09:00:00Z")
+  - IDs: UUID v4
+
+  ## Database Conventions
+  - Tên bảng: snake_case, số nhiều (sources, raw_documents, insights, job_logs)
+  - PK: id UUID NOT NULL DEFAULT gen_random_uuid()
+  - Timestamps: created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+  - Soft delete: dùng status field (active/inactive/archived) — không xóa dữ liệu quan trọng
+  - JSONB: dùng cho metadata linh hoạt, config, role summaries, dept lists, delivery channel config
+
+  ## Coding Conventions
+  - Python: PEP8, type hints bắt buộc, docstring ngắn trên public functions
+  - FastAPI: route → service → repository pattern (tách rõ 3 lớp)
+  - React: function components + hooks only (không dùng class components)
+  - Commits: Conventional Commits — feat:, fix:, chore:, docs:, refactor:
+  - Branch: main / develop / feature/<name> / fix/<name>
+  - Ngôn ngữ code/comment: English; tài liệu spec/BRD viết tiếng Việt
+
+  ## Phase Strategy
+  Phase 1 (MVP): Source CRUD → Ingest → Normalize → AI Analysis → Insight → Dashboard → Email digest
+  Phase 2: Chatbot, pgvector semantic search, event clustering, scoring nâng cao, personalization
+  Phase 3: Task workflow, SOP impact mapping, executive auto-reporting, Jira integration
+
+  ## Constraints quan trọng
+  - Team size: 1 developer — ưu tiên simplicity, tránh over-engineering
+  - Mọi insight phải có ít nhất 1 source trace — không có sourceless insight
+  - AI summary không thay thế nguồn gốc — luôn kèm source link
+  - Phase 1 chỉ dùng catalog nguồn đã whitelist (30 nguồn)
+  - Delivery rule phải qua UI config, không hardcode rule trong code
+
+rules:
+  proposal:
+    - Viết bằng tiếng Việt, technical terms giữ tiếng Anh
+    - Luôn có mục "Non-goals" để giới hạn scope rõ ràng
+    - Nêu phase áp dụng (Phase 1 / 2 / 3)
+    - Nêu dependency với Epic/module khác nếu có
+    - Không quá 600 từ — súc tích, đủ ý
+
+  design:
+    - Phải nêu rõ API endpoints bị ảnh hưởng hoặc mới tạo
+    - Phải nêu rõ bảng DB bị ảnh hưởng hoặc thêm mới
+    - Nếu liên quan AI/LLM phải nêu model dùng và grounding strategy
+    - Nêu rõ integration với n8n nếu liên quan delivery
+    - Nêu rõ module (M1-M10) bị ảnh hưởng
+
+  tasks:
+    - Chia task theo đơn vị: Backend API, Frontend UI, DB migration, AI pipeline, n8n flow, Test
+    - Mỗi task không quá 4 giờ làm việc (solo dev constraint)
+    - Task phải có Definition of Done rõ ràng và kiểm tra được
+    - Đánh dấu phase (P1/P2/P3) cho mỗi task
+    - Đánh dấu dependency nếu task cần task khác hoàn thành trước
+    - Group task theo: Backend / Frontend / AI / DevOps / Test
+
+  spec:
+    - Phải có Acceptance Criteria cụ thể và kiểm tra được
+    - Phân biệt rõ FR (Functional) và NFR (Non-functional)
+    - Nếu thay đổi taxonomy/rule phải nêu impact tới dữ liệu cũ
+    - Nêu rõ actor và tiền điều kiện cho mỗi use case

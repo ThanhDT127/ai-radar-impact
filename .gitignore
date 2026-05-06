@@ -1,0 +1,30 @@
+# Environment
+.env
+.env.local
+
+# Secrets — NEVER commit credentials
+secrets/
+*.json.key
+*-sa-key.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.swp
