@@ -387,3 +387,51 @@
 .notFound a {
   font-size: 0.875rem;
 }
+
+/* ===========================
+   Role Tags & Event Tags (v2)
+   =========================== */
+.roleList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.roleTag {
+  font-size: 0.70rem;
+  font-weight: 500;
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 20px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.eventTag {
+  font-size: 0.70rem;
+  font-weight: 500;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.10);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 20px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* ===========================
+   Detail Footer (v2)
+   =========================== */
+.detailFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.analyzedDate {
+  font-size: 0.80rem;
+  color: var(--color-text-muted);
+}

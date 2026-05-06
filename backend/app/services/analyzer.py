@@ -21,17 +21,17 @@ TRUST_SCORE_MAP: dict[str, float] = {
     "unverified": 0.20,
 }
 
-# Rule-based impact label mapping from event_type
+# Rule-based impact label mapping from event_type (tiếng Việt)
 IMPACT_LABEL_MAP: dict[str, str] = {
-    "Security alert": "High",
-    "Deprecation": "High",
-    "Policy change": "High",
-    "Regulation update": "High",
-    "New release": "Medium",
-    "Operational incident": "Medium",
-    "Research update": "Low",
-    "Trend signal": "Low",
-    "Community discussion": "Watch",
+    "Cảnh báo bảo mật": "Nghiêm trọng",
+    "Cập nhật quy định": "Cao",
+    "Thay đổi chính sách": "Cao",
+    "Ngừng hỗ trợ": "Cao",
+    "Phát hành mới": "Trung bình",
+    "Sự cố vận hành": "Trung bình",
+    "Cập nhật nghiên cứu": "Thấp",
+    "Tín hiệu xu hướng": "Thấp",
+    "Thảo luận cộng đồng": "Theo dõi",
 }
 
 MIN_CONFIDENCE = 0.3  # Below this, do not publish
@@ -74,12 +74,12 @@ class AnalyzerService:
 
         # Rule-based scoring
         trust_score = TRUST_SCORE_MAP.get(source.trust_tier, 0.5)
-        impact_label = IMPACT_LABEL_MAP.get(result.event_type or "", "Low")
+        impact_label = IMPACT_LABEL_MAP.get(result.event_type or "", "Thấp")
 
         # Create insight
         await self.insight_repo.create(
             raw_document_id=raw_doc.id,
-            title=raw_doc.title or "Untitled",
+            title=raw_doc.title or "Chưa có tiêu đề",
             summary_short=result.summary_short,
             summary_medium=result.summary_medium,
             topics=result.topics,
@@ -90,6 +90,8 @@ class AnalyzerService:
             source_url=raw_doc.source_url,
             confidence=result.confidence,
             ai_raw_response=result.raw_response,
+            affected_roles=result.affected_roles,
+            published_at=raw_doc.published_at,
         )
 
         await self.raw_doc_repo.update_status(raw_doc.id, "analyzed")

@@ -1,49 +1,76 @@
 """Gemini analysis prompts and response schema."""
 
 ALLOWED_TOPICS = [
-    "AI", "Technology", "Data", "Software Process", "Security",
-    "Legal/Compliance", "Content/Marketing", "Service/Platform",
-    "Market/Competitor", "Internal Governance",
+    "Trí tuệ nhân tạo",
+    "Công nghệ",
+    "Dữ liệu",
+    "Quy trình phần mềm",
+    "An ninh mạng",
+    "Pháp lý/Tuân thủ",
+    "Nội dung/Marketing",
+    "Dịch vụ/Nền tảng",
+    "Thị trường/Đối thủ",
+    "Quản trị nội bộ",
 ]
 
 ALLOWED_EVENT_TYPES = [
-    "New release", "Policy change", "Regulation update", "Security alert",
-    "Deprecation", "Trend signal", "Community discussion",
-    "Research update", "Operational incident",
+    "Phát hành mới",
+    "Thay đổi chính sách",
+    "Cập nhật quy định",
+    "Cảnh báo bảo mật",
+    "Ngừng hỗ trợ",
+    "Tín hiệu xu hướng",
+    "Thảo luận cộng đồng",
+    "Cập nhật nghiên cứu",
+    "Sự cố vận hành",
 ]
 
-ALLOWED_NATURES = ["Risk", "Opportunity", "Compliance", "Informational", "Watchlist"]
+ALLOWED_NATURES = ["Rủi ro", "Cơ hội", "Tuân thủ", "Thông tin chung", "Theo dõi"]
+
+ALLOWED_ROLES = [
+    "Executive",
+    "Engineering",
+    "Data/AI",
+    "Product",
+    "Content/Marketing",
+    "Legal/Compliance",
+    "HR/L&D",
+    "Toàn công ty",
+]
 
 ANALYSIS_PROMPT = """\
-You are an AI analyst. Analyze the following article and return a JSON object.
+Bạn là chuyên gia phân tích AI. Phân tích bài viết sau và trả về JSON.
 
-RULES:
-- Only use information explicitly stated in the article
-- Do NOT speculate or add external knowledge
-- summary_short must be 1-2 sentences, under 200 characters
-- summary_medium must be 1 paragraph, under 500 characters
-- topics must only contain values from the allowed list
-- event_type must be exactly one value from the allowed list
-- nature must be exactly one value from the allowed list
-- If uncertain about classification, set confidence below 0.5
+QUY TẮC:
+- Chỉ sử dụng thông tin có trong bài viết
+- KHÔNG suy đoán hoặc thêm kiến thức bên ngoài
+- summary_short tối đa 200 ký tự, 1-2 câu, bằng tiếng Việt, súc tích và rõ ràng
+- summary_medium tối đa 500 ký tự, 1 đoạn, bằng tiếng Việt, mô tả đầy đủ hơn
+- topics chỉ chứa giá trị từ danh sách CHỦ ĐỀ CHO PHÉP
+- event_type chỉ chọn 1 giá trị từ danh sách LOẠI SỰ KIỆN CHO PHÉP
+- nature chỉ chọn 1 giá trị từ danh sách TÍNH CHẤT CHO PHÉP
+- affected_roles: chọn 1 hoặc nhiều vai trò từ danh sách VAI TRÒ CHO PHÉP bị ảnh hưởng bởi sự kiện này
+- Nếu không chắc chắn về phân loại, đặt confidence dưới 0.5
 
-ALLOWED TOPICS: {topics}
-ALLOWED EVENT TYPES: {event_types}
-ALLOWED NATURES: {natures}
+CHỦ ĐỀ CHO PHÉP: {topics}
+LOẠI SỰ KIỆN CHO PHÉP: {event_types}
+TÍNH CHẤT CHO PHÉP: {natures}
+VAI TRÒ CHO PHÉP: {roles}
 
-Return ONLY valid JSON matching this schema (no markdown, no code block):
+Trả về ONLY valid JSON (không markdown, không code block):
 {{
-  "topics": ["<topic>"],
-  "event_type": "<event_type>",
-  "nature": "<nature>",
-  "summary_short": "<1-2 sentences max 200 chars>",
-  "summary_medium": "<1 paragraph max 500 chars>",
-  "confidence": <0.0 to 1.0>
+  "topics": ["<chủ đề>"],
+  "event_type": "<loại sự kiện>",
+  "nature": "<tính chất>",
+  "summary_short": "<1-2 câu tối đa 200 ký tự bằng tiếng Việt>",
+  "summary_medium": "<1 đoạn tối đa 500 ký tự bằng tiếng Việt>",
+  "affected_roles": ["<vai trò>"],
+  "confidence": <0.0 đến 1.0>
 }}
 
-ARTICLE TITLE: {title}
+TIÊU ĐỀ BÀI VIẾT: {title}
 
-ARTICLE CONTENT:
+NỘI DUNG BÀI VIẾT:
 {content}
 """
 
@@ -54,6 +81,7 @@ def build_prompt(title: str, content: str) -> str:
         topics=", ".join(ALLOWED_TOPICS),
         event_types=", ".join(ALLOWED_EVENT_TYPES),
         natures=", ".join(ALLOWED_NATURES),
+        roles=", ".join(ALLOWED_ROLES),
         title=title,
         content=content[:6000],  # Limit content to avoid token overflow
     )

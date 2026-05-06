@@ -17,11 +17,24 @@ router = APIRouter(prefix="/api/v1/insights", tags=["insights"])
 async def list_insights(
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     size: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    role: str | None = Query(default=None, description="Filter by affected role (e.g. Engineering)"),
+    source_id: uuid.UUID | None = Query(default=None, description="Filter by source UUID"),
+    sort_by: str = Query(
+        default="created_at",
+        description="Sort order: created_at | published_at | impact_label",
+        pattern="^(created_at|published_at|impact_label)$",
+    ),
     session: AsyncSession = Depends(get_session),
 ) -> PaginatedResponse[InsightListItem]:
-    """Return a paginated list of published insights, newest first."""
+    """Return a paginated list of published insights with optional filters and sort."""
     repo = InsightRepository(session)
-    items, total = await repo.list_paginated(page=page, size=size)
+    items, total = await repo.list_paginated(
+        page=page,
+        size=size,
+        role=role,
+        source_id=source_id,
+        sort_by=sort_by,
+    )
     return PaginatedResponse(
         page=page,
         size=size,

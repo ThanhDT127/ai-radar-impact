@@ -4,6 +4,12 @@ import { fetchInsightById } from '../api/insights';
 import ImpactBadge from '../components/ImpactBadge';
 import styles from '../styles/insights.module.css';
 
+function formatDate(isoDate: string): string {
+  return new Date(isoDate).toLocaleDateString('vi-VN', {
+    year: 'numeric', month: 'long', day: 'numeric',
+  });
+}
+
 export default function InsightDetail() {
   const { id } = useParams<{ id: string }>();
 
@@ -29,20 +35,22 @@ export default function InsightDetail() {
   if (isError || !insight) {
     return (
       <div className={`${styles.detailPage} ${styles.notFound}`}>
-        <h2>Insight not found</h2>
-        <p>This insight may have been removed or the URL is incorrect.</p>
-        <Link to="/">← Back to insights</Link>
+        <h2>Không tìm thấy bản tin</h2>
+        <p>Bản tin này có thể đã bị xóa hoặc đường dẫn không đúng.</p>
+        <Link to="/">← Về danh sách bản tin</Link>
       </div>
     );
   }
 
-  const publishedDate = new Date(insight.created_at).toLocaleDateString('en-US', {
-    year: 'numeric', month: 'long', day: 'numeric',
-  });
+  const publishedDate = insight.published_at
+    ? formatDate(insight.published_at)
+    : formatDate(insight.created_at);
+
+  const analyzedDate = formatDate(insight.created_at);
 
   return (
     <div className={styles.detailPage}>
-      <Link to="/" className={styles.backLink}>← All Insights</Link>
+      <Link to="/" className={styles.backLink}>← Tất cả bản tin</Link>
 
       <div className={styles.detailHeader}>
         <h1 className={styles.detailTitle}>{insight.title}</h1>
@@ -50,7 +58,7 @@ export default function InsightDetail() {
       </div>
 
       <div className={styles.detailMeta}>
-        <span>{publishedDate}</span>
+        <span>📅 {publishedDate}</span>
         {insight.event_type && (
           <>
             <span className={styles.detailMetaDot}>·</span>
@@ -64,21 +72,32 @@ export default function InsightDetail() {
           </>
         )}
         <span className={styles.detailMetaDot}>·</span>
-        <span>Confidence {Math.round(insight.confidence * 100)}%</span>
+        <span>Độ tin cậy {Math.round(insight.confidence * 100)}%</span>
       </div>
 
       <div className={styles.detailBody}>
         {insight.summary_short && (
           <>
-            <p className={styles.detailSectionLabel}>Summary</p>
+            <p className={styles.detailSectionLabel}>Tóm tắt</p>
             <p className={styles.detailSummaryShort}>{insight.summary_short}</p>
           </>
         )}
 
         {insight.summary_medium && (
           <>
-            <p className={styles.detailSectionLabel}>Analysis</p>
+            <p className={styles.detailSectionLabel}>Phân tích chi tiết</p>
             <p className={styles.detailSummaryMedium}>{insight.summary_medium}</p>
+          </>
+        )}
+
+        {insight.affected_roles.length > 0 && (
+          <>
+            <p className={styles.detailSectionLabel}>Vai trò ảnh hưởng</p>
+            <div className={styles.roleList}>
+              {insight.affected_roles.map((role) => (
+                <span key={role} className={styles.roleTag}>👤 {role}</span>
+              ))}
+            </div>
           </>
         )}
 
@@ -91,14 +110,17 @@ export default function InsightDetail() {
         )}
       </div>
 
-      <a
-        href={insight.source_url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={styles.sourceLink}
-      >
-        🔗 View original source
-      </a>
+      <div className={styles.detailFooter}>
+        <span className={styles.analyzedDate}>🤖 Phân tích lúc: {analyzedDate}</span>
+        <a
+          href={insight.source_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={styles.sourceLink}
+        >
+          🔗 Xem nguồn gốc
+        </a>
+      </div>
     </div>
   );
 }

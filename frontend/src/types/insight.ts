@@ -11,6 +11,8 @@ export interface InsightListItem {
   impact_label: string | null;
   source_url: string;
   confidence: number;
+  affected_roles: string[];
+  published_at: string | null; // ISO 8601 UTC
   created_at: string; // ISO 8601 UTC
 }
 

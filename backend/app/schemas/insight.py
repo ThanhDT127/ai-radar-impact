@@ -21,6 +21,8 @@ class InsightListItem(BaseModel):
     impact_label: str | None
     source_url: str
     confidence: float
+    affected_roles: list[str]
+    published_at: datetime | None
     created_at: datetime
 
 
@@ -41,5 +43,7 @@ class InsightDetail(BaseModel):
     source_url: str
     confidence: float
     status: str
+    affected_roles: list[str]
+    published_at: datetime | None
     created_at: datetime
     updated_at: datetime

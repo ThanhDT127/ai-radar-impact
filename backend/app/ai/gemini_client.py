@@ -25,6 +25,7 @@ class AnalysisResult:
     nature: str | None = None
     summary_short: str | None = None
     summary_medium: str | None = None
+    affected_roles: list[str] = field(default_factory=list)
     confidence: float = 0.0
     raw_response: dict = field(default_factory=dict)
     error: str | None = None
@@ -83,6 +84,7 @@ class GeminiClient:
             nature=data.get("nature"),
             summary_short=data.get("summary_short"),
             summary_medium=data.get("summary_medium"),
+            affected_roles=data.get("affected_roles", []),
             confidence=float(data.get("confidence", 0.0)),
             raw_response=data,
         )

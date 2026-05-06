@@ -25,15 +25,15 @@ export default function InsightList() {
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['insights', page],
-    queryFn: () => fetchInsights(page, PAGE_SIZE),
+    queryFn: () => fetchInsights({ page, size: PAGE_SIZE }),
   });
 
   return (
     <div className={styles.listPage}>
       <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>Intelligence Insights</h1>
+        <h1 className={styles.pageTitle}>Bản tin Radar AI</h1>
         <p className={styles.pageSubtitle}>
-          AI-analyzed signals from technology and industry sources
+          Tín hiệu công nghệ và AI được phân tích tự động từ các nguồn uy tín
         </p>
       </div>
 
@@ -45,7 +45,7 @@ export default function InsightList() {
 
       {isError && (
         <div className={styles.errorState}>
-          <p>⚠️ Failed to load insights</p>
+          <p>⚠️ Không thể tải dữ liệu bản tin</p>
           <p style={{ fontSize: '0.8rem', marginTop: 8, opacity: 0.6 }}>
             {(error as Error)?.message}
           </p>
@@ -54,8 +54,8 @@ export default function InsightList() {
 
       {data && data.items.length === 0 && (
         <div className={styles.emptyState}>
-          <h3>No insights yet</h3>
-          <p>Run the ingestion pipeline to fetch and analyze your first batch of insights.</p>
+          <h3>Chưa có bản tin nào</h3>
+          <p>Chạy pipeline ingestion để thu thập và phân tích bản tin đầu tiên.</p>
         </div>
       )}
 

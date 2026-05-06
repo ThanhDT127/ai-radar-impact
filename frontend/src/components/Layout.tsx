@@ -44,7 +44,7 @@ export default function Layout({ children }: LayoutProps) {
             </div>
           </Link>
           <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-            Intelligence Dashboard
+            Dashboard Phân Tích
           </span>
         </div>
       </header>

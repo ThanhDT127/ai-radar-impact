@@ -12,15 +12,20 @@ function relativeTime(isoDate: string): string {
   const then = new Date(isoDate).getTime();
   const diffMs = now - then;
   const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffMin < 60) return `${diffMin} phút trước`;
   const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffHr < 24) return `${diffHr} giờ trước`;
   const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) return `${diffDay}d ago`;
-  return new Date(isoDate).toLocaleDateString();
+  if (diffDay === 1) return 'Hôm qua';
+  if (diffDay < 30) return `${diffDay} ngày trước`;
+  return new Date(isoDate).toLocaleDateString('vi-VN');
 }
 
 export default function InsightCard({ insight }: InsightCardProps) {
+  const timeDisplay = insight.published_at
+    ? relativeTime(insight.published_at)
+    : relativeTime(insight.created_at);
+
   return (
     <Link to={`/insights/${insight.id}`} className={styles.card}>
       <div className={styles.cardHeader}>
@@ -34,11 +39,21 @@ export default function InsightCard({ insight }: InsightCardProps) {
 
       <div className={styles.cardFooter}>
         <div className={styles.topicList}>
-          {insight.topics.slice(0, 3).map((topic) => (
+          {insight.topics.slice(0, 2).map((topic) => (
             <span key={topic} className={styles.topicTag}>{topic}</span>
           ))}
+          {insight.event_type && (
+            <span className={styles.eventTag}>{insight.event_type}</span>
+          )}
         </div>
-        <span className={styles.cardTime}>{relativeTime(insight.created_at)}</span>
+        {insight.affected_roles.length > 0 && (
+          <div className={styles.roleList}>
+            {insight.affected_roles.slice(0, 2).map((role) => (
+              <span key={role} className={styles.roleTag}>👤 {role}</span>
+            ))}
+          </div>
+        )}
+        <span className={styles.cardTime}>📅 {timeDisplay}</span>
       </div>
     </Link>
   );
