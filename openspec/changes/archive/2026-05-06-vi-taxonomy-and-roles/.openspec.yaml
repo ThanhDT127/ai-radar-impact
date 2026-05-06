@@ -1,0 +1,10 @@
+schema: spec-driven
+created: 2026-05-06
+archived: 2026-05-06
+status: completed
+summary: >
+  Localized all taxonomy to Vietnamese (10 topics, 9 event types, 5 natures, 5 impact labels).
+  Added affected_roles (ARRAY) and published_at columns via Alembic migration 002.
+  Updated Gemini prompt, analyzer, API routes, repository, and frontend components.
+  All 14 new insights verified with VI taxonomy, affected_roles, and published_at populated.
+  Fixed Gemini JSON truncation bug via response_mime_type=application/json + 4096 tokens.
