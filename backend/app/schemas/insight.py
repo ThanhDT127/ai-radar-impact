@@ -14,6 +14,7 @@ class InsightListItem(BaseModel):
     id: uuid.UUID
     title: str
     summary_short: str | None
+    summary_medium: str | None
     topics: list[str]
     event_type: str | None
     nature: str | None
@@ -24,6 +25,9 @@ class InsightListItem(BaseModel):
     affected_roles: list[str]
     published_at: datetime | None
     created_at: datetime
+    source_id: uuid.UUID
+    source_name: str
+    source_type: str
 
 
 class InsightDetail(BaseModel):
@@ -47,3 +51,7 @@ class InsightDetail(BaseModel):
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    source_id: uuid.UUID
+    source_name: str
+    source_type: str
+    source_feed_url: str | None

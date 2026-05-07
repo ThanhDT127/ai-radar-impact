@@ -1,4 +1,4 @@
-"""Insight API routes — list and detail endpoints."""
+"""Insight API routes - list and detail endpoints."""
 
 import uuid
 
@@ -17,22 +17,44 @@ router = APIRouter(prefix="/api/v1/insights", tags=["insights"])
 async def list_insights(
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     size: int = Query(default=20, ge=1, le=100, description="Items per page"),
-    role: str | None = Query(default=None, description="Filter by affected role (e.g. Engineering)"),
-    source_id: uuid.UUID | None = Query(default=None, description="Filter by source UUID"),
+    role: str | None = Query(
+        default=None,
+        description="Comma-separated affected roles (e.g. Engineering,Data/AI)",
+    ),
+    source_id: str | None = Query(
+        default=None,
+        description="Comma-separated source UUIDs",
+    ),
     sort_by: str = Query(
         default="created_at",
-        description="Sort order: created_at | published_at | impact_label",
-        pattern="^(created_at|published_at|impact_label)$",
+        description="Sort order: created_at | published_at | impact_label | trust_score",
+        pattern="^(created_at|published_at|impact_label|trust_score)$",
     ),
     session: AsyncSession = Depends(get_session),
 ) -> PaginatedResponse[InsightListItem]:
     """Return a paginated list of published insights with optional filters and sort."""
+    roles = [item.strip() for item in role.split(",") if item.strip()] if role else None
+    source_ids: list[uuid.UUID] | None = None
+
+    if source_id:
+        try:
+            source_ids = [uuid.UUID(item.strip()) for item in source_id.split(",") if item.strip()]
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "invalid_source_id",
+                    "detail": "source_id must contain valid UUID values",
+                    "code": "INVALID_SOURCE_ID",
+                },
+            ) from exc
+
     repo = InsightRepository(session)
     items, total = await repo.list_paginated(
         page=page,
         size=size,
-        role=role,
-        source_id=source_id,
+        roles=roles,
+        source_ids=source_ids,
         sort_by=sort_by,
     )
     return PaginatedResponse(

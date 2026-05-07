@@ -8,49 +8,58 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   return (
     <div>
-      <header style={{
-        height: 'var(--header-height)',
-        borderBottom: '1px solid var(--color-border)',
-        backgroundColor: 'rgba(15, 17, 23, 0.9)',
-        backdropFilter: 'blur(12px)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
-      }}>
-        <div className="container" style={{
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}>
-          <Link to="/" style={{ textDecoration: 'none' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                display: 'flex',
+      <header
+        style={{
+          height: 'var(--header-height)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 20,
+          backdropFilter: 'blur(14px)',
+          background: 'rgba(243, 237, 228, 0.78)',
+          borderBottom: '1px solid var(--color-border)',
+        }}
+      >
+        <div
+          className="container"
+          style={{
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '16px',
+          }}
+        >
+          <Link to="/" style={{ display: 'inline-flex', alignItems: 'center', gap: '12px' }}>
+            <span
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '14px',
-              }}>📡</span>
-              <span style={{
-                fontWeight: 700,
-                fontSize: '1rem',
-                color: 'var(--color-text-primary)',
-                letterSpacing: '-0.01em',
-              }}>AI Radar</span>
+                background: 'linear-gradient(135deg, #b84d1e, #e28d56)',
+                color: '#fff',
+                fontWeight: 800,
+              }}
+            >
+              AI
+            </span>
+            <div>
+              <strong style={{ display: 'block', fontFamily: 'var(--font-display)' }}>
+                AI Radar Impact
+              </strong>
+              <span style={{ color: 'var(--color-text-muted)', fontSize: '0.82rem' }}>
+                Sources, roles, and impact signals
+              </span>
             </div>
           </Link>
-          <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-            Dashboard Phân Tích
+          <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.88rem' }}>
+            Dashboard phân tích
           </span>
         </div>
       </header>
-      <main className="container">
-        {children}
-      </main>
+      <main className="container">{children}</main>
     </div>
   );
 }

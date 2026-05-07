@@ -87,13 +87,13 @@ class IngestionService:
                         published_at=entry.published_at,
                         fingerprint=fingerprint,
                     )
+                    await self.session.commit()
                     summary.new += 1
 
                 except Exception as e:
                     logger.error("Error processing entry '%s': %s", entry.title, e)
+                    await self.session.rollback()
                     summary.errors += 1
-
-        await self.session.commit()
 
         # Run AI analysis on newly added documents
         if summary.new > 0:

@@ -26,12 +26,26 @@
 - Filter chips multi-select cho nguồn và vai trò
 - Insight card redesign: thêm published_at, source name, role badges
 - Responsive design
+- Refine UX/UI để tabs dễ dùng hơn trên dữ liệu thật:
+  - Filter hiển thị đẹp, quét nhanh, không gây khó chịu khi có nhiều lựa chọn
+  - Pagination giữ lại nhưng phải hỗ trợ dãy số trang và nhập trang trực tiếp
+  - Badge mức độ ảnh hưởng hiển thị nhất quán, không loạn kích thước
+  - Tiêu đề tiếng Việt dễ đọc hơn tiêu đề gốc tiếng Anh
+  - Thời gian hiển thị rõ ràng hơn cho cả relative time và ngày tuyệt đối
+- Bổ sung định nghĩa sản phẩm cho insight card:
+  - Chuyện gì thay đổi
+  - Vì sao đáng chú ý
+  - Ai bị ảnh hưởng
 
 ## Phạm vi
 
 - Backend: seed script, verify script, API endpoint `/sources`
 - Frontend: toàn bộ UI refactor
 - Phụ thuộc: Change `vi-taxonomy-and-roles` phải hoàn thành trước (cần roles + published_at + tiếng Việt)
+
+## Capabilities
+
+- `dashboard-tabs-and-filters` — Dashboard MUST provide 3 tabs with usable filters, consistent impact badges, clear pagination, and insight cards optimized for quick comprehension and action.
 
 ## Phụ thuộc
 

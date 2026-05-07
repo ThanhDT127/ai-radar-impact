@@ -1,0 +1,11 @@
+schema: spec-driven
+created: 2026-05-06
+archived: 2026-05-07
+status: completed
+summary: >
+  Added 14 new RSS sources (total 15) including arXiv, VnExpress, TechCrunch, The Verge, etc.
+  Built GET /api/v1/sources and GET /api/v1/insights/stats endpoints.
+  Refactored InsightList into 3-tab layout (Tổng quan / Theo nguồn / Theo vai trò).
+  Added KPISummary, TabBar, FilterChips, SortDropdown, RoleBadge, RelativeTime components.
+  Full E2E verified: 15 sources ingesting, 3 tabs working, multi-select filters, pagination.
+  Delta spec synced to openspec/specs/dashboard-tabs-and-filters/spec.md.

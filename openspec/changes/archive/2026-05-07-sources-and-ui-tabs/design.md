@@ -74,7 +74,7 @@ Tạo `backend/app/scripts/verify_feeds.py`:
 
 ### 2.2 Tab 1 — Tổng quan
 
-**Mô tả:** Feed tất cả insights, sắp xếp mặc định theo thời gian mới nhất.
+**Mô tả:** Feed tất cả insights, sắp xếp mặc định theo thời gian mới nhất hoặc mức ảnh hưởng tùy lựa chọn người dùng.
 
 **Thành phần:**
 - KPI Summary Bar (4 cards):
@@ -83,7 +83,7 @@ Tạo `backend/app/scripts/verify_feeds.py`:
   - Cơ hội (count nature = "Cơ hội")
   - Nguồn hoạt động (count sources active)
 - Sort Dropdown: Mới nhất / Ảnh hưởng cao nhất / Tin cậy cao nhất
-- Insight Card List (infinite scroll hoặc pagination)
+- Insight Card List (pagination với dãy số trang + jump page)
 
 **Insight Card redesign:**
 ```
@@ -103,6 +103,17 @@ Thay đổi so với card hiện tại:
 - Thêm nguồn name
 - Thêm published_at (relative time: "2 giờ trước", "Hôm qua")
 - Badge impact dùng tiếng Việt
+- Thêm dòng "Điều thay đổi" để giải thích ngắn gọn tín hiệu chính
+- Thêm dòng "Vì sao đáng chú ý" để gắn insight với giá trị thực tế cho người đọc
+
+### 2.2.1 Product framing cho Insight Card
+
+Mỗi insight card phải trả lời được 3 câu hỏi trong một lần quét mắt:
+- **Chuyện gì thay đổi?** — tín hiệu mới hoặc thay đổi chính của bài viết
+- **Vì sao đáng chú ý?** — ý nghĩa thực tế hoặc lý do cần quan tâm
+- **Ai bị ảnh hưởng?** — vai trò/phòng ban liên quan
+
+Card không chỉ là summary của bài báo; card phải là lớp diễn giải ngắn gọn để người dùng nội bộ hiểu tác động thực tế.
 
 ### 2.3 Tab 2 — Theo nguồn
 
@@ -113,7 +124,9 @@ Thay đổi so với card hiện tại:
   - Mỗi chip = 1 source name + count badge
   - Click để toggle on/off (multi-select)
   - Chip active có highlight color
-  - Horizontal scroll nếu nhiều sources
+  - Không phụ thuộc vào horizontal scroll dài gây khó quét
+  - Trên desktop/tablet, chips nên wrap hoặc chia nhóm để nhìn thấy nhiều source cùng lúc
+  - Trên mobile, nếu cần scroll phải có affordance rõ và không che nội dung
 - Same Insight Card List như Tab 1
 - Sort Dropdown (giống Tab 1)
 
@@ -136,6 +149,7 @@ GET /api/v1/sources → [{ id, name, status, insight_count }]
   - Chips: Executive | Engineering | Data/AI | Product | Content/Marketing | Legal/Compliance | HR/L&D | Toàn công ty
   - Click để toggle (multi-select)
   - Count badge trên mỗi chip
+  - Layout phải ưu tiên khả năng quét nhanh, không làm người dùng phải kéo ngang liên tục
 - Same Insight Card List
 - Sort Dropdown
 
@@ -154,6 +168,16 @@ GET /api/v1/insights?role=Engineering,Data/AI&sort_by=created_at
 | `FilterChips.tsx` | Generic multi-select chips, badge counts |
 | `RoleBadge.tsx` | Small badge hiển thị role name |
 | `RelativeTime.tsx` | Component hiển thị "2 giờ trước", "Hôm qua" |
+
+### 2.5.1 Refine components
+
+- `FilterChips.tsx` cần hỗ trợ layout dễ quét hơn khi số lượng chip lớn
+- `Pagination.tsx` cần hỗ trợ:
+  - dãy số trang
+  - ellipsis khi nhiều trang
+  - nhập số trang để nhảy nhanh
+- `ImpactBadge.tsx` cần chuẩn hóa kích thước và alignment giữa các mức độ
+- `RelativeTime.tsx` cần làm rõ hơn cách hiển thị relative time và fallback ngày tuyệt đối
 
 ### 2.6 Design tokens / Colors
 
@@ -184,6 +208,11 @@ GET /api/v1/insights?role=Engineering,Data/AI&sort_by=created_at
 - **Desktop (>1024px):** KPI bar 4 columns, cards full width
 - **Tablet (768-1024px):** KPI bar 2x2, cards full width
 - **Mobile (<768px):** KPI bar stack, tabs dropdown/scroll, cards stack
+- **Mobile verification target (375px):**
+  - Tab bar không vỡ layout
+  - Filters không che nội dung card
+  - Card metadata không chồng lấn
+  - Pagination vẫn thao tác được bằng ngón tay
 
 ### 2.8 Backend API mới cần thiết
 
@@ -216,3 +245,28 @@ Thêm sections:
 - **Vai trò ảnh hưởng:** Hiển thị roles badges
 - **Thời gian:** published_at (thời gian bài gốc) + created_at (thời gian phân tích)
 - **Nguồn:** Source name + link
+
+## 3. Refinement decisions bổ sung
+
+### 3.1 Pagination
+
+- Giữ pagination thay vì infinite scroll
+- UI pagination phải hỗ trợ:
+  - Previous / Next
+  - dãy số trang gần trang hiện tại
+  - nút tới trang đầu/trang cuối khi cần
+  - nhập số trang để nhảy trực tiếp
+
+### 3.2 Title hiển thị
+
+- Trong phạm vi change này, UI phải ưu tiên một tiêu đề dễ đọc hơn cho người dùng tiếng Việt
+- Nếu chưa có `title_vi` từ pipeline AI, UI cần có chiến lược hiển thị giảm mỏi mắt:
+  - ưu tiên wrap tốt
+  - tránh card bị quá dày chữ
+  - ưu tiên phần “chuyện gì thay đổi” để người dùng không phải đọc hết title gốc
+
+### 3.3 Impact badge
+
+- Badge impact là metadata hệ thống, không phải phần minh họa trang trí
+- Tất cả badge phải có cấu trúc, chiều cao, và alignment nhất quán
+- Khác biệt chính nằm ở màu và label, không phải ở kích thước khối nền

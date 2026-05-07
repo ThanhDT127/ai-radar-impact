@@ -10,6 +10,9 @@ from app.models.source import Source
 
 logger = logging.getLogger(__name__)
 
+MAX_TITLE_LENGTH = 500
+MAX_AUTHOR_LENGTH = 255
+
 
 @dataclass
 class FeedEntry:
@@ -64,7 +67,7 @@ class RSSConnector:
         source_url: str = entry.get("link", "") or ""
 
         # Title
-        title: str = entry.get("title", "") or "Untitled"
+        title: str = (entry.get("title", "") or "Untitled")[:MAX_TITLE_LENGTH]
 
         # Content: prefer content[0].value, then summary
         raw_content = ""
@@ -74,7 +77,8 @@ class RSSConnector:
             raw_content = entry.get("summary", "") or ""
 
         # Author
-        author: str | None = entry.get("author") or None
+        author_raw = entry.get("author") or None
+        author: str | None = author_raw[:MAX_AUTHOR_LENGTH] if author_raw else None
 
         # Published date
         published_at: datetime | None = None
