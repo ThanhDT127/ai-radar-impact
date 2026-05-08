@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.connectors.rss_connector import RSSConnector
+from app.connectors import ConnectorRegistry
 from app.repositories.raw_document_repo import RawDocumentRepository
 from app.repositories.source_repo import SourceRepository
 from app.services.normalizer import normalize_entry
@@ -31,7 +31,6 @@ class IngestionService:
         self.session = session
         self.source_repo = SourceRepository(session)
         self.raw_doc_repo = RawDocumentRepository(session)
-        self.rss_connector = RSSConnector()
 
     async def run(self, source_id: uuid.UUID | None = None) -> IngestionSummary:
         """Run ingestion for all active sources, or a single source by ID.
@@ -54,13 +53,13 @@ class IngestionService:
         for source in sources:
             logger.info("Ingesting source: %s (%s)", source.name, source.source_type)
 
-            # Fetch entries
+            # Fetch entries via registry
             try:
-                if source.source_type == "rss":
-                    entries = self.rss_connector.fetch(source)
-                else:
-                    logger.warning("Unsupported source type: %s — skipping", source.source_type)
-                    continue
+                connector = ConnectorRegistry.get(source.source_type)
+                entries = connector.fetch(source)
+            except ValueError:
+                logger.warning("No connector registered for source_type '%s' — skipping", source.source_type)
+                continue
             except Exception as e:
                 logger.error("Error fetching source %s: %s", source.name, e)
                 summary.errors += 1

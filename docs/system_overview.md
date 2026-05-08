@@ -22,9 +22,11 @@ Phạm vi hiện tại còn hẹp và có chủ ý:
 ## 2. Kiến trúc tổng quan
 
 ```text
-RSS Feed
+RSS Feed / API / Web
   ->
-RSS Connector
+ConnectorRegistry (lookup by source_type)
+  ->
+Connector (RSSConnector / ...)
   ->
 Normalizer
   ->
@@ -45,6 +47,7 @@ Thành phần chính:
 - `db`: PostgreSQL
 - `frontend`: React + Vite + React Query
 - `Vertex AI`: dùng Gemini để classify và summarize
+- `ConnectorRegistry`: registry-based pattern ánh xạ `source_type → ConnectorClass`, cho phép mở rộng connector không cần sửa pipeline
 
 Runtime local:
 
@@ -69,11 +72,14 @@ File liên quan:
 Cách nó hoạt động:
 
 1. Bảng `sources` lưu danh sách nguồn được phép ingest
-2. Hiện tại source được seed sẵn là `GitHub Changelog`
-3. `run_ingestion.py` gọi `IngestionService.run()`
-4. `IngestionService` lấy tất cả source có `status = active`
-5. Nếu `source_type = rss` thì dùng `RSSConnector.fetch(...)`
-6. Connector dùng `feedparser` để đọc RSS/Atom và trả về danh sách `FeedEntry`
+2. `run_ingestion.py` gọi `IngestionService.run()`
+3. `IngestionService` lấy tất cả source có `status = active`
+4. Với mỗi source, gọi `ConnectorRegistry.get(source.source_type)` để lấy đúng connector
+5. Registry tra cứu connector đã đăng ký theo `source_type` (ví dụ: `"rss"` → `RSSConnector`)
+6. Connector trả về danh sách `ConnectorEntry` — cấu trúc chung cho mọi loại connector
+7. Nếu `source_type` chưa có connector đăng ký, hệ thống log warning và bỏ qua source đó
+
+Connector tự đăng ký vào registry khi module được import (`connectors/__init__.py` import tất cả connector → trigger `ConnectorRegistry.register(...)`). Thêm connector mới chỉ cần tạo class kế thừa `BaseConnector` và thêm 1 dòng import — không cần sửa `IngestionService`.
 
 Output của bước này chưa phải insight. Đây mới là dữ liệu gốc lấy từ feed:
 
@@ -317,7 +323,7 @@ Bản này chưa phải nền tảng hoàn chỉnh. Các phần sau chưa có ho
 - chưa có search / filter nâng cao
 - chưa có notification
 - chưa có workflow review / approve
-- chưa có nhiều connector ngoài RSS
+- đã có connector framework (registry pattern) — sẵn sàng mở rộng sang HackerNews API, Reddit API, Web scraping mà không cần sửa pipeline
 - parser output AI chưa đủ cứng, vẫn có khả năng fail nếu JSON model trả về bị cắt
 
 

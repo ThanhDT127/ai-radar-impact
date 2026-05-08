@@ -6,7 +6,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from app.connectors.rss_connector import FeedEntry
+from app.connectors.base import ConnectorEntry
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,8 @@ def make_fingerprint(source_url: str, title: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def normalize_entry(entry: FeedEntry) -> tuple[str, str]:
-    """Normalize a FeedEntry.
+def normalize_entry(entry: ConnectorEntry) -> tuple[str, str]:
+    """Normalize a ConnectorEntry.
 
     Returns (normalized_content, fingerprint).
     """
