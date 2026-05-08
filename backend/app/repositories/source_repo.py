@@ -27,6 +27,31 @@ class SourceRepository:
         """Return a source by its UUID."""
         return await self.session.get(Source, source_id)
 
+    async def create(
+        self,
+        *,
+        name: str,
+        source_type: str,
+        feed_url: str | None,
+        trust_tier: str,
+        topics: list[str],
+        status: str,
+        config: dict,
+    ) -> Source:
+        """Insert a new source and return it."""
+        source = Source(
+            name=name,
+            source_type=source_type,
+            feed_url=feed_url,
+            trust_tier=trust_tier,
+            topics=topics,
+            status=status,
+            config=config,
+        )
+        self.session.add(source)
+        await self.session.flush()
+        return source
+
     async def list_with_insight_counts(self) -> list[dict]:
         """Return sources with published insight counts."""
         result = await self.session.execute(

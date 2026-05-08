@@ -37,6 +37,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://radar:radar_dev@db:5432/ai_radar
       # Vertex AI auth via Service Account JSON
       GOOGLE_APPLICATION_CREDENTIALS: /secrets/sa-key.json
+      # Admin API key — override in production
+      ADMIN_API_KEY: changeme
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:

@@ -5,6 +5,18 @@ import uuid
 from pydantic import BaseModel
 
 
+class SourceCreate(BaseModel):
+    """Request body for creating a new source."""
+
+    name: str
+    source_type: str
+    feed_url: str | None = None
+    trust_tier: str
+    topics: list[str] = []
+    status: str = "active"
+    config: dict = {}
+
+
 class SourceListItem(BaseModel):
     """Source row with aggregated insight count."""
 

@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     min_content_length: int = 200
     max_daily_analysis: int = 500
 
+    # Admin API
+    admin_api_key: str = "changeme"
+
     # Environment
     env: str = "development"
 

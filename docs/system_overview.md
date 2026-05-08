@@ -230,13 +230,17 @@ File liên quan:
 - `frontend/src/pages/InsightDetail.tsx`
 - `backend/app/routes/insights.py`
 
-API hiện tại:
+API public (frontend):
 
-- `GET /api/v1/insights`
-  - trả về danh sách insight có pagination
-  - chỉ lấy các insight có `status = published`
-- `GET /api/v1/insights/{id}`
-  - trả về chi tiết 1 insight
+- `GET /api/v1/insights` — danh sách insight có pagination, chỉ `status = published`
+- `GET /api/v1/insights/{id}` — chi tiết 1 insight
+
+API admin (yêu cầu `Authorization: Bearer <ADMIN_API_KEY>`):
+
+- `POST /api/v1/admin/ingest` — trigger ingestion, optional `?source_id=<UUID>`
+- `POST /api/v1/admin/analyze` — trigger AI analysis cho pending documents (có daily cap → 429 khi vượt)
+- `GET /api/v1/admin/sources` — danh sách sources với insight count
+- `POST /api/v1/admin/sources` — thêm source mới
 
 Frontend hiển thị:
 
@@ -288,11 +292,43 @@ docker-compose exec backend python -m app.scripts.run_analysis
 docker-compose exec backend python -m app.scripts.reset_failed
 ```
 
+### Trigger ingestion qua Admin API
+
+```powershell
+# Tất cả sources
+curl -X POST http://localhost:8000/api/v1/admin/ingest -H "Authorization: Bearer changeme"
+
+# Một source cụ thể
+curl -X POST "http://localhost:8000/api/v1/admin/ingest?source_id=<UUID>" -H "Authorization: Bearer changeme"
+```
+
+### Trigger analysis qua Admin API
+
+```powershell
+curl -X POST http://localhost:8000/api/v1/admin/analyze -H "Authorization: Bearer changeme"
+```
+
+### Thêm source mới qua Admin API
+
+```powershell
+curl -X POST http://localhost:8000/api/v1/admin/sources `
+  -H "Authorization: Bearer changeme" `
+  -H "Content-Type: application/json" `
+  -d '{"name":"My Feed","source_type":"rss","feed_url":"https://...","trust_tier":"medium","topics":["Công nghệ"]}'
+```
+
+### Xem danh sách sources qua Admin API
+
+```powershell
+curl http://localhost:8000/api/v1/admin/sources -H "Authorization: Bearer changeme"
+```
+
 ### Xem kết quả
 
 - UI: `http://localhost:5173`
 - Health: `http://localhost:8000/api/v1/health`
 - API list: `http://localhost:8000/api/v1/insights`
+- Admin API: `http://localhost:8000/api/v1/admin/` (Bearer token required)
 
 
 ## 5. Cách hiểu dữ liệu trong hệ thống
@@ -326,8 +362,8 @@ Nếu `raw_documents` có nhiều mà `insights` ít, thì vấn đề nằm ở
 
 Bản này chưa phải nền tảng hoàn chỉnh. Các phần sau chưa có hoặc chưa đầy đủ:
 
-- chưa có auth / RBAC
-- chưa có admin UI quản lý source
+- chưa có auth / RBAC cho public API
+- đã có Admin API (Bearer token) cho ingestion, analysis, source management — chưa có Admin UI
 - chưa có scheduler tự động
 - chưa có search / filter nâng cao
 - chưa có notification
