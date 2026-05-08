@@ -1,34 +1,93 @@
 <claude-mem-context>
-# Memory Context
-
-# [AI Radar Impact] recent context, 2026-05-06 5:39pm GMT+7
-
-Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
-Format: ID TIME TYPE TITLE
-Fetch details: get_observations([IDs]) | Search: mem-search skill
-
-Stats: 10 obs (3.751t read) | 112.534t work | 97% savings
-
-### May 6, 2026
-1 3:47p 🔵 Anthropic news RSS feed does not exist; Microsoft AI Blog selected as replacement
-2 " ✅ Replaced Anthropic News with Microsoft AI Blog in seed sources
-3 3:49p ✅ Migrated live database source from Anthropic News to Microsoft AI Blog
-4 " 🔵 Router ordering bug: /insights/stats matched as UUID path parameter
-5 " 🔵 Duplicate source record created during seed operation
-6 " ✅ Feed sources validated and API fully operational with 15 sources and 14 insights
-7 3:50p 🔵 Ingestion pipeline fails on author field length constraint violation
-8 " 🔴 Fixed ingestion failures from long author fields; added field truncation and transaction recovery
-S2 Implement sources-and-ui-tabs feature for AI Radar Impact: add 15 RSS sources, build KPI dashboard with tabs for Overview/Sources/Roles, implement source filtering and role-based views, and complete end-to-end verification (May 6, 4:03 PM)
-S1 Apply the sources-and-ui-tabs OpenSpec change to implement 15 RSS sources, KPI dashboard tabs, source filtering, and role-based insights view (May 6, 4:03 PM)
-S3 Verify that the 3-tab UI implementation (sources-and-ui-tabs) is present and accessible in the running frontend application (May 6, 4:04 PM)
-S4 User requested clarification on 6 UI/UX issues with AI Radar Impact dashboard: date auto-update, trust scoring credibility, news point usefulness, English titles readability, filter design, pagination tedium, and impact badge sizing inconsistency (May 6, 4:12 PM)
-S5 User asked Claude to define product direction for AI Radar Impact dashboard: what insight cards should answer, how to optimize each tab, what UI patterns to use for filters/pagination, who the dashboard serves, and how to make content less useless (May 6, 4:19 PM)
-S6 User requested code review and design recommendations for improving AI analysis prompts for Vietnamese content classification system, following GPT's detailed critique of current prompt limitations (May 6, 4:21 PM)
-9 4:50p 🔵 AI analysis prompt requires restructuring for production reliability
-S7 Status check on current change and remaining issues: Which change is active, completion status, and what problems remain to be resolved (May 6, 4:50 PM)
-S8 User requested assessment of `sources-and-ui-tabs` change scope, settled decisions, open questions, and recommended next steps for UI/AI pipeline work (May 6, 4:56 PM)
-S9 Refined OpenSpec change "sources-and-ui-tabs" by enhancing proposal/design with UX improvements and created specification artifact for dashboard tabs and filters (May 6, 5:05 PM)
-10 5:06p 🔵 Current implementation state of dashboard components and styling reviewed
-
-Access 113k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
+
+# Agent Instructions — AI Radar Impact
+
+This file provides guidance to Claude Code subagents spawned within this project. Read CLAUDE.md first for full project context, architecture, taxonomy, and known gotchas. This file adds agent-specific rules on top.
+
+---
+
+## Project in One Paragraph
+
+AI Radar Impact ingests RSS feeds from 15 tech/AI sources, runs each article through Gemini 2.5 Flash (Vertex AI) for Vietnamese classification and summarization, then surfaces the results as insight cards on a React dashboard. Stack: FastAPI + PostgreSQL (async SQLAlchemy) + React 19 + Vite. All user-facing content and AI output is in Vietnamese.
+
+---
+
+## Non-Negotiable Rules
+
+- **Never drop or truncate database tables.** Use `alembic downgrade` if a migration needs reverting.
+- **Never run sync SQLAlchemy calls.** All DB operations use `async with session` — a sync call will deadlock silently.
+- **Never modify `ALLOWED_TOPICS`, `ALLOWED_EVENT_TYPES`, `ALLOWED_NATURES`, or `ALLOWED_ROLES` in `prompts.py` without also updating the frontend label mappings.** These are closed sets; adding a value breaks existing filter UI.
+- **Never commit `.env` or `secrets/sa-key.json`.** Both are gitignored for a reason.
+- **Always run migrations after schema changes.** `docker-compose exec backend alembic upgrade head`.
+
+---
+
+## Task-Specific Guidance
+
+### Exploring / Reading Code
+
+- Entry points by concern:
+  - Data pipeline: `backend/app/services/ingestion.py`, `backend/app/services/analyzer.py`
+  - AI prompt: `backend/app/ai/prompts.py`, `backend/app/ai/gemini_client.py`
+  - API routes: `backend/app/routes/` — note router registration order in `main.py` (stats before /{id})
+  - Frontend state: `frontend/src/pages/InsightList.tsx`, `frontend/src/api/insights.ts`
+- Read `openspec/specs/` for BDD-style specs of each capability before modifying behavior.
+
+### Implementing Backend Features
+
+- All new routes go under `/api/v1/`. Register in `backend/app/main.py`.
+- Repository pattern is mandatory — business logic stays in `services/`, DB queries stay in `repositories/`.
+- New DB columns require an Alembic migration. Generate with:
+  `docker-compose exec backend alembic revision --autogenerate -m "description"`
+- Pydantic v2 schemas in `schemas/` — use `model_validator` not `validator`.
+- Content sent to Gemini is capped at 6000 chars in `build_prompt()`. Keep this limit in mind for chunking decisions.
+
+### Implementing Frontend Features
+
+- API calls go in `frontend/src/api/` — no direct axios calls from components or pages.
+- All server state via TanStack Query. Local UI state (filters, pagination, active tab) via `useState`.
+- CSS Modules only — no inline styles, no global class mutations.
+- Vietnamese text is the default language for all labels, badges, and messages.
+
+### Modifying the AI Pipeline
+
+- The Gemini prompt is in `backend/app/ai/prompts.py`. Any structural change to the JSON schema the model must return also requires updating the `AnalysisResult` dataclass in `gemini_client.py` and the `create()` call in `analyzer.py`.
+- Confidence threshold for publishing is `MIN_CONFIDENCE = 0.3` in `analyzer.py`. The OpenSpec spec says 0.5 — trust the code, not the spec.
+- Trust score and impact label are **rule-based**, not AI-generated. Mappings live in `TRUST_SCORE_MAP` and `IMPACT_LABEL_MAP` in `analyzer.py`.
+- After changing prompts, run a test on a small batch: `docker-compose exec backend python -m app.scripts.run_analysis`
+
+### Running / Debugging the Pipeline
+
+```bash
+# Check what's pending vs analyzed vs failed
+docker-compose exec backend python -c "
+import asyncio
+from app.database import AsyncSessionLocal
+from app.repositories.raw_document_repo import RawDocumentRepository
+async def check():
+    async with AsyncSessionLocal() as s:
+        r = RawDocumentRepository(s)
+        print(await r.get_status_counts())
+asyncio.run(check())
+"
+
+# Re-queue failed documents for retry
+docker-compose exec backend python -m app.scripts.reset_failed
+
+# Run analysis on up to N pending docs
+docker-compose exec backend python -m app.scripts.run_analysis
+```
+
+### Verifying Against OpenSpec
+
+Before reporting a task complete, check the relevant spec in `openspec/specs/<capability>/spec.md`. Each spec uses BDD scenario format (`WHEN … THEN …`). Verify each scenario is satisfied by the implementation, not just that the code compiles.
+
+---
+
+## What NOT to Do
+
+- Do not add `print()` debug statements to production code — use `logger = logging.getLogger(__name__)`.
+- Do not create new scripts in `backend/app/scripts/` for one-off investigation — run inline via `docker-compose exec backend python -c "..."`.
+- Do not add comments that explain what the code does — only add comments for non-obvious WHY (constraints, workarounds, invariants).
+- Do not introduce new dependencies without checking if an existing library already in `requirements.txt` covers the need.

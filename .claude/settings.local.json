@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(openspec status *)",
+      "Bash(openspec instructions *)",
+      "Bash(docker-compose up *)",
+      "Bash(docker info *)",
+      "Bash(docker context *)",
+      "Bash(python -c ' *)",
+      "PowerShell(New-Item *)"
+    ]
+  }
+}
