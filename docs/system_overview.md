@@ -10,10 +10,10 @@ Bản hiện tại là một vertical slice MVP để chứng minh một luồng
 4. Gọi AI để phân tích và tạo insight
 5. Hiển thị insight trên giao diện web
 
-Phạm vi hiện tại còn hẹp và có chủ ý:
+Phạm vi hiện tại:
 
-- 1 nguồn seed sẵn: `GitHub Changelog`
-- 1 loại connector: `rss`
+- 18 nguồn seed: 15 RSS (GitHub, OpenAI, Google AI, AWS, NVIDIA...) + HackerNews + Reddit r/MachineLearning + Reddit r/artificial
+- 3 loại connector: `rss`, `hackernews`, `reddit`
 - 2 màn hình frontend: danh sách insight và chi tiết insight
 - 2 API nghiệp vụ chính: list insight và detail insight
 - Ingestion đang được chạy thủ công bằng script, chưa có scheduler tự động
@@ -22,11 +22,13 @@ Phạm vi hiện tại còn hẹp và có chủ ý:
 ## 2. Kiến trúc tổng quan
 
 ```text
-RSS Feed / API / Web
+RSS Feed / HN Firebase API / Reddit .json / Web URL
   ->
 ConnectorRegistry (lookup by source_type)
   ->
-Connector (RSSConnector / ...)
+Connector (RSSConnector / HackerNewsConnector / RedditConnector)
+  ->
+WebArticleConnector (trafilatura — dùng bởi HN và Reddit)
   ->
 Normalizer
   ->
@@ -65,6 +67,9 @@ Bước lấy dữ liệu nằm trong RSS pipeline.
 File liên quan:
 
 - `backend/app/connectors/rss_connector.py`
+- `backend/app/connectors/hackernews_connector.py`
+- `backend/app/connectors/reddit_connector.py`
+- `backend/app/connectors/web_article_connector.py`
 - `backend/app/services/ingestion.py`
 - `backend/app/scripts/run_ingestion.py`
 - `backend/app/scripts/seed_sources.py`
@@ -75,9 +80,13 @@ Cách nó hoạt động:
 2. `run_ingestion.py` gọi `IngestionService.run()`
 3. `IngestionService` lấy tất cả source có `status = active`
 4. Với mỗi source, gọi `ConnectorRegistry.get(source.source_type)` để lấy đúng connector
-5. Registry tra cứu connector đã đăng ký theo `source_type` (ví dụ: `"rss"` → `RSSConnector`)
+5. Registry tra cứu connector đã đăng ký theo `source_type`:
+   - `"rss"` → `RSSConnector` (feedparser)
+   - `"hackernews"` → `HackerNewsConnector` (HN Firebase API + trafilatura)
+   - `"reddit"` → `RedditConnector` (Reddit .json endpoint + trafilatura)
 6. Connector trả về danh sách `ConnectorEntry` — cấu trúc chung cho mọi loại connector
-7. Nếu `source_type` chưa có connector đăng ký, hệ thống log warning và bỏ qua source đó
+7. `IngestionService` áp dụng `min_content_length` filter — bài quá ngắn bị skip trước khi lưu
+8. Nếu `source_type` chưa có connector đăng ký, hệ thống log warning và bỏ qua source đó
 
 Connector tự đăng ký vào registry khi module được import (`connectors/__init__.py` import tất cả connector → trigger `ConnectorRegistry.register(...)`). Thêm connector mới chỉ cần tạo class kế thừa `BaseConnector` và thêm 1 dòng import — không cần sửa `IngestionService`.
 
@@ -126,8 +135,8 @@ Lưu danh sách nguồn cho phép ingest.
 Thông tin chính:
 
 - tên nguồn
-- loại nguồn (`rss`, sau này có thể mở rộng `api`, `web`)
-- `feed_url`
+- loại nguồn (`rss`, `hackernews`, `reddit`)
+- `feed_url` (null với HN/Reddit, dùng `config.subreddit` thay thế)
 - `trust_tier`
 - `topics`
 - `status`
@@ -187,7 +196,7 @@ File liên quan:
 
 Luồng xử lý:
 
-1. Analyzer lấy tất cả `raw_documents` có `processing_status = pending`
+1. Analyzer lấy tất cả `raw_documents` có `processing_status = pending` (tối đa `MAX_DAILY_ANALYSIS = 500` mỗi ngày)
 2. Lấy nội dung ưu tiên `normalized_content`, fallback sang `raw_content`
 3. Gọi Gemini qua `GeminiClient.analyze(title, content)`
 4. Prompt yêu cầu model trả về JSON có cấu trúc
@@ -323,7 +332,7 @@ Bản này chưa phải nền tảng hoàn chỉnh. Các phần sau chưa có ho
 - chưa có search / filter nâng cao
 - chưa có notification
 - chưa có workflow review / approve
-- đã có connector framework (registry pattern) — sẵn sàng mở rộng sang HackerNews API, Reddit API, Web scraping mà không cần sửa pipeline
+- đã có HackerNews, Reddit, Web article connector — 18 nguồn đang active
 - parser output AI chưa đủ cứng, vẫn có khả năng fail nếu JSON model trả về bị cắt
 
 
@@ -336,8 +345,8 @@ Nếu cần nhìn hệ thống bằng 1 câu:
 Và nếu cần nhớ bằng 4 dòng:
 
 ```text
-Lấy dữ liệu      -> RSS feed
-Chuẩn hóa        -> clean HTML + fingerprint
+Lấy dữ liệu      -> RSS / HackerNews / Reddit / Web
+Chuẩn hóa        -> clean HTML + fingerprint + min_content_length filter
 Lưu trữ          -> sources / raw_documents / insights
 Xem kết quả      -> API insights + dashboard web
 ```

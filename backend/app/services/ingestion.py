@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.connectors import ConnectorRegistry
 from app.repositories.raw_document_repo import RawDocumentRepository
 from app.repositories.source_repo import SourceRepository
@@ -69,6 +70,12 @@ class IngestionService:
             for entry in entries:
                 try:
                     normalized_content, fingerprint = normalize_entry(entry)
+
+                    # Min content length filter
+                    if len(normalized_content) < settings.min_content_length:
+                        logger.debug("Skipping short content (%d chars) from '%s'", len(normalized_content), entry.title[:60])
+                        summary.skipped += 1
+                        continue
 
                     # Dedup check
                     if await self.raw_doc_repo.exists_by_fingerprint(fingerprint):

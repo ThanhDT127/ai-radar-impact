@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     backend_port: int = 8000
     cors_origins: str = "http://localhost:5173"
 
+    # Cost controls
+    min_content_length: int = 200
+    max_daily_analysis: int = 500
+
     # Environment
     env: str = "development"
 

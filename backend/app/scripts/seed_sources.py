@@ -151,6 +151,33 @@ INITIAL_SOURCES = [
         "status": "active",
         "config": {"max_items": 20, "language": "vi"},
     },
+    {
+        "name": "HackerNews",
+        "source_type": "hackernews",
+        "feed_url": None,
+        "trust_tier": "medium",
+        "topics": ["Công nghệ", "Trí tuệ nhân tạo", "Quy trình phần mềm"],
+        "status": "active",
+        "config": {"max_items": 15, "min_score": 50, "fetch_timeout": 10},
+    },
+    {
+        "name": "Reddit r/MachineLearning",
+        "source_type": "reddit",
+        "feed_url": None,
+        "trust_tier": "medium",
+        "topics": ["Trí tuệ nhân tạo", "Dữ liệu"],
+        "status": "active",
+        "config": {"max_items": 25, "min_upvotes": 20, "fetch_timeout": 10, "subreddit": "MachineLearning"},
+    },
+    {
+        "name": "Reddit r/artificial",
+        "source_type": "reddit",
+        "feed_url": None,
+        "trust_tier": "medium",
+        "topics": ["Trí tuệ nhân tạo"],
+        "status": "active",
+        "config": {"max_items": 25, "min_upvotes": 20, "fetch_timeout": 10, "subreddit": "artificial"},
+    },
 ]
 
 

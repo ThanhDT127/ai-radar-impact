@@ -1,16 +1,34 @@
 """Analyzer service — runs Gemini analysis on pending raw documents and creates insights."""
 
 import logging
+from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.gemini_client import GeminiClient
+from app.config import settings
 from app.models.raw_document import RawDocument
 from app.models.source import Source
 from app.repositories.insight_repo import InsightRepository
 from app.repositories.raw_document_repo import RawDocumentRepository
 
 logger = logging.getLogger(__name__)
+
+# In-memory daily analysis counter — resets at midnight
+_daily_counter: dict[str, int] = {"date": "", "count": 0}
+
+
+def _get_daily_count() -> int:
+    today = str(date.today())
+    if _daily_counter["date"] != today:
+        _daily_counter["date"] = today
+        _daily_counter["count"] = 0
+    return _daily_counter["count"]  # type: ignore[return-value]
+
+
+def _increment_daily_count() -> None:
+    _get_daily_count()  # ensure reset if new day
+    _daily_counter["count"] = _daily_counter["count"] + 1  # type: ignore[assignment]
 
 # Rule-based trust score mapping from source trust_tier
 TRUST_SCORE_MAP: dict[str, float] = {
@@ -98,12 +116,19 @@ class AnalyzerService:
         return True
 
     async def run_pending(self, limit: int = 50) -> dict[str, int]:
-        """Process up to `limit` pending raw documents.
+        """Process up to `limit` pending raw documents, subject to daily cap.
 
         Returns counts: { created, skipped, errors }.
         """
-        pending = await self.raw_doc_repo.get_pending(limit=limit)
-        logger.info("Analyzing %d pending documents", len(pending))
+        daily_used = _get_daily_count()
+        daily_remaining = settings.max_daily_analysis - daily_used
+        if daily_remaining <= 0:
+            logger.warning("Daily analysis cap reached (%d). Skipping.", settings.max_daily_analysis)
+            return {"created": 0, "skipped": 0, "errors": 0}
+
+        effective_limit = min(limit, daily_remaining)
+        pending = await self.raw_doc_repo.get_pending(limit=effective_limit)
+        logger.info("Analyzing %d pending documents (daily cap: %d used / %d)", len(pending), daily_used, settings.max_daily_analysis)
 
         counts = {"created": 0, "skipped": 0, "errors": 0}
 
@@ -121,6 +146,7 @@ class AnalyzerService:
                 created = await self.analyze_document(raw_doc, source)
                 if created:
                     counts["created"] += 1
+                    _increment_daily_count()
                 else:
                     counts["skipped"] += 1
             except Exception as e:
