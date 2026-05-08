@@ -6,6 +6,17 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
+class InsightReference(BaseModel):
+    """A related insight from the same cluster."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    title: str
+    source_name: str
+    source_url: str
+
+
 class InsightListItem(BaseModel):
     """Lightweight insight for list views."""
 
@@ -55,3 +66,6 @@ class InsightDetail(BaseModel):
     source_name: str
     source_type: str
     source_feed_url: str | None
+    cluster_id: uuid.UUID | None
+    is_primary: bool
+    references: list[InsightReference] = []

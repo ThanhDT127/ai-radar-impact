@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ARRAY, ForeignKey, JSON, String, Text, Float
+from sqlalchemy import ARRAY, Boolean, ForeignKey, JSON, String, Text, Float
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -38,6 +38,9 @@ class Insight(Base):
     affected_roles: Mapped[list[str]] = mapped_column(ARRAY(String), default=list, nullable=True)
     # New in v2: original publish date from source (may differ from created_at)
     published_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # Semantic dedup clustering
+    cluster_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true", default=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=func.now(), onupdate=func.now()

@@ -155,4 +155,12 @@ class AnalyzerService:
 
         await self.session.commit()
         logger.info("Analysis complete — %s", counts)
+
+        if counts["created"] > 0:
+            from app.services.dedup_engine import DeduplicationEngine
+            dedup = DeduplicationEngine(self.session)
+            dedup_result = await dedup.run_dedup()
+            counts["clusters_created"] = dedup_result["clusters_created"]
+            counts["duplicates_marked"] = dedup_result["duplicates_marked"]
+
         return counts

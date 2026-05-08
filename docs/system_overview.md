@@ -38,6 +38,8 @@ Gemini / Vertex AI Analysis
   ->
 insights (PostgreSQL)
   ->
+DeduplicationEngine (TF-IDF cosine similarity → cluster_id / is_primary)
+  ->
 FastAPI
   ->
 React Dashboard
@@ -183,6 +185,14 @@ Thông tin chính:
 - `confidence`
 - `status`
 - `ai_raw_response`
+- `cluster_id` (UUID, nullable) — nhóm các insights về cùng sự kiện
+- `is_primary` (Boolean, default true) — bài đại diện trong cluster (true = hiện trên dashboard)
+
+Ý nghĩa clustering:
+
+- Insights về cùng một sự kiện từ nhiều nguồn được nhóm vào 1 `cluster_id`
+- Chỉ bài có `is_primary = true` xuất hiện trong list view
+- Bài detail trả thêm `references` — danh sách các bài khác trong cùng cluster
 
 
 ### 3.4 Phân tích AI và tạo insight
@@ -369,6 +379,7 @@ Bản này chưa phải nền tảng hoàn chỉnh. Các phần sau chưa có ho
 - chưa có notification
 - chưa có workflow review / approve
 - đã có HackerNews, Reddit, Web article connector — 18 nguồn đang active
+- đã có semantic dedup (TF-IDF, threshold 0.6) — Phase 2 có thể nâng lên vector embedding (pgvector)
 - parser output AI chưa đủ cứng, vẫn có khả năng fail nếu JSON model trả về bị cắt
 
 

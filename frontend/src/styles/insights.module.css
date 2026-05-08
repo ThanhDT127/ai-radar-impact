@@ -501,6 +501,33 @@
   background: var(--color-accent-strong);
 }
 
+.referenceList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.referenceItem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.referenceLink {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.referenceLink:hover {
+  text-decoration: underline;
+}
+
 @media (max-width: 1024px) {
   .cardGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

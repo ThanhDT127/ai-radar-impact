@@ -18,11 +18,21 @@ export interface InsightListItem {
   source_type: string;
 }
 
+export interface InsightReference {
+  id: string;
+  title: string;
+  source_name: string;
+  source_url: string;
+}
+
 export interface InsightDetail extends InsightListItem {
   summary_medium: string | null;
   status: string;
   updated_at: string;
   source_feed_url: string | null;
+  cluster_id: string | null;
+  is_primary: boolean;
+  references: InsightReference[];
 }
 
 export interface PaginatedResponse<T> {

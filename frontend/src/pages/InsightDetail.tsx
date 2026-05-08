@@ -1,4 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
+import type { InsightReference } from '../types/insight';
 import { useQuery } from '@tanstack/react-query';
 import { fetchInsightById } from '../api/insights';
 import ImpactBadge from '../components/ImpactBadge';
@@ -102,6 +103,27 @@ export default function InsightDetail() {
                 <span key={topic} className={styles.topicTag}>{topic}</span>
               ))}
             </div>
+          </section>
+        )}
+
+        {insight.references && insight.references.length > 0 && (
+          <section className={styles.detailSection}>
+            <p className={styles.detailSectionLabel}>Bài viết liên quan từ nguồn khác</p>
+            <ul className={styles.referenceList}>
+              {insight.references.map((ref: InsightReference) => (
+                <li key={ref.id} className={styles.referenceItem}>
+                  <span className={styles.sourcePill}>{ref.source_name}</span>
+                  <a
+                    href={ref.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={styles.referenceLink}
+                  >
+                    {ref.title}
+                  </a>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
 

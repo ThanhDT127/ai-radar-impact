@@ -83,6 +83,7 @@ class InsightRepository:
             .join(RawDocument, Insight.raw_document_id == RawDocument.id)
             .join(Source, RawDocument.source_id == Source.id)
             .where(Insight.status == "published")
+            .where(Insight.is_primary == True)  # noqa: E712
             .options(selectinload(Insight.raw_document).selectinload(RawDocument.source))
         )
 
@@ -114,7 +115,7 @@ class InsightRepository:
         return items, total
 
     async def get_by_id(self, insight_id: uuid.UUID) -> dict | None:
-        """Return a single insight by UUID, or None."""
+        """Return a single insight by UUID with references, or None."""
         result = await self.session.execute(
             select(Insight)
             .where(Insight.id == insight_id)
@@ -123,7 +124,26 @@ class InsightRepository:
         insight = result.scalar_one_or_none()
         if insight is None:
             return None
-        return self._serialize_insight(insight)
+
+        references: list[dict] = []
+        if insight.cluster_id is not None:
+            ref_result = await self.session.execute(
+                select(Insight, Source.name.label("source_name"))
+                .join(RawDocument, Insight.raw_document_id == RawDocument.id)
+                .join(Source, RawDocument.source_id == Source.id)
+                .where(Insight.cluster_id == insight.cluster_id)
+                .where(Insight.id != insight_id)
+                .where(Insight.status == "published")
+            )
+            for ref_insight, src_name in ref_result:
+                references.append({
+                    "id": ref_insight.id,
+                    "title": ref_insight.title,
+                    "source_name": src_name,
+                    "source_url": ref_insight.source_url,
+                })
+
+        return self._serialize_insight(insight, references=references)
 
     async def get_stats(self) -> dict[str, int]:
         """Return dashboard KPI stats."""
@@ -153,7 +173,7 @@ class InsightRepository:
             "active_sources": active_sources.scalar_one() or 0,
         }
 
-    def _serialize_insight(self, insight: Insight) -> dict:
+    def _serialize_insight(self, insight: Insight, references: list[dict] | None = None) -> dict:
         """Convert an ORM object into an API-shaped dictionary."""
         source = insight.raw_document.source
         return {
@@ -177,4 +197,7 @@ class InsightRepository:
             "source_name": source.name,
             "source_type": source.source_type,
             "source_feed_url": source.feed_url,
+            "cluster_id": insight.cluster_id,
+            "is_primary": insight.is_primary,
+            "references": references or [],
         }
