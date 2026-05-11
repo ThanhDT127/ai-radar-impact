@@ -37,6 +37,8 @@ class SourceRepository:
         topics: list[str],
         status: str,
         config: dict,
+        region: str = "global",
+        target_roles: list[str] | None = None,
     ) -> Source:
         """Insert a new source and return it."""
         source = Source(
@@ -47,6 +49,8 @@ class SourceRepository:
             topics=topics,
             status=status,
             config=config,
+            region=region,
+            target_roles=target_roles or [],
         )
         self.session.add(source)
         await self.session.flush()
@@ -60,6 +64,8 @@ class SourceRepository:
                 Source.name,
                 Source.source_type,
                 Source.status,
+                Source.region,
+                Source.target_roles,
                 func.count(Insight.id).label("insight_count"),
             )
             .outerjoin(RawDocument, RawDocument.source_id == Source.id)

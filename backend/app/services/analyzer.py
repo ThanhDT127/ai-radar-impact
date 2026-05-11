@@ -1,11 +1,12 @@
 """Analyzer service — runs Gemini analysis on pending raw documents and creates insights."""
 
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.gemini_client import GeminiClient
+from app.ai.prompts import ALLOWED_ACTION_TYPES
 from app.config import settings
 from app.models.raw_document import RawDocument
 from app.models.source import Source
@@ -54,6 +55,90 @@ IMPACT_LABEL_MAP: dict[str, str] = {
 
 MIN_CONFIDENCE = 0.3  # Below this, do not publish
 
+# Vietnamese-specific topics for vietnam_relevance medium tier
+_VN_SPECIFIC_TOPICS = {"Pháp lý/Tuân thủ", "Quản trị nội bộ"}
+
+
+def _validate_recommendations(
+    recs: dict | None, affected_roles: list[str]
+) -> dict | None:
+    """Drop recommendations whose role ∉ affected_roles or action_type invalid.
+
+    Returns None if no valid entries remain (instead of empty dict for clarity).
+    """
+    if not isinstance(recs, dict) or not recs:
+        return None
+    affected = set(affected_roles or [])
+    cleaned: dict = {}
+    for role, value in recs.items():
+        if role not in affected:
+            logger.warning(
+                "Dropping recommendation for role '%s' (not in affected_roles)", role
+            )
+            continue
+        if not isinstance(value, dict):
+            logger.warning("Dropping malformed recommendation for role '%s'", role)
+            continue
+        action_type = value.get("action_type")
+        note = value.get("note")
+        if action_type not in ALLOWED_ACTION_TYPES:
+            logger.warning(
+                "Dropping recommendation for role '%s' (invalid action_type=%r)",
+                role,
+                action_type,
+            )
+            continue
+        if not isinstance(note, str) or not note.strip():
+            continue
+        cleaned[role] = {"action_type": action_type, "note": note.strip()}
+    return cleaned or None
+
+
+def _compute_urgency(
+    impact_label: str | None, published_at: datetime | None
+) -> str:
+    """Rule D3: critical/high/medium/low from impact_label + recency."""
+    if impact_label is None:
+        return "low"
+
+    if published_at is None:
+        # No published date — fall back to impact_label only
+        if impact_label == "Nghiêm trọng":
+            return "critical"
+        if impact_label == "Cao":
+            return "medium"
+        if impact_label == "Trung bình":
+            return "medium"
+        return "low"
+
+    now = datetime.now(timezone.utc)
+    pub = published_at if published_at.tzinfo else published_at.replace(tzinfo=timezone.utc)
+    age_days = (now - pub).days
+    is_recent = age_days < 14
+
+    if impact_label == "Nghiêm trọng" and is_recent:
+        return "critical"
+    if impact_label == "Cao" and is_recent:
+        return "high"
+    if impact_label == "Trung bình":
+        return "medium"
+    if impact_label == "Cao" and not is_recent:
+        return "medium"
+    return "low"
+
+
+def _compute_vietnam_relevance(source: Source, topics: list[str]) -> str:
+    """Rule D4: high/medium/low from source.config.language + topics."""
+    config = source.config or {}
+    language = config.get("language", "")
+    topics_set = set(topics or [])
+
+    if language == "vi" or "Pháp lý/Tuân thủ" in topics_set:
+        return "high"
+    if topics_set & _VN_SPECIFIC_TOPICS:
+        return "medium"
+    return "low"
+
 
 class AnalyzerService:
     """Analyzes pending raw documents using Gemini and creates insights."""
@@ -94,6 +179,13 @@ class AnalyzerService:
         trust_score = TRUST_SCORE_MAP.get(source.trust_tier, 0.5)
         impact_label = IMPACT_LABEL_MAP.get(result.event_type or "", "Thấp")
 
+        # v2 actionable fields — graceful: AI fields may be None if Gemini malformed
+        recommendations = _validate_recommendations(
+            result.recommendations, result.affected_roles
+        )
+        urgency = _compute_urgency(impact_label, raw_doc.published_at)
+        vietnam_relevance = _compute_vietnam_relevance(source, result.topics)
+
         # Create insight
         await self.insight_repo.create(
             raw_document_id=raw_doc.id,
@@ -110,6 +202,12 @@ class AnalyzerService:
             ai_raw_response=result.raw_response,
             affected_roles=result.affected_roles,
             published_at=raw_doc.published_at,
+            signal=result.signal,
+            why_it_matters=result.why_it_matters,
+            recommendations=recommendations,
+            risks=result.risks,
+            urgency=urgency,
+            vietnam_relevance=vietnam_relevance,
         )
 
         await self.raw_doc_repo.update_status(raw_doc.id, "analyzed")

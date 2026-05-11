@@ -29,6 +29,11 @@ class AnalysisResult:
     confidence: float = 0.0
     raw_response: dict = field(default_factory=dict)
     error: str | None = None
+    # v2 actionable fields (may be None if Gemini returned malformed/missing)
+    signal: str | None = None
+    why_it_matters: str | None = None
+    recommendations: dict | None = None
+    risks: list[str] | None = None
 
 
 class GeminiClient:
@@ -88,6 +93,25 @@ class GeminiClient:
             logger.warning("Failed to parse Gemini JSON response: %s | raw: %s", e, text[:300])
             return AnalysisResult(error=f"JSON parse error: {e}", raw_response={"raw": raw_text})
 
+        # v2 actionable fields — graceful: missing/wrong type → None instead of raising
+        signal = data.get("signal")
+        if not isinstance(signal, str) or not signal.strip():
+            signal = None
+
+        why_it_matters = data.get("why_it_matters")
+        if not isinstance(why_it_matters, str) or not why_it_matters.strip():
+            why_it_matters = None
+
+        recommendations = data.get("recommendations")
+        if not isinstance(recommendations, dict):
+            recommendations = None
+
+        risks = data.get("risks")
+        if not isinstance(risks, list):
+            risks = None
+        else:
+            risks = [r for r in risks if isinstance(r, str) and r.strip()]
+
         return AnalysisResult(
             topics=data.get("topics", []),
             event_type=data.get("event_type"),
@@ -97,4 +121,8 @@ class GeminiClient:
             affected_roles=data.get("affected_roles", []),
             confidence=float(data.get("confidence", 0.0)),
             raw_response=data,
+            signal=signal,
+            why_it_matters=why_it_matters,
+            recommendations=recommendations,
+            risks=risks,
         )

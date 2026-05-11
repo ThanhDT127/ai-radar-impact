@@ -3,8 +3,11 @@ import type { InsightReference } from '../types/insight';
 import { useQuery } from '@tanstack/react-query';
 import { fetchInsightById } from '../api/insights';
 import ImpactBadge from '../components/ImpactBadge';
+import MomentumIndicator from '../components/MomentumIndicator';
+import RecommendationsByRole from '../components/RecommendationsByRole';
 import RelativeTime from '../components/RelativeTime';
 import RoleBadge from '../components/RoleBadge';
+import UrgencyBadge from '../components/UrgencyBadge';
 import styles from '../styles/insights.module.css';
 
 function formatDateTime(isoDate: string): string {
@@ -55,8 +58,13 @@ export default function InsightDetail() {
         <div className={styles.detailHero}>
           <span className={styles.sourcePill}>{insight.source_name}</span>
           <h1 className={styles.detailTitle}>{insight.title}</h1>
+          <MomentumIndicator momentum={insight.momentum} />
         </div>
-        <ImpactBadge label={insight.impact_label} />
+        <div className={styles.cardBadges}>
+          {insight.urgency
+            ? <UrgencyBadge urgency={insight.urgency} />
+            : <ImpactBadge label={insight.impact_label} />}
+        </div>
       </div>
 
       <div className={styles.detailMeta}>
@@ -70,6 +78,20 @@ export default function InsightDetail() {
       </div>
 
       <div className={styles.detailBody}>
+        {insight.signal && (
+          <section className={styles.detailSection}>
+            <p className={styles.detailSectionLabel}>Tín hiệu chính</p>
+            <p className={styles.detailSummaryShort}>{insight.signal}</p>
+          </section>
+        )}
+
+        {insight.why_it_matters && (
+          <section className={styles.detailSection}>
+            <p className={styles.detailSectionLabel}>Tại sao quan trọng</p>
+            <p className={styles.detailSummaryMedium}>{insight.why_it_matters}</p>
+          </section>
+        )}
+
         {insight.summary_short && (
           <section className={styles.detailSection}>
             <p className={styles.detailSectionLabel}>Tóm tắt</p>
@@ -81,6 +103,24 @@ export default function InsightDetail() {
           <section className={styles.detailSection}>
             <p className={styles.detailSectionLabel}>Phân tích chi tiết</p>
             <p className={styles.detailSummaryMedium}>{insight.summary_medium}</p>
+          </section>
+        )}
+
+        {insight.recommendations && Object.keys(insight.recommendations).length > 0 && (
+          <section className={styles.detailSection}>
+            <p className={styles.detailSectionLabel}>Khuyến nghị theo vai trò</p>
+            <RecommendationsByRole recommendations={insight.recommendations} />
+          </section>
+        )}
+
+        {insight.risks && insight.risks.length > 0 && (
+          <section className={styles.detailSection}>
+            <p className={styles.detailSectionLabel}>Rủi ro cần cân nhắc</p>
+            <ul className={styles.risksList}>
+              {insight.risks.map((risk, idx) => (
+                <li key={idx}>{risk}</li>
+              ))}
+            </ul>
           </section>
         )}
 

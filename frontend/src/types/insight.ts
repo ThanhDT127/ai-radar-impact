@@ -1,3 +1,13 @@
+export type ActionType = "watch" | "read" | "test" | "PoC" | "roadmap";
+export type Urgency = "critical" | "high" | "medium" | "low";
+export type Momentum = "new" | "rising" | "mature";
+export type VietnamRelevance = "high" | "medium" | "low";
+
+export interface RecommendationItem {
+  action_type: ActionType;
+  note: string;
+}
+
 export interface InsightListItem {
   id: string;
   title: string;
@@ -16,6 +26,14 @@ export interface InsightListItem {
   source_id: string;
   source_name: string;
   source_type: string;
+  // v2 actionable fields
+  signal: string | null;
+  why_it_matters: string | null;
+  recommendations: Record<string, RecommendationItem> | null;
+  risks: string[] | null;
+  momentum: Momentum | null;
+  urgency: Urgency | null;
+  vietnam_relevance: VietnamRelevance | null;
 }
 
 export interface InsightReference {

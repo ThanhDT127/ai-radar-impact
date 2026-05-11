@@ -2,8 +2,19 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+
+ActionType = Literal["watch", "read", "test", "PoC", "roadmap"]
+
+
+class RecommendationItem(BaseModel):
+    """A per-role recommendation."""
+
+    action_type: ActionType
+    note: str
 
 
 class InsightReference(BaseModel):
@@ -39,6 +50,14 @@ class InsightListItem(BaseModel):
     source_id: uuid.UUID
     source_name: str
     source_type: str
+    # v2 actionable fields
+    signal: str | None = None
+    why_it_matters: str | None = None
+    recommendations: dict[str, RecommendationItem] | None = None
+    risks: list[str] | None = None
+    momentum: str | None = None
+    urgency: str | None = None
+    vietnam_relevance: str | None = None
 
 
 class InsightDetail(BaseModel):
@@ -69,3 +88,11 @@ class InsightDetail(BaseModel):
     cluster_id: uuid.UUID | None
     is_primary: bool
     references: list[InsightReference] = []
+    # v2 actionable fields
+    signal: str | None = None
+    why_it_matters: str | None = None
+    recommendations: dict[str, RecommendationItem] | None = None
+    risks: list[str] | None = None
+    momentum: str | None = None
+    urgency: str | None = None
+    vietnam_relevance: str | None = None

@@ -25,10 +25,22 @@ async def list_insights(
         default=None,
         description="Comma-separated source UUIDs",
     ),
+    urgency: str | None = Query(
+        default=None,
+        description="Comma-separated urgency levels (critical,high,medium,low)",
+    ),
+    momentum: str | None = Query(
+        default=None,
+        description="Comma-separated momentum (new,rising,mature)",
+    ),
+    vietnam_relevance: str | None = Query(
+        default=None,
+        description="Comma-separated vietnam_relevance (high,medium,low)",
+    ),
     sort_by: str = Query(
-        default="created_at",
-        description="Sort order: created_at | published_at | impact_label | trust_score",
-        pattern="^(created_at|published_at|impact_label|trust_score)$",
+        default="urgency",
+        description="Sort order: urgency | created_at | published_at | impact_label | trust_score",
+        pattern="^(urgency|created_at|published_at|impact_label|trust_score)$",
     ),
     session: AsyncSession = Depends(get_session),
 ) -> PaginatedResponse[InsightListItem]:
@@ -49,6 +61,14 @@ async def list_insights(
                 },
             ) from exc
 
+    urgency_list = [v.strip() for v in urgency.split(",") if v.strip()] if urgency else None
+    momentum_list = [v.strip() for v in momentum.split(",") if v.strip()] if momentum else None
+    vietnam_list = (
+        [v.strip() for v in vietnam_relevance.split(",") if v.strip()]
+        if vietnam_relevance
+        else None
+    )
+
     repo = InsightRepository(session)
     items, total = await repo.list_paginated(
         page=page,
@@ -56,6 +76,9 @@ async def list_insights(
         roles=roles,
         source_ids=source_ids,
         sort_by=sort_by,
+        urgency=urgency_list,
+        momentum=momentum_list,
+        vietnam_relevance=vietnam_list,
     )
     return PaginatedResponse(
         page=page,

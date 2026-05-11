@@ -26,6 +26,8 @@ class Source(Base):
     topics: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     config: Mapped[dict] = mapped_column(JSON, default=dict)
+    region: Mapped[str] = mapped_column(String(20), nullable=False, server_default="global", default="global")
+    target_roles: Mapped[list[str]] = mapped_column(ARRAY(String(50)), nullable=False, server_default="{}", default=list)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=func.now(), onupdate=func.now()

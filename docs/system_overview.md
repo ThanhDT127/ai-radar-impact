@@ -92,6 +92,16 @@ Cách nó hoạt động:
 
 Connector tự đăng ký vào registry khi module được import (`connectors/__init__.py` import tất cả connector → trigger `ConnectorRegistry.register(...)`). Thêm connector mới chỉ cần tạo class kế thừa `BaseConnector` và thêm 1 dòng import — không cần sửa `IngestionService`.
 
+**GitHub Trending connector** (github-trending-connector 2026-05-11): Source type `github_trending` scrape `github.com/trending/{language}?since={daily|weekly|monthly}` qua BeautifulSoup. Mỗi entry tạo `ConnectorEntry` với `title=owner/repo`, content phong phú (mô tả + ngôn ngữ + sao tăng), `metadata` chứa `stars_today/total_stars/forks/trending_position`. 4 seed sources: All Daily, Python Daily, Weekly All, TypeScript Daily. **Rủi ro**: GitHub đổi HTML structure → connector log warning + return `[]`, không crash pipeline.
+
+**Region tagging** (add-china-ai-sources 2026-05-09): Mỗi source có `region` ∈ `global` / `china` / `vietnam`:
+
+- **`china`** layer: Interconnects, ChinaTalk, ChinAI Newsletter (Substack); DeepSeek V3 + Yi 01.AI (GitHub releases.atom). HuggingFace organization RSS endpoint hiện tại trả 401 — defer cho future change với HF Papers API connector hoặc auth flow.
+- **`vietnam`** layer: VnExpress Số hóa + 5 nguồn Phase 2B (GenK, VietnamNet ICT, Viblo, Daynhauhoc, Machine Learning Cơ Bản). Defer (RSS endpoint không hợp lệ): CafeF, ICTNews, VietTimes, MLOpsVN, 200lab.
+- **`global`** mặc định cho 18 nguồn phương Tây gốc + 5 sub-channel feeds (AWS Security/Compute, arXiv CS.IR/CS.SE/CS.CR) + 11 nguồn Phase 2A (HF Blog, Stack Overflow, dev.to AI/ML, JetBrains, Docker, Kubernetes, KrebsOnSecurity, BleepingComputer, MS Security, GH Security Blog).
+
+`Source.target_roles` (VARCHAR[]) là hint metadata cho mỗi source — không tự động set `affected_roles` của insight (Gemini vẫn quyết định), nhưng cho phép dashboard filter "show insights for DevOps team" theo source tagging.
+
 Output của bước này chưa phải insight. Đây mới là dữ liệu gốc lấy từ feed:
 
 - `source_url`
@@ -218,10 +228,28 @@ Luồng xử lý:
    - tạo 1 record trong bảng `insights`
    - cập nhật `raw_document.processing_status = analyzed`
 
+**Insight Schema v2 (2026-05-09)** — mỗi insight có thêm 7 trường actionable:
+
+- 4 trường AI: `signal`, `why_it_matters`, `recommendations` (dict role→{action_type, note}), `risks`
+- 3 trường rule-based: `momentum` (cluster size + age), `urgency` (impact + recency), `vietnam_relevance` (source language + topics)
+- `action_type` ∈ {`watch`, `read`, `test`, `PoC`, `roadmap`}
+- Insights cũ chưa có 7 fields → trả `null`, frontend hide gracefully
+
+**UI behavior** (radar-polish-and-coverage 2026-05-09):
+- Card chỉ hiện 1 badge: `UrgencyBadge` (nếu insight có `urgency`) HOẶC `ImpactBadge` (fallback) — không cùng lúc, tránh duplicate
+- `MomentumIndicator` chỉ render `rising` (🔥 Đang nổi lên); `new` và `mature` được hide vì `RelativeTime` đã thể hiện đủ thông tin
+- 13 vai trò trong `affected_roles` (thêm DevOps/Infrastructure/Security/BA/QA/Designer/UX)
+- Sub-channel sources: AWS Security/Compute Blog + arXiv CS.IR/CS.SE/CS.CR — phân loại nội dung theo target_roles từ source level
+
+Để regenerate insights cũ với prompt v2:
+```bash
+docker-compose exec backend python -m app.scripts.regenerate_insights --limit 50
+```
+
 Hệ thống hiện tại dùng kết hợp:
 
-- AI cho classify và summarize
-- rule-based logic cho `trust_score` và `impact_label`
+- AI cho classify, summarize, signal/why_it_matters/recommendations/risks
+- rule-based logic cho `trust_score`, `impact_label`, `momentum`, `urgency`, `vietnam_relevance`
 
 Điều này có nghĩa:
 

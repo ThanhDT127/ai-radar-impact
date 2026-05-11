@@ -20,6 +20,15 @@ _IMPACT_ORDER = case(
     else_=6,
 )
 
+# Urgency sort order: critical → high → medium → low → null/unknown
+_URGENCY_ORDER = case(
+    (Insight.urgency == "critical", 1),
+    (Insight.urgency == "high", 2),
+    (Insight.urgency == "medium", 3),
+    (Insight.urgency == "low", 4),
+    else_=5,
+)
+
 
 class InsightRepository:
     """Data access layer for insights table."""
@@ -44,6 +53,12 @@ class InsightRepository:
         ai_raw_response: dict,
         affected_roles: list[str] | None = None,
         published_at: datetime | None = None,
+        signal: str | None = None,
+        why_it_matters: str | None = None,
+        recommendations: dict | None = None,
+        risks: list[str] | None = None,
+        urgency: str | None = None,
+        vietnam_relevance: str | None = None,
     ) -> Insight:
         """Insert a new insight and return it."""
         insight = Insight(
@@ -62,10 +77,25 @@ class InsightRepository:
             affected_roles=affected_roles or [],
             published_at=published_at,
             status="published",
+            signal=signal,
+            why_it_matters=why_it_matters,
+            recommendations=recommendations,
+            risks=risks,
+            urgency=urgency,
+            vietnam_relevance=vietnam_relevance,
         )
         self.session.add(insight)
         await self.session.flush()
         return insight
+
+    async def update_momentum(self, insight_id: uuid.UUID, momentum: str) -> None:
+        """Update momentum for a single insight (called post-dedup)."""
+        result = await self.session.execute(
+            select(Insight).where(Insight.id == insight_id)
+        )
+        insight = result.scalar_one_or_none()
+        if insight is not None:
+            insight.momentum = momentum
 
     async def list_paginated(
         self,
@@ -73,7 +103,10 @@ class InsightRepository:
         size: int = 20,
         roles: list[str] | None = None,
         source_ids: list[uuid.UUID] | None = None,
-        sort_by: str = "created_at",
+        sort_by: str = "urgency",
+        urgency: list[str] | None = None,
+        momentum: list[str] | None = None,
+        vietnam_relevance: list[str] | None = None,
     ) -> tuple[list[dict], int]:
         """Return paginated insights with optional role/source filters and sort."""
         offset = (page - 1) * size
@@ -95,21 +128,31 @@ class InsightRepository:
         if source_ids:
             base_query = base_query.where(RawDocument.source_id.in_(source_ids))
 
+        if urgency:
+            base_query = base_query.where(Insight.urgency.in_(urgency))
+        if momentum:
+            base_query = base_query.where(Insight.momentum.in_(momentum))
+        if vietnam_relevance:
+            base_query = base_query.where(Insight.vietnam_relevance.in_(vietnam_relevance))
+
         if sort_by == "published_at":
-            order = Insight.published_at.desc().nulls_last()
+            order = (Insight.published_at.desc().nulls_last(),)
         elif sort_by == "impact_label":
-            order = _IMPACT_ORDER.asc()
+            order = (_IMPACT_ORDER.asc(),)
         elif sort_by == "trust_score":
-            order = Insight.trust_score.desc().nulls_last()
+            order = (Insight.trust_score.desc().nulls_last(),)
+        elif sort_by == "created_at":
+            order = (Insight.created_at.desc(),)
         else:
-            order = Insight.created_at.desc()
+            # Default: urgency (critical→low) THEN published_at DESC
+            order = (_URGENCY_ORDER.asc(), Insight.published_at.desc().nulls_last())
 
         count_query = select(func.count()).select_from(base_query.subquery())
         total_result = await self.session.execute(count_query)
         total = total_result.scalar_one()
 
         result = await self.session.execute(
-            base_query.order_by(order).offset(offset).limit(size)
+            base_query.order_by(*order).offset(offset).limit(size)
         )
         items = [self._serialize_insight(item) for item in result.scalars().unique().all()]
         return items, total
@@ -200,4 +243,11 @@ class InsightRepository:
             "cluster_id": insight.cluster_id,
             "is_primary": insight.is_primary,
             "references": references or [],
+            "signal": insight.signal,
+            "why_it_matters": insight.why_it_matters,
+            "recommendations": insight.recommendations,
+            "risks": insight.risks,
+            "momentum": insight.momentum,
+            "urgency": insight.urgency,
+            "vietnam_relevance": insight.vietnam_relevance,
         }

@@ -15,6 +15,8 @@ class SourceCreate(BaseModel):
     topics: list[str] = []
     status: str = "active"
     config: dict = {}
+    region: str = "global"
+    target_roles: list[str] = []
 
 
 class SourceListItem(BaseModel):
@@ -25,6 +27,8 @@ class SourceListItem(BaseModel):
     source_type: str
     status: str
     insight_count: int
+    region: str = "global"
+    target_roles: list[str] = []
 
 
 class InsightStats(BaseModel):

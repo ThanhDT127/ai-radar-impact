@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import ARRAY, Boolean, ForeignKey, JSON, String, Text, Float
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -41,6 +41,14 @@ class Insight(Base):
     # Semantic dedup clustering
     cluster_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true", default=True)
+    # Insight Schema v2 — actionable fields
+    signal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    why_it_matters: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommendations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    risks: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    momentum: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    urgency: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    vietnam_relevance: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=func.now(), onupdate=func.now()

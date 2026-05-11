@@ -28,3 +28,6 @@ node_modules/
 .vscode/
 .idea/
 *.swp
+
+# Claude Code runtime
+.claude/*.lock

@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
 import type { InsightListItem } from '../types/insight';
 import ImpactBadge from './ImpactBadge';
+import MomentumIndicator from './MomentumIndicator';
 import RelativeTime from './RelativeTime';
 import RoleBadge from './RoleBadge';
+import UrgencyBadge from './UrgencyBadge';
 import styles from '../styles/insights.module.css';
 
 interface InsightCardProps {
@@ -21,10 +23,15 @@ function makeDisplayTitle(insight: InsightListItem): string {
 }
 
 function makeWhatChanged(insight: InsightListItem): string {
-  return insight.summary_short ?? insight.title;
+  // Prefer signal (implication) over summary_short (fact recap) when available
+  return insight.signal ?? insight.summary_short ?? insight.title;
 }
 
 function makeWhyItMatters(insight: InsightListItem): string {
+  // Prefer AI-generated why_it_matters when available
+  if (insight.why_it_matters) {
+    return insight.why_it_matters;
+  }
   if (insight.summary_medium) {
     return insight.summary_medium;
   }
@@ -55,8 +62,13 @@ export default function InsightCard({ insight }: InsightCardProps) {
           <span className={styles.sourcePill}>{insight.source_name}</span>
           <h3 className={styles.cardTitle}>{displayTitle}</h3>
           {showOriginalTitle && <p className={styles.cardOriginalTitle}>{insight.title}</p>}
+          <MomentumIndicator momentum={insight.momentum} />
         </div>
-        <ImpactBadge label={insight.impact_label} />
+        <div className={styles.cardBadges}>
+          {insight.urgency
+            ? <UrgencyBadge urgency={insight.urgency} />
+            : <ImpactBadge label={insight.impact_label} />}
+        </div>
       </div>
 
       <div className={styles.cardInsightBlock}>

@@ -1,8 +1,10 @@
-## ADDED Requirements
+## Purpose
 
+Insight Dashboard UI cho phép team đa vai trò (Engineering, Data/AI, Product, Legal, Executive...) xem insights đã phân tích, lọc theo urgency/momentum/role và đọc khuyến nghị hành động cụ thể cho vai trò của mình.
+## Requirements
 ### Requirement: Trang danh sách Insights
 
-React page hiển thị danh sách insight dưới dạng cards, fetch từ backend API.
+React page MUST hiển thị danh sách insight dưới dạng cards, fetch từ backend API.
 
 #### Scenario: Hiển thị danh sách insight
 - **WHEN** user truy cập trang chủ (`/`)
@@ -22,7 +24,7 @@ React page hiển thị danh sách insight dưới dạng cards, fetch từ back
 
 ### Requirement: Trang chi tiết Insight
 
-Khi click vào 1 insight card, navigate tới trang chi tiết.
+Khi click vào 1 insight card, app MUST navigate tới trang chi tiết.
 
 #### Scenario: Hiển thị chi tiết
 - **WHEN** user click vào 1 insight card
@@ -38,7 +40,7 @@ Khi click vào 1 insight card, navigate tới trang chi tiết.
 
 ### Requirement: Impact label màu sắc
 
-Impact label phải có visual indicator rõ ràng bằng màu.
+Impact label MUST có visual indicator rõ ràng bằng màu.
 
 #### Scenario: Màu theo impact level
 - **WHEN** insight card hoặc detail hiển thị impact_label
@@ -46,7 +48,7 @@ Impact label phải có visual indicator rõ ràng bằng màu.
 
 ### Requirement: Responsive và hiệu năng
 
-Dashboard phải responsive và load nhanh.
+Dashboard MUST responsive và load nhanh.
 
 #### Scenario: Mobile responsive
 - **WHEN** user mở trang trên màn hình < 768px
@@ -55,3 +57,97 @@ Dashboard phải responsive và load nhanh.
 #### Scenario: Pagination UI
 - **WHEN** có nhiều hơn 20 insights
 - **THEN** hiển thị pagination controls (Previous/Next) ở cuối danh sách
+
+### Requirement: InsightCard hiển thị urgency badge và signal
+
+Card MUST hiển thị `urgency` badge nổi bật + `signal` (nếu có) thay cho summary để truyền tải nhanh "tại sao quan trọng".
+
+#### Scenario: Card có urgency badge
+- **WHEN** insight có `urgency` ≠ null
+- **THEN** card render badge với màu phù hợp:
+  - `critical` → đỏ
+  - `high` → cam
+  - `medium` → vàng
+  - `low` → xám
+
+#### Scenario: Card hiển thị signal khi có
+- **WHEN** insight có `signal` ≠ null
+- **THEN** card hiển thị `signal` ở vị trí ưu tiên (trên summary_short)
+
+#### Scenario: Fallback cho insight cũ
+- **WHEN** insight không có `signal` (insight cũ chưa regenerate)
+- **THEN** card hiển thị `summary_short` như cũ
+
+#### Scenario: Card hiển thị momentum indicator
+- **WHEN** insight có `momentum = "rising"`
+- **THEN** card render icon/text "Đang nổi lên" (hoặc tương tự)
+- **WHEN** `momentum = "new"`
+- **THEN** card render icon "Mới"
+
+### Requirement: InsightDetail hiển thị recommendations theo role
+
+Trang detail MUST có section "Khuyến nghị cho team" hiển thị `recommendations` phân nhóm theo role.
+
+#### Scenario: Detail có recommendations
+- **WHEN** insight có `recommendations` non-empty
+- **THEN** detail page render section "Khuyến nghị" với heading + group theo role
+- **THEN** mỗi group hiển thị `action_type` (badge: watch/read/test/PoC/roadmap) + `note`
+
+#### Scenario: Detail có why_it_matters
+- **WHEN** insight có `why_it_matters` ≠ null
+- **THEN** detail page render section "Tại sao quan trọng" prominent (sau title, trước summary)
+
+#### Scenario: Detail có risks
+- **WHEN** insight có `risks` non-empty
+- **THEN** detail page render section "Rủi ro cần cân nhắc" với bullet list
+
+#### Scenario: Detail không có fields mới
+- **WHEN** insight cũ không có 7 fields mới
+- **THEN** detail page hide các sections "Khuyến nghị", "Tại sao quan trọng", "Rủi ro" — không render placeholder/N/A
+
+### Requirement: Card không hiện badge trùng
+
+InsightCard MUST chỉ render 1 trong 2 (UrgencyBadge HOẶC ImpactBadge), không cả 2 cùng lúc.
+
+#### Scenario: Insight có urgency
+- **WHEN** insight có `urgency` ≠ null
+- **THEN** card render `<UrgencyBadge>`
+- **THEN** card KHÔNG render `<ImpactBadge>` (dù `impact_label` ≠ null)
+
+#### Scenario: Insight cũ chưa có urgency
+- **WHEN** insight có `urgency = null` và `impact_label` ≠ null
+- **THEN** card render `<ImpactBadge>` như cũ
+- **THEN** không có UrgencyBadge
+
+#### Scenario: Cả 2 đều null
+- **WHEN** insight có `urgency = null` và `impact_label = null`
+- **THEN** card không render badge nào ở slot này
+
+### Requirement: MomentumIndicator chỉ render `rising`
+
+MomentumIndicator MUST hide cho `momentum ∈ {new, mature, null}`. Chỉ render khi `momentum = "rising"`.
+
+#### Scenario: Momentum = rising
+- **WHEN** insight có `momentum = "rising"`
+- **THEN** render pill `🔥 Đang nổi lên`
+
+#### Scenario: Momentum = new
+- **WHEN** insight có `momentum = "new"`
+- **THEN** component return `null` (không render)
+
+#### Scenario: Momentum = mature hoặc null
+- **WHEN** insight có `momentum = "mature"` hoặc `null`
+- **THEN** component return `null`
+
+### Requirement: RoleBadge hỗ trợ 5 role mới
+
+`RoleBadge` MUST có color mapping cho 5 role mới (DevOps, Infrastructure, Security, BA/QA, Designer/UX), tránh trùng màu với 8 role hiện có.
+
+#### Scenario: Render role mới
+- **WHEN** insight có `affected_roles` chứa `"Security"`
+- **THEN** RoleBadge render với màu red-orange (#dc2626 hoặc tương tự)
+
+#### Scenario: Render role chưa có mapping
+- **WHEN** role không thuộc 13 entries (lỗi data hoặc role mới)
+- **THEN** RoleBadge fallback màu gray default, không crash
+

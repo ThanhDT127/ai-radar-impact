@@ -17,6 +17,15 @@ SIMILARITY_THRESHOLD = 0.6
 TRUST_TIER_ORDER = {"very_high": 0, "high": 1, "medium": 2, "low": 3, "unverified": 4}
 
 
+def compute_momentum(cluster_size: int, cluster_age_days: float) -> str:
+    """Rule D2: derive momentum from cluster size + age."""
+    if cluster_size <= 1:
+        return "new" if cluster_age_days < 3 else "mature"
+    if cluster_size >= 3 and cluster_age_days < 7:
+        return "rising"
+    return "mature"
+
+
 class DeduplicationEngine:
     """Groups semantically similar insights into clusters and marks one as primary."""
 
@@ -83,6 +92,20 @@ class DeduplicationEngine:
 
         return sorted(cluster, key=sort_key)[0]["id"]
 
+    async def get_cluster_metadata(self, cluster_id: uuid.UUID) -> dict:
+        """Return {size, earliest_published_at} for a given cluster_id."""
+        result = await self.session.execute(
+            select(Insight.published_at)
+            .where(Insight.cluster_id == cluster_id)
+            .where(Insight.status == "published")
+        )
+        rows = list(result.scalars().all())
+        if not rows:
+            return {"size": 0, "earliest_published_at": None}
+        valid = [p for p in rows if p is not None]
+        earliest = min(valid) if valid else None
+        return {"size": len(rows), "earliest_published_at": earliest}
+
     async def run_dedup(self) -> dict[str, int]:
         """Re-cluster all insights from the last 7 days.
 
@@ -126,12 +149,32 @@ class DeduplicationEngine:
 
         clusters_created = 0
         duplicates_marked = 0
+        today = date.today()
 
         for group_indices in groups:
-            if len(group_indices) < 2:
+            cluster_insights = [rows[i] for i in group_indices]
+            size = len(cluster_insights)
+
+            pub_dates: list[date] = []
+            for ins in cluster_insights:
+                p = ins.get("published_at") or today
+                # datetime is a subclass of date — use .date() to coerce
+                if hasattr(p, "hour"):  # datetime, not date
+                    p = p.date()
+                pub_dates.append(p)
+            earliest = min(pub_dates) if pub_dates else today
+            age_days = (today - earliest).days
+            momentum = compute_momentum(size, age_days)
+
+            if size < 2:
+                # Singleton — only update momentum, leave cluster_id null
+                await self.session.execute(
+                    update(Insight)
+                    .where(Insight.id == cluster_insights[0]["id"])
+                    .values(momentum=momentum)
+                )
                 continue
 
-            cluster_insights = [rows[i] for i in group_indices]
             cluster_id = uuid.uuid4()
             primary_id = self.select_primary(cluster_insights)
 
@@ -140,7 +183,11 @@ class DeduplicationEngine:
                 await self.session.execute(
                     update(Insight)
                     .where(Insight.id == ins["id"])
-                    .values(cluster_id=cluster_id, is_primary=is_primary)
+                    .values(
+                        cluster_id=cluster_id,
+                        is_primary=is_primary,
+                        momentum=momentum,
+                    )
                 )
                 if not is_primary:
                     duplicates_marked += 1
