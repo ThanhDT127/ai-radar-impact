@@ -26,5 +26,8 @@ trafilatura==2.0.0
 # ML — semantic deduplication
 scikit-learn==1.5.2
 
+# Playwright — headless browser for SPA scraping
+playwright==1.49.0
+
 # Utilities
 python-dotenv==1.0.1

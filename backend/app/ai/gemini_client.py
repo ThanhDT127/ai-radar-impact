@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 from google import genai
@@ -52,34 +53,45 @@ class GeminiClient:
         """Classify and summarize an article using Gemini Flash via Vertex AI.
 
         Returns an AnalysisResult. On error, returns result with error field set.
+        Retries up to 3 times on 429 rate-limit errors with exponential backoff.
         """
         prompt = build_prompt(title=title, content=content)
+        _retry_delays = [5, 15, 45]
 
-        try:
-            response = self._client.models.generate_content(
-                model=MODEL_ID,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.1,      # Low temp for consistent classification
-                    max_output_tokens=4096,
-                    response_mime_type="application/json",  # Prevent Unicode escaping + ensure valid JSON
-                ),
-            )
+        for attempt, delay in enumerate([0] + _retry_delays):
+            if delay:
+                logger.info("Retrying Gemini after %ds (attempt %d/3) for '%s'", delay, attempt, title[:50])
+                time.sleep(delay)
+            try:
+                response = self._client.models.generate_content(
+                    model=MODEL_ID,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.1,
+                        max_output_tokens=4096,
+                        response_mime_type="application/json",
+                    ),
+                )
 
-            # Check for truncation
-            candidates = response.candidates or []
-            if candidates:
-                finish_reason = candidates[0].finish_reason
-                # finish_reason 2 = MAX_TOKENS (truncated)
-                if hasattr(finish_reason, "value") and finish_reason.value == 2:
-                    logger.warning("Gemini response truncated (MAX_TOKENS) for '%s'", title[:50])
+                candidates = response.candidates or []
+                if candidates:
+                    finish_reason = candidates[0].finish_reason
+                    if hasattr(finish_reason, "value") and finish_reason.value == 2:
+                        logger.warning("Gemini response truncated (MAX_TOKENS) for '%s'", title[:50])
 
-            raw_text = response.text or ""
-            return self._parse_response(raw_text)
+                raw_text = response.text or ""
+                return self._parse_response(raw_text)
 
-        except Exception as e:
-            logger.error("Vertex AI error for '%s': %s", title[:50], e)
-            return AnalysisResult(error=str(e))
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    if attempt < len(_retry_delays):
+                        logger.warning("Gemini 429 rate-limit for '%s', will retry", title[:50])
+                        continue
+                logger.error("Vertex AI error for '%s': %s", title[:50], e)
+                return AnalysisResult(error=err_str)
+
+        return AnalysisResult(error="Gemini 429 RESOURCE_EXHAUSTED after 3 retries")
 
     def _parse_response(self, raw_text: str) -> AnalysisResult:
         """Parse Gemini JSON response into AnalysisResult."""

@@ -65,6 +65,80 @@
   flex-wrap: wrap;
 }
 
+.toolbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.preset,
+.presetActive {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.preset:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+.presetActive {
+  background: rgba(184, 77, 30, 0.15);
+  border-color: rgba(184, 77, 30, 0.5);
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.filterToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.filterToggle:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-muted);
+}
+
+.filterBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.filterCaret {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
 .sortBox {
   display: inline-flex;
   align-items: center;
@@ -146,6 +220,147 @@
 .chipCountActive {
   background: var(--color-accent);
   color: #fff;
+}
+
+.filterPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+}
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filterRowLabel {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  min-width: 80px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.filterChip,
+.filterChipActive {
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 0.84rem;
+  padding: 6px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.filterChip:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+.filterChipActive {
+  background: rgba(184, 77, 30, 0.15);
+  border-color: rgba(184, 77, 30, 0.45);
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.sourceRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.sourceLabel {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  min-width: 80px;
+  text-align: right;
+  flex-shrink: 0;
+  padding-top: 9px;
+}
+
+.sourceContent {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sourceSearch {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 7px 12px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.sourceSearch:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.sourceChipWrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sourceCount {
+  font-size: 0.74rem;
+  color: var(--color-text-muted);
+  margin-left: 4px;
+}
+
+.moreButton {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+  padding: 2px 0;
+  text-decoration: underline;
+}
+
+.filterFooter {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.clearAll {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  text-decoration: underline;
+}
+
+.clearAll:hover {
+  color: var(--color-accent);
 }
 
 .emptyFilterHint {

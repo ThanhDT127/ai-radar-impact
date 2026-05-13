@@ -306,14 +306,18 @@ INITIAL_SOURCES = [
     # Note: Anthropic + Papers With Code defer — no working RSS endpoint found.
     {
         "name": "Hugging Face Blog",
-        "source_type": "rss",
-        "feed_url": "https://huggingface.co/blog/feed.xml",
+        "source_type": "web_index",
+        "feed_url": "https://huggingface.co/blog",
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo", "Cập nhật nghiên cứu"],
         "status": "active",
         "region": "global",
         "target_roles": ["Engineering", "Data/AI"],
-        "config": {"max_items": 15, "language": "en"},
+        "config": {
+            "link_pattern": r"/blog/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+",
+            "exclude_patterns": [r"/blog/?$", r"/blog/feed"],
+            "max_items": 10,
+        },
     },
     {
         "name": "Stack Overflow Blog",
@@ -451,14 +455,18 @@ INITIAL_SOURCES = [
     },
     {
         "name": "Viblo",
-        "source_type": "rss",
-        "feed_url": "https://viblo.asia/rss",
+        "source_type": "web_index",
+        "feed_url": "https://viblo.asia/newest",
         "trust_tier": "medium",
         "topics": ["Công nghệ", "Quy trình phần mềm"],
         "status": "active",
         "region": "vietnam",
         "target_roles": ["Engineering"],
-        "config": {"max_items": 12, "language": "vi"},
+        "config": {
+            "link_pattern": r"/p/[a-zA-Z0-9-]+$",
+            "exclude_patterns": [r"/newest/?$", r"/t/", r"/u/"],
+            "max_items": 10,
+        },
     },
     {
         "name": "Daynhauhoc",
@@ -473,14 +481,18 @@ INITIAL_SOURCES = [
     },
     {
         "name": "Machine Learning Cơ Bản",
-        "source_type": "rss",
-        "feed_url": "https://machinelearningcoban.com/feed.xml",
+        "source_type": "web_index",
+        "feed_url": "https://machinelearningcoban.com",
         "trust_tier": "high",
         "topics": ["Trí tuệ nhân tạo", "Dữ liệu"],
         "status": "active",
         "region": "vietnam",
         "target_roles": ["Data/AI", "Engineering"],
-        "config": {"max_items": 10, "language": "vi"},
+        "config": {
+            "link_pattern": r"/\d{4}/\d{2}/\d{2}/",
+            "exclude_patterns": [r"/page/", r"/tag/", r"/category/"],
+            "max_items": 10,
+        },
     },
     # GitHub Trending — early code activity signal (github-trending-connector 2026-05-11)
     {
@@ -647,6 +659,40 @@ INITIAL_SOURCES = [
             "max_items": 10,
         },
     },
+    # Playwright sources — JavaScript-rendered SPA sites without RSS
+    {
+        "name": "VietTimes Công nghệ",
+        "source_type": "rss",
+        "feed_url": "https://viettimes.vn/rss/khoa-hoc-cong-nghe-109.rss",
+        "trust_tier": "medium",
+        "topics": ["Công nghệ", "Trí tuệ nhân tạo"],
+        "status": "active",
+        "region": "vietnam",
+        "target_roles": ["Engineering", "Data/AI", "Product"],
+        "config": {"max_items": 15, "language": "vi"},
+    },
+    {
+        "name": "ICTNews Công nghệ",
+        "source_type": "playwright",
+        "feed_url": "https://ictnews.vn/cntt-vien-thong",
+        "trust_tier": "medium",
+        "topics": ["Công nghệ", "Trí tuệ nhân tạo", "Pháp lý/Tuân thủ"],
+        "status": "active",
+        "region": "vietnam",
+        "target_roles": ["Engineering", "Data/AI", "Executive"],
+        "config": {
+            "link_selector": "a",
+            "link_pattern": r"/[^/?#]+-\d+\.html$",
+            "max_items": 10,
+        },
+    },
+    # MLOpsVN Blog — disabled: /blog returns 404 as of 2026-05-12
+    # {
+    #     "name": "MLOpsVN Blog",
+    #     "source_type": "playwright",
+    #     "feed_url": "https://mlops.vn/blog",
+    #     "status": "inactive",
+    # },
 ]
 
 
