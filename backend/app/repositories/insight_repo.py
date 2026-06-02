@@ -59,6 +59,11 @@ class InsightRepository:
         risks: list[str] | None = None,
         urgency: str | None = None,
         vietnam_relevance: str | None = None,
+        actionability_score: float | None = None,
+        intelligence_tier: str | None = None,
+        so_what: str | None = None,
+        adoption_ring: str | None = None,
+        practical_indicators: dict | None = None,
     ) -> Insight:
         """Insert a new insight and return it."""
         insight = Insight(
@@ -83,6 +88,11 @@ class InsightRepository:
             risks=risks,
             urgency=urgency,
             vietnam_relevance=vietnam_relevance,
+            actionability_score=actionability_score,
+            intelligence_tier=intelligence_tier,
+            so_what=so_what,
+            adoption_ring=adoption_ring,
+            practical_indicators=practical_indicators,
         )
         self.session.add(insight)
         await self.session.flush()
@@ -107,6 +117,7 @@ class InsightRepository:
         urgency: list[str] | None = None,
         momentum: list[str] | None = None,
         vietnam_relevance: list[str] | None = None,
+        intelligence_tier: list[str] | None = None,
     ) -> tuple[list[dict], int]:
         """Return paginated insights with optional role/source filters and sort."""
         offset = (page - 1) * size
@@ -134,6 +145,8 @@ class InsightRepository:
             base_query = base_query.where(Insight.momentum.in_(momentum))
         if vietnam_relevance:
             base_query = base_query.where(Insight.vietnam_relevance.in_(vietnam_relevance))
+        if intelligence_tier:
+            base_query = base_query.where(Insight.intelligence_tier.in_(intelligence_tier))
 
         if sort_by == "published_at":
             order = (Insight.published_at.desc().nulls_last(),)
@@ -143,6 +156,8 @@ class InsightRepository:
             order = (Insight.trust_score.desc().nulls_last(),)
         elif sort_by == "created_at":
             order = (Insight.created_at.desc(),)
+        elif sort_by == "actionability_score":
+            order = (Insight.actionability_score.desc().nulls_last(),)
         else:
             # Default: urgency (critical→low) THEN published_at DESC
             order = (_URGENCY_ORDER.asc(), Insight.published_at.desc().nulls_last())
@@ -218,6 +233,30 @@ class InsightRepository:
 
     def _serialize_insight(self, insight: Insight, references: list[dict] | None = None) -> dict:
         """Convert an ORM object into an API-shaped dictionary."""
+        # Dynamically extract primary image URL from raw_content or metadata
+        primary_image = None
+        raw_content = insight.raw_document.raw_content or ""
+        metadata = insight.raw_document.metadata_ or {}
+        
+        if "primary_image_url" in metadata:
+            primary_image = metadata["primary_image_url"]
+            
+        if not primary_image and raw_content:
+            import re
+            og_match = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']', raw_content, re.IGNORECASE)
+            if og_match:
+                primary_image = og_match.group(1)
+            else:
+                tw_match = re.search(r'<meta\s+name=["\']twitter:image["\']\s+content=["\']([^"\']+)["\']', raw_content, re.IGNORECASE)
+                if tw_match:
+                    primary_image = tw_match.group(1)
+                else:
+                    img_match = re.search(r'<img\s+[^>]*src=["\']([^"\']+)["\']', raw_content, re.IGNORECASE)
+                    if img_match:
+                        img_src = img_match.group(1)
+                        if "pixel" not in img_src.lower() and "logo" not in img_src.lower() and not img_src.startswith("data:"):
+                            primary_image = img_src
+
         source = insight.raw_document.source
         return {
             "id": insight.id,
@@ -250,4 +289,11 @@ class InsightRepository:
             "momentum": insight.momentum,
             "urgency": insight.urgency,
             "vietnam_relevance": insight.vietnam_relevance,
+            "actionability_score": insight.actionability_score,
+            "intelligence_tier": insight.intelligence_tier,
+            "so_what": insight.so_what,
+            "adoption_ring": insight.adoption_ring,
+            "practical_indicators": insight.practical_indicators,
+            "content_text": insight.raw_document.normalized_content or insight.raw_document.raw_content,
+            "primary_image": primary_image,
         }

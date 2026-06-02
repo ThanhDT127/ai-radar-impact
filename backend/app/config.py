@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     min_content_length: int = 200
     max_daily_analysis: int = 500
 
+    # Content gate (two-pass pipeline)
+    enable_gate: bool = True
+    gate_threshold: float = 0.4
+
     # Admin API
     admin_api_key: str = "changeme"
 

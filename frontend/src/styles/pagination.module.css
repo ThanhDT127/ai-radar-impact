@@ -1,0 +1,157 @@
+.paginationShell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-top: 36px;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.paginationBtn {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  border-radius: var(--radius-full);
+  padding: 10px 18px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.paginationBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.paginationPages {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.paginationPage,
+.paginationPageActive {
+  min-width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.paginationPageActive {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}
+
+.paginationEllipsis {
+  color: var(--color-text-muted);
+  padding: 0 4px;
+}
+
+.paginationInfo {
+  color: var(--color-text-secondary);
+}
+
+.paginationJump {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.paginationJumpBox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+}
+
+.paginationInput {
+  width: 72px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  padding: 0 12px;
+}
+
+.paginationGoBtn {
+  height: 40px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  padding: 0 16px;
+  font: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.paginationGoBtn:hover {
+  background: var(--color-accent-light);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* ── Compact Pagination (toolbar inline) ─────── */
+
+.paginationCompact {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 4px 6px;
+  box-shadow: var(--shadow-1);
+}
+
+.paginationBtnCompact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.paginationBtnCompact:hover:not(:disabled) {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+}
+
+.paginationBtnCompact:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.paginationInfoCompact {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+  min-width: 48px;
+  text-align: center;
+}
+

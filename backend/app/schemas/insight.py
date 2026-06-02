@@ -58,6 +58,13 @@ class InsightListItem(BaseModel):
     momentum: str | None = None
     urgency: str | None = None
     vietnam_relevance: str | None = None
+    # v3 taxonomy overhaul
+    actionability_score: float | None = None
+    intelligence_tier: str | None = None
+    so_what: str | None = None
+    adoption_ring: str | None = None
+    practical_indicators: dict | None = None
+    primary_image: str | None = None
 
 
 class InsightDetail(BaseModel):
@@ -96,3 +103,11 @@ class InsightDetail(BaseModel):
     momentum: str | None = None
     urgency: str | None = None
     vietnam_relevance: str | None = None
+    # v3 taxonomy overhaul
+    actionability_score: float | None = None
+    intelligence_tier: str | None = None
+    so_what: str | None = None
+    adoption_ring: str | None = None
+    practical_indicators: dict | None = None
+    content_text: str | None = None
+    primary_image: str | None = None

@@ -1,5 +1,7 @@
 import type { Urgency } from '../types/insight';
-import styles from '../styles/insights.module.css';
+import Tooltip from './Tooltip';
+import { TOOLTIP } from './TooltipContent';
+import styles from '../styles/badges.module.css';
 
 interface UrgencyBadgeProps {
   urgency: Urgency | null;
@@ -7,9 +9,9 @@ interface UrgencyBadgeProps {
 
 const URGENCY_LABEL: Record<Urgency, string> = {
   critical: 'Khẩn cấp',
-  high: 'Cao',
-  medium: 'Trung bình',
-  low: 'Thấp',
+  high: 'Cấp thiết: Cao',
+  medium: 'Cấp thiết: Trung bình',
+  low: 'Cấp thiết: Thấp',
 };
 
 const URGENCY_CLASS: Record<Urgency, string> = {
@@ -22,10 +24,13 @@ const URGENCY_CLASS: Record<Urgency, string> = {
 export default function UrgencyBadge({ urgency }: UrgencyBadgeProps) {
   if (!urgency) return null;
   const className = `${styles.badge} ${styles[URGENCY_CLASS[urgency]]}`.trim();
+  const tip = TOOLTIP.urgency[urgency] ?? '';
   return (
-    <span className={className} title={`Mức độ cấp thiết: ${URGENCY_LABEL[urgency]}`}>
-      <span className={styles.badgeDot} aria-hidden="true">●</span>
-      <span>{URGENCY_LABEL[urgency]}</span>
-    </span>
+    <Tooltip content={tip}>
+      <span className={className}>
+        <span className={styles.badgeDot} aria-hidden="true">●</span>
+        <span>{URGENCY_LABEL[urgency]}</span>
+      </span>
+    </Tooltip>
   );
 }

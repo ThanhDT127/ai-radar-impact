@@ -1,5 +1,6 @@
 import type { ActionType, RecommendationItem } from '../types/insight';
-import styles from '../styles/insights.module.css';
+import { ROLE_DISPLAY_LABEL } from './RoleBadge';
+import styles from '../styles/badges.module.css';
 
 interface RecommendationsByRoleProps {
   recommendations: Record<string, RecommendationItem> | null;
@@ -29,7 +30,7 @@ export default function RecommendationsByRole({ recommendations }: Recommendatio
       {Object.entries(recommendations).map(([role, item]) => (
         <div key={role} className={styles.recommendationRow}>
           <div className={styles.recommendationHead}>
-            <span className={styles.recommendationRole}>{role}</span>
+            <span className={styles.recommendationRole}>{ROLE_DISPLAY_LABEL[role] ?? role}</span>
             <span className={`${styles.actionBadge} ${styles[ACTION_CLASS[item.action_type]] ?? ''}`}>
               {ACTION_LABEL[item.action_type] ?? item.action_type}
             </span>

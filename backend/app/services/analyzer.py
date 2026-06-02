@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.gemini_client import GeminiClient
-from app.ai.prompts import ALLOWED_ACTION_TYPES
+from app.ai.prompts import ALLOWED_ACTION_TYPES, ALLOWED_ADOPTION_RINGS
 from app.config import settings
 from app.models.raw_document import RawDocument
 from app.models.source import Source
@@ -43,20 +43,39 @@ TRUST_SCORE_MAP: dict[str, float] = {
 # Rule-based impact label mapping from event_type (tiếng Việt)
 IMPACT_LABEL_MAP: dict[str, str] = {
     "Cảnh báo bảo mật": "Nghiêm trọng",
+    "Breaking Change": "Nghiêm trọng",
     "Cập nhật quy định": "Cao",
     "Thay đổi chính sách": "Cao",
-    "Ngừng hỗ trợ": "Cao",
+    "Ngừng hỗ trợ/Deprecation": "Cao",
+    "Sự cố vận hành": "Cao",
     "Phát hành mới": "Trung bình",
-    "Sự cố vận hành": "Trung bình",
-    "Cập nhật nghiên cứu": "Thấp",
+    "Benchmark/So sánh": "Trung bình",
+    "Hướng dẫn/Best Practice": "Trung bình",
+    "Nghiên cứu/Paper": "Thấp",
     "Tín hiệu xu hướng": "Thấp",
     "Thảo luận cộng đồng": "Theo dõi",
 }
 
+# Event type weights for actionability scoring
+EVENT_TYPE_WEIGHTS: dict[str, float] = {
+    "Cảnh báo bảo mật": 1.0,
+    "Breaking Change": 1.0,
+    "Sự cố vận hành": 0.9,
+    "Phát hành mới": 0.8,
+    "Hướng dẫn/Best Practice": 0.7,
+    "Cập nhật quy định": 0.7,
+    "Thay đổi chính sách": 0.7,
+    "Ngừng hỗ trợ/Deprecation": 0.8,
+    "Benchmark/So sánh": 0.5,
+    "Nghiên cứu/Paper": 0.3,
+    "Tín hiệu xu hướng": 0.4,
+    "Thảo luận cộng đồng": 0.2,
+}
+
 MIN_CONFIDENCE = 0.3  # Below this, do not publish
 
-# Vietnamese-specific topics for vietnam_relevance medium tier
-_VN_SPECIFIC_TOPICS = {"Pháp lý/Tuân thủ", "Quản trị nội bộ"}
+# Vietnamese-specific topics for vietnam_relevance
+_VN_SPECIFIC_TOPICS = {"Legal & Regulation", "Team & Process"}
 
 
 def _validate_recommendations(
@@ -94,6 +113,15 @@ def _validate_recommendations(
     return cleaned or None
 
 
+def _validate_adoption_ring(adoption_ring: str | None) -> str | None:
+    """Validate adoption_ring against allowed values. Return None if invalid."""
+    if adoption_ring and adoption_ring in ALLOWED_ADOPTION_RINGS:
+        return adoption_ring
+    if adoption_ring:
+        logger.warning("Invalid adoption_ring '%s', defaulting to None", adoption_ring)
+    return None
+
+
 def _compute_urgency(
     impact_label: str | None, published_at: datetime | None
 ) -> str:
@@ -102,7 +130,6 @@ def _compute_urgency(
         return "low"
 
     if published_at is None:
-        # No published date — fall back to impact_label only
         if impact_label == "Nghiêm trọng":
             return "critical"
         if impact_label == "Cao":
@@ -133,11 +160,73 @@ def _compute_vietnam_relevance(source: Source, topics: list[str]) -> str:
     language = config.get("language", "")
     topics_set = set(topics or [])
 
-    if language == "vi" or "Pháp lý/Tuân thủ" in topics_set:
+    if language == "vi" or "Legal & Regulation" in topics_set:
         return "high"
     if topics_set & _VN_SPECIFIC_TOPICS:
         return "medium"
     return "low"
+
+
+def _compute_actionability_score(
+    gate_score: float,
+    confidence: float,
+    trust_score: float,
+    event_type: str | None,
+    published_at: datetime | None,
+) -> float:
+    """Composite actionability score: 5-factor weighted formula.
+
+    Formula: 0.25*gate + 0.20*confidence + 0.15*trust + 0.25*event_weight + 0.15*recency
+    Returns float in range [0, 1].
+    """
+    event_weight = EVENT_TYPE_WEIGHTS.get(event_type or "", 0.3)
+
+    # Recency: exponential decay, 1.0 for today → ~0.25 after 30 days
+    recency = 0.25
+    if published_at:
+        now = datetime.now(timezone.utc)
+        pub = published_at if published_at.tzinfo else published_at.replace(tzinfo=timezone.utc)
+        age_days = max(0, (now - pub).days)
+        recency = max(0.1, 1.0 - (age_days / 30.0) * 0.75) if age_days <= 30 else 0.1
+
+    score = (
+        0.25 * gate_score
+        + 0.20 * confidence
+        + 0.15 * trust_score
+        + 0.25 * event_weight
+        + 0.15 * recency
+    )
+    return round(min(1.0, max(0.0, score)), 4)
+
+
+def _compute_intelligence_tier(
+    actionability_score: float, event_type: str | None
+) -> str:
+    """Rule-based intelligence tier assignment.
+
+    Tactical: breaking changes, security patches, new releases with high actionability
+    Operational: mid-actionability, deployment-affecting events
+    Strategic: long-term trends, policy, research
+    Informational: low actionability catch-all
+    """
+    tactical_events = {
+        "Cảnh báo bảo mật", "Breaking Change", "Sự cố vận hành",
+        "Phát hành mới", "Hướng dẫn/Best Practice",
+    }
+    strategic_events = {
+        "Tín hiệu xu hướng", "Thay đổi chính sách", "Cập nhật quy định",
+        "Nghiên cứu/Paper",
+    }
+
+    if event_type in tactical_events and actionability_score >= 0.6:
+        return "Tactical"
+    if event_type in tactical_events and actionability_score >= 0.4:
+        return "Operational"
+    if event_type in strategic_events:
+        return "Strategic"
+    if actionability_score >= 0.5:
+        return "Operational"
+    return "Informational"
 
 
 class AnalyzerService:
@@ -152,6 +241,10 @@ class AnalyzerService:
     async def analyze_document(self, raw_doc: RawDocument, source: Source) -> bool:
         """Analyze a single raw document and create an insight.
 
+        Two-pass pipeline:
+        1. Gate pass (if enabled): lightweight pre-screening to filter noise
+        2. Deep analysis: full classification + actionable fields
+
         Returns True if insight was created, False otherwise.
         """
         content = raw_doc.normalized_content or raw_doc.raw_content or ""
@@ -160,7 +253,29 @@ class AnalyzerService:
             await self.raw_doc_repo.update_status(raw_doc.id, "failed")
             return False
 
-        # Call Gemini
+        # --- Pass 1: Gate (when enabled) ---
+        gate_score = 0.5  # default when gate is disabled
+        if settings.enable_gate:
+            gate_result = self.gemini.gate_analyze(
+                title=raw_doc.title or "", content=content
+            )
+            if gate_result.error:
+                logger.warning(
+                    "Gate error for doc %s, proceeding with deep analysis: %s",
+                    raw_doc.id, gate_result.error,
+                )
+                gate_score = 0.5  # fail-open
+            elif not gate_result.pass_gate:
+                logger.info(
+                    "Gate filtered doc %s (score=%.2f, reason=%s)",
+                    raw_doc.id, gate_result.actionability_score, gate_result.gate_reason,
+                )
+                await self.raw_doc_repo.update_status(raw_doc.id, "low_signal")
+                return False
+            else:
+                gate_score = gate_result.actionability_score
+
+        # --- Pass 2: Deep Analysis ---
         result = self.gemini.analyze(title=raw_doc.title or "", content=content)
 
         if result.error:
@@ -179,12 +294,28 @@ class AnalyzerService:
         trust_score = TRUST_SCORE_MAP.get(source.trust_tier, 0.5)
         impact_label = IMPACT_LABEL_MAP.get(result.event_type or "", "Thấp")
 
-        # v2 actionable fields — graceful: AI fields may be None if Gemini malformed
+        # v2 actionable fields
         recommendations = _validate_recommendations(
             result.recommendations, result.affected_roles
         )
         urgency = _compute_urgency(impact_label, raw_doc.published_at)
         vietnam_relevance = _compute_vietnam_relevance(source, result.topics)
+
+        # v3 taxonomy overhaul fields
+        adoption_ring = _validate_adoption_ring(result.adoption_ring)
+
+        actionability_score = _compute_actionability_score(
+            gate_score=gate_score,
+            confidence=result.confidence,
+            trust_score=trust_score,
+            event_type=result.event_type,
+            published_at=raw_doc.published_at,
+        )
+
+        intelligence_tier = _compute_intelligence_tier(
+            actionability_score=actionability_score,
+            event_type=result.event_type,
+        )
 
         # Create insight
         await self.insight_repo.create(
@@ -208,6 +339,11 @@ class AnalyzerService:
             risks=result.risks,
             urgency=urgency,
             vietnam_relevance=vietnam_relevance,
+            actionability_score=actionability_score,
+            intelligence_tier=intelligence_tier,
+            so_what=result.so_what,
+            adoption_ring=adoption_ring,
+            practical_indicators=result.practical_indicators,
         )
 
         await self.raw_doc_repo.update_status(raw_doc.id, "analyzed")

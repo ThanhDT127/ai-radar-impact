@@ -49,6 +49,12 @@ class Insight(Base):
     momentum: Mapped[str | None] = mapped_column(String(20), nullable=True)
     urgency: Mapped[str | None] = mapped_column(String(20), nullable=True)
     vietnam_relevance: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Taxonomy overhaul v3
+    actionability_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    intelligence_tier: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    so_what: Mapped[str | None] = mapped_column(Text, nullable=True)
+    adoption_ring: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    practical_indicators: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=func.now(), onupdate=func.now()

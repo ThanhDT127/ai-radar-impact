@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import styles from '../styles/insights.module.css';
+import styles from '../styles/pagination.module.css';
 
 interface PaginationProps {
   page: number;
   total: number;
   size: number;
   onPageChange: (newPage: number) => void;
+  variant?: 'default' | 'compact';
 }
 
 function buildPages(currentPage: number, totalPages: number): Array<number | 'ellipsis'> {
@@ -44,7 +45,7 @@ function buildPages(currentPage: number, totalPages: number): Array<number | 'el
   return result;
 }
 
-export default function Pagination({ page, total, size, onPageChange }: PaginationProps) {
+export default function Pagination({ page, total, size, onPageChange, variant = 'default' }: PaginationProps) {
   const totalPages = Math.ceil(total / size);
   const [jumpPage, setJumpPage] = useState(String(page));
 
@@ -70,6 +71,32 @@ export default function Pagination({ page, total, size, onPageChange }: Paginati
       onPageChange(nextPage);
     }
   };
+
+  if (variant === 'compact') {
+    return (
+      <div className={styles.paginationCompact}>
+        <button
+          className={styles.paginationBtnCompact}
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+          aria-label="Previous page"
+        >
+          ←
+        </button>
+        <span className={styles.paginationInfoCompact}>
+          {page} / {totalPages}
+        </span>
+        <button
+          className={styles.paginationBtnCompact}
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+          aria-label="Next page"
+        >
+          →
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.paginationShell}>

@@ -2,26 +2,76 @@ import { Link, useParams } from 'react-router-dom';
 import type { InsightReference } from '../types/insight';
 import { useQuery } from '@tanstack/react-query';
 import { fetchInsightById } from '../api/insights';
-import ImpactBadge from '../components/ImpactBadge';
+
+import Breadcrumb from '../components/Breadcrumb';
 import MomentumIndicator from '../components/MomentumIndicator';
+import OriginalArticlePanel from '../components/OriginalArticlePanel';
 import RecommendationsByRole from '../components/RecommendationsByRole';
 import RelativeTime from '../components/RelativeTime';
 import RoleBadge from '../components/RoleBadge';
+import Tooltip from '../components/Tooltip';
+import { TOOLTIP } from '../components/TooltipContent';
 import UrgencyBadge from '../components/UrgencyBadge';
-import styles from '../styles/insights.module.css';
+import styles from '../styles/detail.module.css';
+import badgeStyles from '../styles/badges.module.css';
 
-function formatDateTime(isoDate: string): string {
-  return new Date(isoDate).toLocaleString('vi-VN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+import { useState } from 'react';
+
+/* ── Label maps ── */
+
+const TIER_LABEL: Record<string, string> = {
+  Tactical: 'Hành động ngay',
+  Operational: 'Vận hành',
+  Strategic: 'Chiến lược',
+  Informational: 'Tham khảo',
+};
+
+const ADOPTION_LABEL: Record<string, string> = {
+  Adopt: 'Áp dụng',
+  Trial: 'Dùng thử',
+  Assess: 'Đánh giá',
+  Hold: 'Tạm hoãn',
+};
+
+/* ── Helpers ── */
+
+function generateBullets(insight: {
+  signal?: string | null;
+  so_what?: string | null;
+  why_it_matters?: string | null;
+  summary_short?: string | null;
+  summary_medium?: string | null;
+}): string[] {
+  const bullets: string[] = [];
+  if (insight.signal) bullets.push(insight.signal.trim());
+  if (insight.so_what) bullets.push(insight.so_what.trim());
+  if (insight.why_it_matters) bullets.push(insight.why_it_matters.trim());
+  if (insight.summary_short) {
+    const sentences = insight.summary_short
+      .split(/(?<=[.。!?])\s+/)
+      .filter((s) => s.trim().length > 10);
+    for (const sentence of sentences) {
+      const clean = sentence.trim();
+      if (bullets.length >= 5) break;
+      if (!bullets.includes(clean)) bullets.push(clean);
+    }
+  }
+  if (insight.summary_medium && bullets.length < 5) {
+    const sentences = insight.summary_medium
+      .split(/(?<=[.。!?])\s+/)
+      .filter((s) => s.trim().length > 10);
+    for (const sentence of sentences) {
+      const clean = sentence.trim();
+      if (bullets.length >= 5) break;
+      if (!bullets.includes(clean)) bullets.push(clean);
+    }
+  }
+  return bullets.slice(0, 5);
 }
 
 export default function InsightDetail() {
   const { id } = useParams<{ id: string }>();
+  const [originalCollapsed, setOriginalCollapsed] = useState(false);
 
   const { data: insight, isLoading, isError } = useQuery({
     queryKey: ['insight', id],
@@ -49,150 +99,250 @@ export default function InsightDetail() {
   }
 
   const publishedValue = insight.published_at ?? insight.created_at;
+  const bullets = generateBullets(insight);
+  const hasIndicators = !!(insight.practical_indicators && (
+    insight.practical_indicators.has_code_example ||
+    insight.practical_indicators.has_benchmark ||
+    insight.practical_indicators.has_api_change ||
+    insight.practical_indicators.has_migration_guide ||
+    insight.practical_indicators.has_security_patch
+  ));
 
   return (
     <div className={styles.detailPage}>
-      <Link to="/" className={styles.backLink}>← Tất cả bản tin</Link>
+      {/* Breadcrumb */}
+      <Breadcrumb tier={insight.intelligence_tier} title={insight.title} />
 
-      <div className={styles.detailHeader}>
-        <div className={styles.detailHero}>
-          <span className={styles.sourcePill}>{insight.source_name}</span>
+      {/* ── Header Section ── */}
+      <div className={styles.detailHeaderWrap}>
+        <div className={styles.detailHeaderLeft}>
+          <div className={styles.detailSourceTime}>
+            <span className={styles.sourcePill}>{insight.source_name}</span>
+            <span className={styles.metaDot}>•</span>
+            <span className={styles.timeText}><RelativeTime value={publishedValue} /></span>
+            <span className={styles.metaDot}>•</span>
+            <a
+              href={insight.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.originalLinkButton}
+            >
+              Đọc nguồn gốc ↗
+            </a>
+          </div>
+
           <h1 className={styles.detailTitle}>{insight.title}</h1>
-          <MomentumIndicator momentum={insight.momentum} />
+
+          {/* Metadata Grid Box */}
+          <div className={styles.metaRibbon}>
+            {/* Box 1: Đánh giá & Tiên liệu */}
+            <div className={styles.metaRibbonGroup}>
+              <span className={styles.metaGroupLabel}>ĐÁNH GIÁ & TIÊN LIỆU</span>
+              <div className={styles.metaGroupContent}>
+                {insight.intelligence_tier && (
+                  <Link to={`/?intelligence_tier=${insight.intelligence_tier}`}>
+                    <Tooltip content={TOOLTIP.tier[insight.intelligence_tier as keyof typeof TOOLTIP.tier] ?? ''}>
+                      <span className={`${styles.tierBadgeInline} ${styles[`tier${insight.intelligence_tier}`]} ${styles.clickableBadge}`}>
+                        {TIER_LABEL[insight.intelligence_tier] ?? insight.intelligence_tier}
+                      </span>
+                    </Tooltip>
+                  </Link>
+                )}
+                {insight.urgency && (
+                  <Link to={`/?urgency=${insight.urgency}`}>
+                    <span className={styles.clickableBadge}>
+                      <UrgencyBadge urgency={insight.urgency} />
+                    </span>
+                  </Link>
+                )}
+                {insight.momentum && (
+                  <Link to={`/?momentum=${insight.momentum}`}>
+                    <span className={styles.clickableBadge}>
+                      <MomentumIndicator momentum={insight.momentum} />
+                    </span>
+                  </Link>
+                )}
+                {insight.adoption_ring && (
+                  <Tooltip content={TOOLTIP.adoption[insight.adoption_ring as keyof typeof TOOLTIP.adoption] ?? ''}>
+                    <span className={`${badgeStyles.adoptionBadgeInline} ${badgeStyles[`adoption${insight.adoption_ring}`]}`}>
+                      {ADOPTION_LABEL[insight.adoption_ring] ?? insight.adoption_ring}
+                    </span>
+                  </Tooltip>
+                )}
+              </div>
+            </div>
+
+            {/* Box 2: Phạm vi tác động */}
+            <div className={styles.metaRibbonGroup}>
+              <span className={styles.metaGroupLabel}>PHẠM VI TÁC ĐỘNG</span>
+              <div className={styles.metaGroupContent}>
+                {insight.affected_roles.map((role) => (
+                  <Link key={role} to={`/?role=${role}`}>
+                    <RoleBadge role={role} />
+                  </Link>
+                ))}
+                {insight.topics.map((topic) => (
+                  <Link key={topic} to={`/?search=${topic}`}>
+                    <span className={`${badgeStyles.topicTag} ${styles.clickableBadge}`}>{topic}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            {/* Box 3: Chỉ số thực hành */}
+            {hasIndicators && (
+              <div className={styles.metaRibbonGroup}>
+                <span className={styles.metaGroupLabel}>CHỈ SỐ THỰC HÀNH</span>
+                <div className={styles.metaGroupContent}>
+                  {insight.practical_indicators!.has_code_example && (
+                    <Tooltip content={TOOLTIP.practicalIndicators.has_code}>
+                      <span className={badgeStyles.indicatorIcon}>💻 Mã nguồn</span>
+                    </Tooltip>
+                  )}
+                  {insight.practical_indicators!.has_benchmark && (
+                    <Tooltip content={TOOLTIP.practicalIndicators.has_benchmark}>
+                      <span className={badgeStyles.indicatorIcon}>📊 Benchmark</span>
+                    </Tooltip>
+                  )}
+                  {insight.practical_indicators!.has_api_change && (
+                    <Tooltip content={TOOLTIP.practicalIndicators.has_api_change}>
+                      <span className={badgeStyles.indicatorIcon}>🔗 API</span>
+                    </Tooltip>
+                  )}
+                  {insight.practical_indicators!.has_migration_guide && (
+                    <Tooltip content={TOOLTIP.practicalIndicators.has_migration}>
+                      <span className={badgeStyles.indicatorIcon}>📖 Hướng dẫn chuyển đổi</span>
+                    </Tooltip>
+                  )}
+                  {insight.practical_indicators!.has_security_patch && (
+                    <Tooltip content={TOOLTIP.practicalIndicators.has_security}>
+                      <span className={badgeStyles.indicatorIcon}>🛡️ Bản vá bảo mật</span>
+                    </Tooltip>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-        <div className={styles.cardBadges}>
-          {insight.urgency
-            ? <UrgencyBadge urgency={insight.urgency} />
-            : <ImpactBadge label={insight.impact_label} />}
-        </div>
+
+        {insight.primary_image && (
+          <div className={styles.detailHeaderRight}>
+            <img
+              src={insight.primary_image}
+              alt=""
+              className={styles.detailCoverImage}
+            />
+          </div>
+        )}
       </div>
 
-      <div className={styles.detailMeta}>
-        <span><RelativeTime value={publishedValue} /></span>
-        <span className={styles.metaDot}>•</span>
-        <span>{insight.event_type ?? 'Bản tin tổng hợp'}</span>
-        <span className={styles.metaDot}>•</span>
-        <span>{insight.nature ?? 'Thông tin chung'}</span>
-        <span className={styles.metaDot}>•</span>
-        <span>Tin cậy {Math.round(insight.trust_score * 100)}%</span>
-      </div>
-
-      <div className={styles.detailBody}>
-        {insight.signal && (
-          <section className={styles.detailSection}>
-            <p className={styles.detailSectionLabel}>Tín hiệu chính</p>
-            <p className={styles.detailSummaryShort}>{insight.signal}</p>
-          </section>
-        )}
-
-        {insight.why_it_matters && (
-          <section className={styles.detailSection}>
-            <p className={styles.detailSectionLabel}>Tại sao quan trọng</p>
-            <p className={styles.detailSummaryMedium}>{insight.why_it_matters}</p>
-          </section>
-        )}
-
-        {insight.summary_short && (
-          <section className={styles.detailSection}>
-            <p className={styles.detailSectionLabel}>Tóm tắt</p>
-            <p className={styles.detailSummaryShort}>{insight.summary_short}</p>
-          </section>
-        )}
-
-        {insight.summary_medium && (
-          <section className={styles.detailSection}>
-            <p className={styles.detailSectionLabel}>Phân tích chi tiết</p>
-            <p className={styles.detailSummaryMedium}>{insight.summary_medium}</p>
-          </section>
-        )}
-
-        {insight.recommendations && Object.keys(insight.recommendations).length > 0 && (
-          <section className={styles.detailSection}>
-            <p className={styles.detailSectionLabel}>Khuyến nghị theo vai trò</p>
-            <RecommendationsByRole recommendations={insight.recommendations} />
-          </section>
-        )}
-
-        {insight.risks && insight.risks.length > 0 && (
-          <section className={styles.detailSection}>
-            <p className={styles.detailSectionLabel}>Rủi ro cần cân nhắc</p>
-            <ul className={styles.risksList}>
-              {insight.risks.map((risk, idx) => (
-                <li key={idx}>{risk}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {insight.affected_roles.length > 0 && (
-          <section className={styles.detailSection}>
-            <p className={styles.detailSectionLabel}>Vai trò ảnh hưởng</p>
-            <div className={styles.roleList}>
-              {insight.affected_roles.map((role) => (
-                <RoleBadge key={role} role={role} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {insight.topics.length > 0 && (
-          <section className={styles.detailSection}>
-            <p className={styles.detailSectionLabel}>Chủ đề</p>
-            <div className={styles.topicList}>
-              {insight.topics.map((topic) => (
-                <span key={topic} className={styles.topicTag}>{topic}</span>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {insight.references && insight.references.length > 0 && (
-          <section className={styles.detailSection}>
-            <p className={styles.detailSectionLabel}>Bài viết liên quan từ nguồn khác</p>
-            <ul className={styles.referenceList}>
-              {insight.references.map((ref: InsightReference) => (
-                <li key={ref.id} className={styles.referenceItem}>
-                  <span className={styles.sourcePill}>{ref.source_name}</span>
-                  <a
-                    href={ref.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={styles.referenceLink}
-                  >
-                    {ref.title}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        <section className={styles.detailTimeline}>
-          <div className={styles.timelineCard}>
-            <p className={styles.detailSectionLabel}>Xuất bản</p>
-            <strong>{formatDateTime(publishedValue)}</strong>
+      {/* 💡 Core Summary (So What) on top */}
+      {insight.so_what && (
+        <section className={styles.detailHeaderSoWhat}>
+          <div className={styles.detailSoWhatHeader}>
+            <span className="sectionIcon">💡</span>
+            <strong>Ý nghĩa cốt lõi (So What)</strong>
           </div>
-          <div className={styles.timelineCard}>
-            <p className={styles.detailSectionLabel}>Phân tích</p>
-            <strong>{formatDateTime(insight.created_at)}</strong>
-          </div>
+          <p>{insight.so_what}</p>
         </section>
-      </div>
+      )}
 
-      <div className={styles.detailFooter}>
-        <div className={styles.sourceMeta}>
-          <p className={styles.detailSectionLabel}>Nguồn</p>
-          <strong>{insight.source_name}</strong>
-          <span>{insight.source_type.toUpperCase()}</span>
+      {/* ── 50/50 Split View: Phân tích | Bản gốc ── */}
+      <div className={styles.detailSplitView}>
+
+        {/* LEFT COLUMN: AI Analysis (Vietnamese) */}
+        <div className={styles.detailSplitLeft}>
+
+          {/* Tóm tắt & Phân tích chi tiết */}
+          {insight.summary_medium && (
+            <section className={`${styles.detailSection} ${styles.detailSectionInfo}`}>
+              <div className={styles.detailSectionHeader}>
+                <span className="sectionIcon">🔎</span>
+                <span>Tóm tắt & Phân tích chi tiết</span>
+              </div>
+              <p className={styles.detailSummaryMedium}>{insight.summary_medium}</p>
+            </section>
+          )}
+
+          {/* Những điều cần biết (max 5 bullets) */}
+          {bullets.length > 0 && (
+            <section className={`${styles.detailSection} ${styles.detailSectionNeutral}`}>
+              <div className={styles.detailSectionHeader}>
+                <span className="sectionIcon">📋</span>
+                <span>Những điều cần biết</span>
+              </div>
+              <ul className={styles.detailBullets}>
+                {bullets.map((bullet, idx) => (
+                  <li key={idx}>{bullet}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Khuyến nghị hành động */}
+          {insight.recommendations && Object.keys(insight.recommendations).length > 0 && (
+            <section className={`${styles.detailSection} ${styles.detailSectionSuccess}`}>
+              <div className={styles.detailSectionHeader}>
+                <span className="sectionIcon">👥</span>
+                <span>Bạn nên làm gì? (Khuyến nghị theo vai trò)</span>
+              </div>
+              <RecommendationsByRole recommendations={insight.recommendations} />
+            </section>
+          )}
+
+          {/* Rủi ro */}
+          {insight.risks && insight.risks.length > 0 && (
+            <section className={`${styles.detailSection} ${styles.detailSectionDanger}`}>
+              <div className={styles.detailSectionHeader}>
+                <span className="sectionIcon">⚠️</span>
+                <span>Rủi ro cần lưu ý</span>
+              </div>
+              <ul className={styles.risksList}>
+                {insight.risks.map((risk, idx) => (
+                  <li key={idx}>{risk}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Footer: verification + references */}
+          <div className={styles.splitLeftFooter}>
+            <div className={styles.verificationBadge}>
+              <span>🤖 Phân tích tự động bởi Gemini AI</span>
+            </div>
+
+            {insight.references && insight.references.length > 0 && (
+              <div className={styles.splitLeftReferences}>
+                <h4>Các tin liên quan trong luồng:</h4>
+                <ul className={styles.referenceList}>
+                  {insight.references.map((ref: InsightReference) => (
+                    <li key={ref.id} className={styles.referenceItem}>
+                      <span className={styles.sourcePill}>{ref.source_name}</span>
+                      <a href={ref.source_url} target="_blank" rel="noopener noreferrer" className={styles.referenceLink}>
+                        {ref.title}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
-        <a
-          href={insight.source_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={styles.sourceLink}
-        >
-          Xem bài gốc
-        </a>
+
+        {/* RIGHT COLUMN: Original Article (always visible) */}
+        <div className={styles.detailSplitRight}>
+          <OriginalArticlePanel
+            sourceUrl={insight.source_url}
+            title={insight.title}
+            sourceName={insight.source_name}
+            publishedAt={publishedValue}
+            contentText={insight.content_text}
+            primaryImage={insight.primary_image}
+            collapsed={originalCollapsed}
+            onToggle={() => setOriginalCollapsed((prev) => !prev)}
+          />
+        </div>
+
       </div>
     </div>
   );

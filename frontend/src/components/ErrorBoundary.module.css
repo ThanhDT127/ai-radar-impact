@@ -1,0 +1,51 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: var(--space-10);
+  text-align: center;
+  gap: var(--space-4);
+}
+
+.icon {
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.message {
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  max-width: 480px;
+  line-height: var(--leading-relaxed);
+}
+
+.reload {
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  font-weight: 600;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--transition), transform var(--transition-fast);
+  margin-top: var(--space-2);
+}
+
+.reload:hover {
+  background: var(--color-accent-strong);
+  transform: translateY(-1px);
+}
+
+.reload:active {
+  transform: scale(0.97);
+}

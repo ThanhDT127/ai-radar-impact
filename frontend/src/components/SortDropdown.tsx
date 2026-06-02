@@ -1,6 +1,6 @@
 import styles from '../styles/dashboard.module.css';
 
-export type InsightSort = 'created_at' | 'published_at' | 'urgency' | 'trust_score';
+export type InsightSort = 'created_at' | 'published_at' | 'urgency' | 'trust_score' | 'actionability_score';
 
 interface SortDropdownProps {
   value: InsightSort;
@@ -11,7 +11,6 @@ const OPTIONS: Array<{ value: InsightSort; label: string }> = [
   { value: 'created_at', label: 'Mới nhất' },
   { value: 'published_at', label: 'Theo ngày xuất bản' },
   { value: 'urgency', label: 'Ảnh hưởng cao nhất' },
-  { value: 'trust_score', label: 'Tin cậy cao nhất' },
 ];
 
 export default function SortDropdown({ value, onChange }: SortDropdownProps) {

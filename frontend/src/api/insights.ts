@@ -1,20 +1,16 @@
-import axios from 'axios';
 import type { InsightDetail, InsightListItem, PaginatedResponse } from '../types/insight';
-
-const api = axios.create({
-  baseURL: '/api/v1',
-  headers: { 'Content-Type': 'application/json' },
-});
+import { apiClient as api } from './client';
 
 export interface FetchInsightsParams {
   page?: number;
   size?: number;
   role?: string[] | null;
   source_id?: string[] | null;
-  sort_by?: 'urgency' | 'created_at' | 'published_at' | 'impact_label' | 'trust_score';
+  sort_by?: 'urgency' | 'created_at' | 'published_at' | 'impact_label' | 'trust_score' | 'actionability_score';
   urgency?: string[] | null;
   momentum?: string[] | null;
   vietnam_relevance?: string[] | null;
+  intelligence_tier?: string[] | null;
 }
 
 export async function fetchInsights(
@@ -29,6 +25,7 @@ export async function fetchInsights(
     urgency,
     momentum,
     vietnam_relevance,
+    intelligence_tier,
   } = params;
   const query: Record<string, string | number> = { page, size };
 
@@ -39,6 +36,9 @@ export async function fetchInsights(
   if (momentum && momentum.length > 0) query.momentum = momentum.join(',');
   if (vietnam_relevance && vietnam_relevance.length > 0) {
     query.vietnam_relevance = vietnam_relevance.join(',');
+  }
+  if (intelligence_tier && intelligence_tier.length > 0) {
+    query.intelligence_tier = intelligence_tier.join(',');
   }
 
   const { data } = await api.get<PaginatedResponse<InsightListItem>>('/insights', {
