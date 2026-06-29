@@ -35,3 +35,6 @@ node_modules/
 # Temporary/Scratch files
 backend/source_stats.txt
 backend/scratch_analyse_sources.py
+
+# Generated documents
+docs/ignored/
