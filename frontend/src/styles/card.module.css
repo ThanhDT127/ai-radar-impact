@@ -408,3 +408,32 @@ html[data-theme="dark"] .adoptionBadgeInline {
   border-color: rgba(139, 92, 246, 0.15);
   color: var(--color-text-secondary);
 }
+
+/* ── Technical Signals Row ────────────────────────── */
+
+.technicalSignalsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.technicalSignalBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.16);
+  color: #059669;
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+html[data-theme="dark"] .technicalSignalBadge {
+  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(52, 211, 153, 0.16);
+  color: #34d399;
+}

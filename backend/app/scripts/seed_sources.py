@@ -32,7 +32,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo"],
         "status": "active",
-        "config": {"max_items": 20, "language": "en"},
+        "config": {"max_items": 20, "language": "en", "fetch_full_content": True},
     },
     {
         "name": "Microsoft AI Blog",
@@ -41,7 +41,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo", "Công nghệ"],
         "status": "active",
-        "config": {"max_items": 20, "language": "en"},
+        "config": {"max_items": 20, "language": "en", "fetch_full_content": True},
     },
     {
         "name": "Google AI Blog",
@@ -50,7 +50,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo"],
         "status": "active",
-        "config": {"max_items": 20, "language": "en"},
+        "config": {"max_items": 20, "language": "en", "fetch_full_content": True},
     },
     {
         "name": "Google DeepMind",
@@ -59,7 +59,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo", "Dữ liệu"],
         "status": "active",
-        "config": {"max_items": 20, "language": "en"},
+        "config": {"max_items": 20, "language": "en", "fetch_full_content": True},
     },
     {
         "name": "AWS What's New",
@@ -140,7 +140,7 @@ INITIAL_SOURCES = [
         "trust_tier": "high",
         "topics": ["Công nghệ", "An ninh mạng"],
         "status": "active",
-        "config": {"max_items": 20, "language": "en"},
+        "config": {"max_items": 20, "language": "en", "fetch_full_content": True},
     },
     {
         "name": "VnExpress Số hóa",
@@ -149,7 +149,7 @@ INITIAL_SOURCES = [
         "trust_tier": "medium",
         "topics": ["Công nghệ", "Trí tuệ nhân tạo"],
         "status": "active",
-        "config": {"max_items": 20, "language": "vi"},
+        "config": {"max_items": 20, "language": "vi", "fetch_full_content": True},
     },
     {
         "name": "HackerNews",
@@ -289,7 +289,7 @@ INITIAL_SOURCES = [
         "status": "active",
         "region": "china",
         "target_roles": ["Engineering", "Data/AI"],
-        "config": {"max_items": 10, "language": "en"},
+        "config": {"max_items": 10, "language": "en", "min_content_length": 0},
     },
     {
         "name": "Yi 01.AI Releases",
@@ -300,7 +300,7 @@ INITIAL_SOURCES = [
         "status": "active",
         "region": "china",
         "target_roles": ["Engineering", "Data/AI"],
-        "config": {"max_items": 10, "language": "en"},
+        "config": {"max_items": 10, "language": "en", "min_content_length": 0},
     },
     # Phase 2A: Global AI / Dev / DevOps / Security expansion (expand-source-coverage-2a 2026-05-11)
     # Note: Anthropic + Papers With Code defer — no working RSS endpoint found.
@@ -328,7 +328,7 @@ INITIAL_SOURCES = [
         "status": "active",
         "region": "global",
         "target_roles": ["Engineering"],
-        "config": {"max_items": 15, "language": "en"},
+        "config": {"max_items": 15, "language": "en", "fetch_full_content": True},
     },
     {
         "name": "dev.to AI",
@@ -405,7 +405,7 @@ INITIAL_SOURCES = [
         "status": "active",
         "region": "global",
         "target_roles": ["Security", "Engineering"],
-        "config": {"max_items": 12, "language": "en"},
+        "config": {"max_items": 12, "language": "en", "fetch_full_content": True},
     },
     {
         "name": "Microsoft Security Blog",
@@ -440,7 +440,7 @@ INITIAL_SOURCES = [
         "status": "active",
         "region": "vietnam",
         "target_roles": ["Toàn công ty", "Engineering"],
-        "config": {"max_items": 15, "language": "vi"},
+        "config": {"max_items": 15, "language": "vi", "fetch_full_content": True},
     },
     {
         "name": "VietnamNet ICT",
@@ -451,7 +451,7 @@ INITIAL_SOURCES = [
         "status": "active",
         "region": "vietnam",
         "target_roles": ["Toàn công ty", "Executive"],
-        "config": {"max_items": 10, "language": "vi"},
+        "config": {"max_items": 10, "language": "vi", "fetch_full_content": True},
     },
     {
         "name": "Viblo",
@@ -669,7 +669,7 @@ INITIAL_SOURCES = [
         "status": "active",
         "region": "vietnam",
         "target_roles": ["Engineering", "Data/AI", "Product"],
-        "config": {"max_items": 15, "language": "vi"},
+        "config": {"max_items": 15, "language": "vi", "fetch_full_content": True},
     },
     {
         "name": "ICTNews Công nghệ",
@@ -706,7 +706,15 @@ async def seed() -> None:
             existing = result.scalar_one_or_none()
 
             if existing:
-                logger.info("Source already exists: %s - skipping", data["name"])
+                existing.config = data.get("config", {})
+                existing.feed_url = data.get("feed_url")
+                existing.trust_tier = data.get("trust_tier")
+                existing.topics = data.get("topics", [])
+                existing.region = data.get("region", "global")
+                existing.target_roles = data.get("target_roles", [])
+                session.add(existing)
+                await session.commit()
+                logger.info("Updated source configuration: %s", data["name"])
                 continue
 
             source = Source(**data)

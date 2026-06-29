@@ -46,6 +46,10 @@ async def list_insights(
         description="Sort order: urgency | created_at | published_at | impact_label | trust_score | actionability_score",
         pattern="^(urgency|created_at|published_at|impact_label|trust_score|actionability_score)$",
     ),
+    search: str | None = Query(
+        default=None,
+        description="Optional search query keyword for filtering insights",
+    ),
     session: AsyncSession = Depends(get_session),
 ) -> PaginatedResponse[InsightListItem]:
     """Return a paginated list of published insights with optional filters and sort."""
@@ -89,6 +93,7 @@ async def list_insights(
         momentum=momentum_list,
         vietnam_relevance=vietnam_list,
         intelligence_tier=tier_list,
+        search=search,
     )
     return PaginatedResponse(
         page=page,

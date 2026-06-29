@@ -1,4 +1,4 @@
-import { startTransition, useMemo, useState } from 'react';
+import { startTransition, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchInsights } from '../api/insights';
@@ -111,7 +111,7 @@ export default function InsightList() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const page = parseInt(searchParams.get('page') ?? '1', 10);
-  const sortBy = (searchParams.get('sort_by') as InsightSort) ?? 'created_at';
+  const sortBy = (searchParams.get('sort_by') as InsightSort) ?? 'published_at';
   const selectedSourceIds = useMemo(() => searchParams.get('source_id')?.split(',').filter(Boolean) ?? [], [searchParams]);
   const selectedRoles = useMemo(() => searchParams.get('role')?.split(',').filter(Boolean) ?? [], [searchParams]);
   const selectedUrgency = useMemo(() => searchParams.get('urgency')?.split(',').filter(Boolean) ?? [], [searchParams]);
@@ -120,9 +120,15 @@ export default function InsightList() {
   const selectedTier = useMemo(() => searchParams.get('intelligence_tier')?.split(',').filter(Boolean) ?? [], [searchParams]);
   const searchQuery = searchParams.get('search') ?? '';
 
+  const [searchInput, setSearchInput] = useState(searchQuery);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sourceQuery, setSourceQuery] = useState('');
   const [showAllSources, setShowAllSources] = useState(false);
+
+  // Sync input value when searchQuery from URL changes
+  useEffect(() => {
+    setSearchInput(searchQuery);
+  }, [searchQuery]);
 
   const updateFilterParams = (key: string, values: string[] | string | number | null) => {
     const newParams = new URLSearchParams(searchParams);
@@ -142,6 +148,17 @@ export default function InsightList() {
     setSearchParams(newParams);
   };
 
+  // Debounce search input changes to update URL search parameter
+  useEffect(() => {
+    if (searchInput === searchQuery) return;
+
+    const delayDebounceFn = setTimeout(() => {
+      updateFilterParams('search', searchInput || null);
+    }, 300);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchInput, searchQuery]);
+
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['insight-stats'],
     queryFn: fetchInsightStats,
@@ -157,6 +174,7 @@ export default function InsightList() {
       'insights', page, sortBy,
       selectedSourceIds, selectedRoles,
       selectedUrgency, selectedMomentum, selectedVietnam, selectedTier,
+      searchQuery,
     ],
     queryFn: () =>
       fetchInsights({
@@ -169,23 +187,14 @@ export default function InsightList() {
         momentum: selectedMomentum.length > 0 ? selectedMomentum : null,
         vietnam_relevance: selectedVietnam.length > 0 ? selectedVietnam : null,
         intelligence_tier: selectedTier.length > 0 ? selectedTier : null,
+        search: searchQuery || null,
       }),
   });
 
-  // Client-side search filter applied on top of server-filtered results
+  // Display insights directly from query (since filtering happens on the server)
   const filteredItems = useMemo(() => {
-    if (!searchQuery.trim() || !overviewQuery.data?.items) {
-      return overviewQuery.data?.items ?? [];
-    }
-    const q = searchQuery.toLowerCase();
-    return overviewQuery.data.items.filter(item =>
-      item.title.toLowerCase().includes(q) ||
-      (item.summary_short?.toLowerCase().includes(q)) ||
-      (item.so_what?.toLowerCase().includes(q)) ||
-      item.topics.some(t => t.toLowerCase().includes(q)) ||
-      item.affected_roles.some(r => r.toLowerCase().includes(q))
-    );
-  }, [searchQuery, overviewQuery.data?.items]);
+    return overviewQuery.data?.items ?? [];
+  }, [overviewQuery.data?.items]);
 
   const sortedSources = useMemo(
     () => [...sources].sort((l, r) => r.insight_count - l.insight_count || l.name.localeCompare(r.name)),
@@ -354,6 +363,16 @@ export default function InsightList() {
       <section className={styles.panel}>
         <div className={dashStyles.toolbar}>
           <div className={dashStyles.toolbarLeft}>
+            <div className={dashStyles.searchContainer}>
+              <span className={dashStyles.searchIcon}>🔍</span>
+              <input
+                type="search"
+                placeholder="Tìm kiếm bản tin..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className={dashStyles.globalSearchInput}
+              />
+            </div>
             <SortDropdown value={sortBy} onChange={(newSort) => updateFilterParams('sort_by', newSort)} />
             <button
               className={presetUrgentActive ? dashStyles.presetActive : dashStyles.preset}

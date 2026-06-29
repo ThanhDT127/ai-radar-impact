@@ -11,6 +11,7 @@ export interface FetchInsightsParams {
   momentum?: string[] | null;
   vietnam_relevance?: string[] | null;
   intelligence_tier?: string[] | null;
+  search?: string | null;
 }
 
 export async function fetchInsights(
@@ -26,6 +27,7 @@ export async function fetchInsights(
     momentum,
     vietnam_relevance,
     intelligence_tier,
+    search,
   } = params;
   const query: Record<string, string | number> = { page, size };
 
@@ -39,6 +41,9 @@ export async function fetchInsights(
   }
   if (intelligence_tier && intelligence_tier.length > 0) {
     query.intelligence_tier = intelligence_tier.join(',');
+  }
+  if (search) {
+    query.search = search;
   }
 
   const { data } = await api.get<PaginatedResponse<InsightListItem>>('/insights', {

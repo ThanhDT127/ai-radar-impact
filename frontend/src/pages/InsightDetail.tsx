@@ -71,7 +71,18 @@ function generateBullets(insight: {
 
 export default function InsightDetail() {
   const { id } = useParams<{ id: string }>();
-  const [originalCollapsed, setOriginalCollapsed] = useState(false);
+  const [viewMode, setViewMode] = useState<'split' | 'focus-ai' | 'focus-original'>(() => {
+    return (localStorage.getItem('radar-view-mode') as any) || 'split';
+  });
+
+  const changeViewMode = (mode: 'split' | 'focus-ai' | 'focus-original') => {
+    const currentScrollY = window.scrollY;
+    setViewMode(mode);
+    localStorage.setItem('radar-view-mode', mode);
+    setTimeout(() => {
+      window.scrollTo(0, currentScrollY);
+    }, 50);
+  };
 
   const { data: insight, isLoading, isError } = useQuery({
     queryKey: ['insight', id],
@@ -247,14 +258,59 @@ export default function InsightDetail() {
         </section>
       )}
 
+      {/* ── View Mode Controls ── */}
+      <div className={styles.viewModeToolbar}>
+        <span className={styles.viewModeLabel}>Chế độ xem:</span>
+        <button
+          type="button"
+          className={`${styles.viewModeButton} ${viewMode === 'split' ? styles.viewModeActive : ''}`}
+          onClick={(e) => { e.preventDefault(); changeViewMode('split'); }}
+          title="Xem song ngữ song song 50/50"
+        >
+          ⚖️ Song song
+        </button>
+        <button
+          type="button"
+          className={`${styles.viewModeButton} ${viewMode === 'focus-ai' ? styles.viewModeActive : ''}`}
+          onClick={(e) => { e.preventDefault(); changeViewMode('focus-ai'); }}
+          title="Xem phân tích chi tiết tiếng Việt (80/20)"
+        >
+          🤖 Phân tích chi tiết
+        </button>
+        <button
+          type="button"
+          className={`${styles.viewModeButton} ${viewMode === 'focus-original' ? styles.viewModeActive : ''}`}
+          onClick={(e) => { e.preventDefault(); changeViewMode('focus-original'); }}
+          title="Xem bài viết gốc tiếng Anh (20/80)"
+        >
+          📰 Bài viết gốc
+        </button>
+      </div>
+
       {/* ── 50/50 Split View: Phân tích | Bản gốc ── */}
-      <div className={styles.detailSplitView}>
+      <div className={`${styles.detailSplitView} ${styles[viewMode === 'split' ? 'layoutSplit' : (viewMode === 'focus-ai' ? 'layoutFocusAI' : 'layoutFocusOriginal')]}`}>
 
         {/* LEFT COLUMN: AI Analysis (Vietnamese) */}
         <div className={styles.detailSplitLeft}>
 
+          {/* Focus Original Mode - Sidebar AI Mini */}
+          {viewMode === 'focus-original' && (
+            <div className={styles.focusOriginalSidebar}>
+              <h3 className={styles.sidebarMiniTitle}>{insight.title}</h3>
+              <button 
+                type="button"
+                className={styles.sidebarExpandButton}
+                onClick={(e) => { e.preventDefault(); changeViewMode('split'); }}
+                title="Mở rộng phân tích AI"
+                style={{ marginTop: '12px', display: 'block' }}
+              >
+                Xem phân tích chi tiết ▶
+              </button>
+            </div>
+          )}
+
           {/* Tóm tắt & Phân tích chi tiết */}
-          {insight.summary_medium && (
+          {insight.summary_medium && viewMode !== 'focus-original' && (
             <section className={`${styles.detailSection} ${styles.detailSectionInfo}`}>
               <div className={styles.detailSectionHeader}>
                 <span className="sectionIcon">🔎</span>
@@ -265,7 +321,7 @@ export default function InsightDetail() {
           )}
 
           {/* Những điều cần biết (max 5 bullets) */}
-          {bullets.length > 0 && (
+          {bullets.length > 0 && viewMode !== 'focus-original' && (
             <section className={`${styles.detailSection} ${styles.detailSectionNeutral}`}>
               <div className={styles.detailSectionHeader}>
                 <span className="sectionIcon">📋</span>
@@ -280,7 +336,7 @@ export default function InsightDetail() {
           )}
 
           {/* Khuyến nghị hành động */}
-          {insight.recommendations && Object.keys(insight.recommendations).length > 0 && (
+          {insight.recommendations && Object.keys(insight.recommendations).length > 0 && viewMode !== 'focus-original' && (
             <section className={`${styles.detailSection} ${styles.detailSectionSuccess}`}>
               <div className={styles.detailSectionHeader}>
                 <span className="sectionIcon">👥</span>
@@ -291,7 +347,7 @@ export default function InsightDetail() {
           )}
 
           {/* Rủi ro */}
-          {insight.risks && insight.risks.length > 0 && (
+          {insight.risks && insight.risks.length > 0 && viewMode !== 'focus-original' && (
             <section className={`${styles.detailSection} ${styles.detailSectionDanger}`}>
               <div className={styles.detailSectionHeader}>
                 <span className="sectionIcon">⚠️</span>
@@ -306,27 +362,29 @@ export default function InsightDetail() {
           )}
 
           {/* Footer: verification + references */}
-          <div className={styles.splitLeftFooter}>
-            <div className={styles.verificationBadge}>
-              <span>🤖 Phân tích tự động bởi Gemini AI</span>
-            </div>
-
-            {insight.references && insight.references.length > 0 && (
-              <div className={styles.splitLeftReferences}>
-                <h4>Các tin liên quan trong luồng:</h4>
-                <ul className={styles.referenceList}>
-                  {insight.references.map((ref: InsightReference) => (
-                    <li key={ref.id} className={styles.referenceItem}>
-                      <span className={styles.sourcePill}>{ref.source_name}</span>
-                      <a href={ref.source_url} target="_blank" rel="noopener noreferrer" className={styles.referenceLink}>
-                        {ref.title}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
+          {viewMode !== 'focus-original' && (
+            <div className={styles.splitLeftFooter}>
+              <div className={styles.verificationBadge}>
+                <span>🤖 Phân tích tự động bởi Gemini AI</span>
               </div>
-            )}
-          </div>
+
+              {insight.references && insight.references.length > 0 && (
+                <div className={styles.splitLeftReferences}>
+                  <h4>Các tin liên quan trong luồng:</h4>
+                  <ul className={styles.referenceList}>
+                    {insight.references.map((ref: InsightReference) => (
+                      <li key={ref.id} className={styles.referenceItem}>
+                        <span className={styles.sourcePill}>{ref.source_name}</span>
+                        <a href={ref.source_url} target="_blank" rel="noopener noreferrer" className={styles.referenceLink}>
+                          {ref.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* RIGHT COLUMN: Original Article (always visible) */}
@@ -338,8 +396,14 @@ export default function InsightDetail() {
             publishedAt={publishedValue}
             contentText={insight.content_text}
             primaryImage={insight.primary_image}
-            collapsed={originalCollapsed}
-            onToggle={() => setOriginalCollapsed((prev) => !prev)}
+            collapsed={viewMode === 'focus-ai'}
+            onToggle={() => {
+              if (viewMode === 'focus-ai') {
+                changeViewMode('split');
+              } else {
+                changeViewMode('focus-ai');
+              }
+            }}
           />
         </div>
 

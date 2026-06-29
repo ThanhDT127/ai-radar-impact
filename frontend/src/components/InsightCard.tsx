@@ -66,22 +66,22 @@ const ROLE_SHORT_LABEL: Record<string, string> = {
   'Designer/UX': 'UX',
 };
 
-function generateCardBullets(insight: InsightListItem): string[] {
+function generateCardBullets(insight: InsightListItem, displayTitle?: string): string[] {
   const bullets: string[] = [];
   if (insight.signal) bullets.push(insight.signal.trim());
   if (insight.so_what) bullets.push(insight.so_what.trim());
   if (insight.why_it_matters) bullets.push(insight.why_it_matters.trim());
-  if (insight.summary_short) {
+  if (insight.summary_short && insight.summary_short !== displayTitle) {
     const sentences = insight.summary_short
       .split(/(?<=[.。!?])\s+/)
       .filter((s) => s.trim().length > 10);
     for (const sentence of sentences) {
       const clean = sentence.trim();
-      if (bullets.length >= 5) break;
+      if (bullets.length >= 3) break;
       if (!bullets.includes(clean)) bullets.push(clean);
     }
   }
-  return bullets.slice(0, 5);
+  return bullets.slice(0, 3);
 }
 
 export default function InsightCard({ insight, index = 0 }: InsightCardProps) {
@@ -93,7 +93,7 @@ export default function InsightCard({ insight, index = 0 }: InsightCardProps) {
   const tier = insight.intelligence_tier;
   const tierColor = tier ? (TIER_BORDER[tier] ?? 'var(--color-border)') : 'var(--color-border)';
   const tierGlow = tier ? (TIER_GLOW[tier] ?? 'transparent') : 'transparent';
-  const bullets = generateCardBullets(insight);
+  const bullets = generateCardBullets(insight, displayTitle);
 
   const [imageError, setImageError] = useState(false);
   const showImage = !!primaryImage && !imageError;
@@ -163,7 +163,20 @@ export default function InsightCard({ insight, index = 0 }: InsightCardProps) {
         {/* Title */}
         <h3 className={styles.cardTitle}>{displayTitle}</h3>
 
-        {/* 5-bullet summary */}
+        {/* Technical Signals Row */}
+        {(insight.practical_indicators?.has_code_example || 
+          insight.practical_indicators?.has_benchmark || 
+          insight.practical_indicators?.has_api_change || 
+          insight.practical_indicators?.has_security_patch) && (
+          <div className={styles.technicalSignalsRow}>
+            {insight.practical_indicators.has_code_example && <span className={styles.technicalSignalBadge} title="Bài viết có chứa mã nguồn mẫu">💻 Có code mẫu</span>}
+            {insight.practical_indicators.has_benchmark && <span className={styles.technicalSignalBadge} title="Bài viết có số liệu đo đạc, benchmark hiệu năng">📊 Có benchmark</span>}
+            {insight.practical_indicators.has_api_change && <span className={styles.technicalSignalBadge} title="Bài viết đề cập đến việc thay đổi API/cú pháp">🔗 Thay đổi API</span>}
+            {insight.practical_indicators.has_security_patch && <span className={styles.technicalSignalBadge} title="Bài viết có chứa bản vá hoặc thông tin bảo mật">🛡️ Bảo mật</span>}
+          </div>
+        )}
+
+        {/* Bullets summary (max 3) */}
         {bullets.length > 0 && (
           <ul className={styles.cardBullets}>
             {bullets.map((bullet, idx) => (

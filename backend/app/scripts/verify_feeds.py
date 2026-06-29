@@ -14,7 +14,11 @@ from app.scripts.seed_sources import INITIAL_SOURCES
 def main() -> int:
     failures = 0
 
-    for index, source in enumerate(INITIAL_SOURCES, start=1):
+    rss_sources = [
+        s for s in INITIAL_SOURCES if s.get("source_type") == "rss" and s.get("feed_url")
+    ]
+
+    for index, source in enumerate(rss_sources, start=1):
         url = source["feed_url"]
         feed = feedparser.parse(url)
 

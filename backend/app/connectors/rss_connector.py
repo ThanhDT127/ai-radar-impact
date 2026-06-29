@@ -7,6 +7,7 @@ import feedparser
 
 from app.connectors.base import BaseConnector, ConnectorEntry
 from app.connectors.registry import ConnectorRegistry
+from app.connectors.web_article_connector import WebArticleConnector
 from app.models.source import Source
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,9 @@ MAX_AUTHOR_LENGTH = 255
 
 class RSSConnector(BaseConnector):
     """Fetches entries from an RSS/Atom feed."""
+
+    def __init__(self) -> None:
+        self._web = WebArticleConnector()
 
     def fetch(self, source: Source) -> list[ConnectorEntry]:
         """Fetch and normalize entries from the source feed URL.
@@ -29,6 +33,9 @@ class RSSConnector(BaseConnector):
             return []
 
         max_items: int = source.config.get("max_items", 20) if source.config else 20
+        fetch_full_content: bool = (
+            source.config.get("fetch_full_content", False) if source.config else False
+        )
 
         try:
             feed = feedparser.parse(source.feed_url)
@@ -44,7 +51,27 @@ class RSSConnector(BaseConnector):
         entries: list[ConnectorEntry] = []
         for entry in feed.entries[:max_items]:
             try:
-                entries.append(self._normalize_entry(entry))
+                normalized = self._normalize_entry(entry)
+                if fetch_full_content and normalized.source_url:
+                    logger.info("Fetching full content for RSS entry: %s", normalized.source_url)
+                    try:
+                        result = self._web.extract(normalized.source_url)
+                        if result and result.content:
+                            normalized.raw_content = result.content
+                            if result.author:
+                                normalized.author = result.author
+                        else:
+                            logger.warning(
+                                "Failed to extract full content for %s — falling back to summary",
+                                normalized.source_url,
+                            )
+                    except Exception as ex:
+                        logger.warning(
+                            "Error fetching full content for %s: %s — falling back to summary",
+                            normalized.source_url,
+                            ex,
+                        )
+                entries.append(normalized)
             except Exception as e:
                 logger.warning("Could not normalize entry from %s: %s", source.feed_url, e)
 
