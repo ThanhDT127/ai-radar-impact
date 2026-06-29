@@ -36,5 +36,7 @@ node_modules/
 backend/source_stats.txt
 backend/scratch_analyse_sources.py
 
-# Generated documents
+# Documentation outputs & generated files
 docs/ignored/
+docs/generated/
+*.docx
