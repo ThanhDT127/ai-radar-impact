@@ -1,9 +1,12 @@
 """RSS connector — fetches entries from an RSS/Atom feed using feedparser."""
 
 import logging
+import threading
 from datetime import datetime
 
 import feedparser
+import trafilatura
+from playwright.sync_api import sync_playwright
 
 from app.connectors.base import BaseConnector, ConnectorEntry
 from app.connectors.registry import ConnectorRegistry
@@ -62,6 +65,15 @@ class RSSConnector(BaseConnector):
         if not raw_content:
             raw_content = entry.get("summary", "") or ""
 
+        # CloakBrowser full-text fallback if content is too short
+        if source_url and len(raw_content) < 1000:
+            logger.info("RSS content short (%d chars). Attempting full-text fetch via CloakBrowser for %s", len(raw_content), source_url)
+            full_text = self._fetch_full_text_with_cloak(source_url)
+            if full_text and len(full_text) > len(raw_content):
+                raw_content = full_text
+            else:
+                logger.info("Fallback failed or extracted content too short for %s. Using original RSS summary.", source_url)
+
         author_raw = entry.get("author") or None
         author: str | None = author_raw[:MAX_AUTHOR_LENGTH] if author_raw else None
 
@@ -79,6 +91,44 @@ class RSSConnector(BaseConnector):
             author=author,
             published_at=published_at,
         )
+
+    def _fetch_full_text_with_cloak(self, url: str) -> str | None:
+        """Fetch full article content using CloakBrowser + Playwright to bypass anti-bot, then extract with trafilatura."""
+        result: list[str | None] = [None]
+        
+        def _run():
+            try:
+                with sync_playwright() as pw:
+                    try:
+                        browser = pw.chromium.connect_over_cdp("http://cloak:9222")
+                    except Exception as e:
+                        logger.warning("Failed to connect to CloakBrowser for RSS fallback: %s", e)
+                        browser = pw.chromium.launch(
+                            headless=True,
+                            args=["--no-sandbox", "--disable-dev-shm-usage"],
+                        )
+                    
+                    page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    try:
+                        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                        html = page.content()
+                        content = trafilatura.extract(
+                            html,
+                            include_comments=False,
+                            include_tables=False,
+                            no_fallback=False,
+                        )
+                        result[0] = content
+                    finally:
+                        page.close()
+            except Exception as e:
+                logger.warning("CloakBrowser fallback failed for %s: %s", url, e)
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=45)
+        return result[0]
 
 
 ConnectorRegistry.register("rss", RSSConnector)

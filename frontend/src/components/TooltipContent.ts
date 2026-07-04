@@ -44,32 +44,15 @@ export const TOOLTIP = {
     low: 'Ít liên quan: Tin tức công nghệ toàn cầu, hầu như không ảnh hưởng trực tiếp đến bối cảnh Việt Nam.',
   },
   role: {
-    Executive:
-      'Lãnh đạo & Quản lý cấp cao: Cần biết để đưa ra quyết định chiến lược hoặc phê duyệt ngân sách.',
-    Engineering:
-      'Đội ngũ Lập trình (Kỹ sư phần mềm): Cần xem xét để sửa code, tích hợp hoặc cập nhật thư viện.',
-    'Data/AI':
-      'Đội ngũ Dữ liệu & AI: Liên quan đến mô hình học máy, pipeline xử lý hoặc phân tích dữ liệu.',
-    Product:
-      'Đội ngũ Quản lý sản phẩm (PO/PM): Cần biết để cập nhật lộ trình phát triển tính năng (roadmap).',
-    'Content/Marketing':
-      'Đội ngũ Marketing & Nội dung: Cần biết để cập nhật thông tin thị trường, truyền thông thương hiệu.',
-    'Legal/Compliance':
-      'Đội ngũ Pháp lý & Tuân thủ: Cần biết để đánh giá rủi ro bản quyền, chính sách hoặc quy định.',
-    'HR/L&D':
-      'Đội ngũ Nhân sự & Đào tạo: Cần biết để lên kế hoạch tuyển dụng kỹ năng mới hoặc đào tạo nội bộ.',
-    'Toàn công ty':
-      'Toàn thể nhân viên: Tin tức chung có ảnh hưởng rộng rãi đến tất cả mọi người trong công ty.',
-    DevOps:
-      'Đội ngũ DevOps: Liên quan đến quy trình CI/CD, tự động hóa, triển khai hoặc giám sát hạ tầng.',
-    Infrastructure:
-      'Đội ngũ Hạ tầng mạng/Cloud: Liên quan đến hệ thống máy chủ, lưu trữ đám mây hoặc bảo trì.',
-    Security:
-      'Đội ngũ An toàn thông tin (Bảo mật): Cần biết để vá lỗ hổng bảo mật, ứng phó sự cố hoặc bảo vệ dữ liệu.',
-    'BA/QA':
-      'Đội ngũ Phân tích nghiệp vụ & Kiểm thử (BA/Tester): Cần biết để cập nhật kịch bản kiểm thử hoặc phân tích yêu cầu.',
-    'Designer/UX':
-      'Đội ngũ Thiết kế (Designer/UX): Cần biết để cập nhật xu hướng thiết kế, cải thiện giao diện và trải nghiệm.',
+    'Data Analyst': 'Data Analyst: Cần biết để phân tích và trực quan hóa dữ liệu hiệu quả hơn.',
+    'Data Scientist': 'Data Scientist: Cần biết để cập nhật mô hình, thuật toán hoặc phương pháp nghiên cứu mới.',
+    'AI Engineer': 'AI Engineer: Cần biết để cập nhật framework, triển khai và tối ưu hóa hệ thống AI/ML.',
+    'Data Engineer': 'Data Engineer: Cần biết để tối ưu hóa luồng dữ liệu, lưu trữ hoặc quy trình ETL.',
+    Security: 'Đội ngũ Bảo mật: Cần biết để vá lỗ hổng, ứng phó sự cố hoặc bảo vệ hệ thống.',
+    Dev: 'Đội ngũ Lập trình (Dev): Cần xem xét để sửa code, tích hợp hoặc cập nhật thư viện.',
+    'Tech Lead': 'Tech Lead: Cần biết để đánh giá kiến trúc, đưa ra quyết định công nghệ và dẫn dắt team.',
+    'Người dùng phổ thông': 'Người dùng phổ thông: Cần biết để cập nhật ứng dụng, hiểu sự thay đổi của sản phẩm.',
+    'Toàn công ty': 'Toàn thể nhân viên: Tin tức chung có ảnh hưởng rộng rãi đến tất cả mọi người trong công ty.',
   },
   score: {
     actionability:

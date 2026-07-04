@@ -220,3 +220,14 @@ Mแป—i source MUST cรณ `target_roles` non-empty ฤ‘แป dashboard filter theo vai t
 - **THEN** URL phแบฃi pass `verify_feeds.py`
 - **THEN** URL fail โ’ loแบกi khแปi batch vร  document trong tasks
 
+# #   A D D E D   R e q u i r e m e n t s  
+  
+ # # #   R e q u i r e m e n t :   T r i g g e r   f a l l b a c k   e x t r a c t i o n   d y n a m i c a l l y  
+ M o d u l e   M 2   k h i   c ร   o   t i n   R S S   p h แ บ ฃ i   n h แ บ ญ n   d i แ ป ! n   ฤ  ฦ ฐ แ ป ฃ c   k h i   n ร   o   n แ ป "!i   d u n g   R S S   k h ร ด n g   ฤ  แ ป ง   d ร น n g   ฤ  แ ป ’  g แ ป  i   c ฦ ก   c h แ บ ฟ   c ร   o   f u l l - t e x t   t h a y   t h แ บ ฟ .  
+  
+ # # # #   S c e n a r i o :   S h o r t   R S S   s n i p p e t   d e t e c t e d  
+ -   * * W H E N * *   ฤ  แ ป "!  d ร   i   t h u แ ป "!c   t ร ญ n h   ` c o n t e n t `   h o แ บ ท c   ` s u m m a r y `   t h u   ฤ  ฦ ฐ แ ป ฃ c   t แ ป ซ   R S S   c ร ณ   d ฦ ฐ แ ป : i   5 0 0   k ร ฝ   t แ ป ฑ .  
+ -   * * T H E N * *   g แ ป  i   h ร   m   ` _ f e t c h _ f u l l _ t e x t _ w i t h _ c l o a k `   t r u y แ ป  n   v ร   o   U R L   g แ ป  c   c แ ป ง a   b ร   i   v i แ บ ฟ t .  
+ -   * * A N D   W H E N * *   h ร   m   n ร   y   t r แ บ ฃ   v แ ป    k แ บ ฟ t   q u แ บ ฃ   t h ร   n h   c ร ด n g   v ร     d ร   i   h ฦ ก n   ฤ  o แ บ ก n   R S S   h i แ ป ! n   t แ บ ก i .  
+ -   * * T H E N * *   g h i   ฤ  ร จ   n แ ป "!i   d u n g   g แ ป  c   b แ บ ฑ n g   k แ บ ฟ t   q u แ บ ฃ   t h u   ฤ  ฦ ฐ แ ป ฃ c   t แ ป ซ   T r a f i l a t u r a   ฤ  แ ป ’  l ฦ ฐ u   v ร   o   c แ ป "!t   ` r a w _ c o n t e n t ` .  
+ 

@@ -33,18 +33,14 @@ ALLOWED_EVENT_TYPES = [
 ALLOWED_NATURES = ["Rủi ro", "Cơ hội", "Tuân thủ", "Thông tin chung", "Theo dõi"]
 
 ALLOWED_ROLES = [
-    "Executive",
-    "Engineering",
-    "Data/AI",
-    "Product",
-    "Content/Marketing",
-    "Legal/Compliance",
-    "HR/L&D",
-    "DevOps",
-    "Infrastructure",
+    "Data Analyst",
+    "Data Scientist",
+    "AI Engineer",
+    "Data Engineer",
     "Security",
-    "BA/QA",
-    "Designer/UX",
+    "Dev",
+    "Tech Lead",
+    "Người dùng phổ thông",
     "Toàn công ty",
 ]
 
@@ -53,20 +49,63 @@ ALLOWED_ACTION_TYPES = ["watch", "read", "test", "PoC", "roadmap"]
 ALLOWED_ADOPTION_RINGS = ["Adopt", "Trial", "Assess", "Hold"]
 
 # ---------------------------------------------------------------------------
-# Gate Prompt — lightweight pre-screening (~200 tokens output)
+# Gate Prompt — pre-screening with Burden of Proof + Negative Persona
 # ---------------------------------------------------------------------------
 
 GATE_PROMPT = """\
-Bạn là AI triage agent. Đánh giá nhanh bài viết: đây là tin MỚI CÓ ÍCH cho team phần mềm hay chỉ là noise?
+BỐI CẢNH CÔNG TY (COMPANY CONTEXT):
+Chúng ta là Rạng Đông (Rạng Đông Smart) - tập đoàn hàng đầu Việt Nam đang chuyển đổi số mạnh mẽ với định hướng: Smart Home, Smart Lighting, IoT, Nông nghiệp công nghệ cao, Sản xuất thông minh và Tự động hóa công nghiệp (Robotics/Automation).
+Hệ sinh thái công nghệ của chúng ta tập trung vào: Xử lý dữ liệu thiết bị (IoT), Edge AI (AI tại biên), tối ưu hóa quy trình sản xuất, lập trình nhúng/vật lý (Robotics), và bảo mật thiết bị đầu cuối. Mọi tin tức KHÔNG phục vụ cho hệ sinh thái này (ví dụ: tiền ảo, game, Web3, điện thoại/tai nghe tiêu dùng) đều mặc định là NOISE.
 
-TIÊU CHÍ:
-- practical (score ≥ 0.7): phát hành tool/SDK, breaking change, security patch, benchmark có số liệu, hướng dẫn có code
-- strategic (score 0.4-0.7): xu hướng dài hạn, policy change, regulation, M&A ảnh hưởng trực tiếp tech stack
-- theoretical (score 0.2-0.4): paper nghiên cứu chưa có sản phẩm, opinion piece, thought leadership
-- noise (score < 0.2): PR/marketing fluff, M&A không liên quan tech, tin cũ rehash, vague listicle
+Bạn là một Tech Lead cực kỳ bận rộn và hoài nghi. Bạn đã bị "burned" nhiều lần vì team đọc tin tức hype mà không có giá trị thực tiễn. Nguyên tắc của bạn: NẾU một junior dev đọc bài này xong không biết làm gì khác hơn là "thú vị đấy" → ĐÂY LÀ NOISE.
+
+NHIỆM VỤ: Đánh giá bài viết có THỰC SỰ giúp ích cho kỹ sư của Rạng Đông (Dev, Tech Lead, Data/AI Engineer, Security) hay không.
+
+BƯỚC 1 — TÌM BẰNG CHỨNG CỤ THỂ (Burden of Proof):
+Trích xuất chính xác từ bài viết. Nếu KHÔNG TÌM THẤY, ghi null. (CẢNH BÁO: Không được nhầm lẫn giữa việc "nhắc đến tên công nghệ" trong bài PR với việc "có hướng dẫn/kiến trúc kỹ thuật chi tiết").
+- code_or_api: đoạn code cụ thể, kiến trúc hệ thống chi tiết, API endpoint, hoặc link repo GitHub. (LƯU Ý: Chỉ nhắc tên framework/hạ tầng như PyTorch, DGX, Cloud mà không có kiến trúc/code thực tế thì BẮT BUỘC ghi null).
+- cve_or_regulation: mã CVE (CVE-XXXX-XXXX), lệnh cấm/ngừng cấp phép yêu cầu migrate, đạo luật có deadline, hoặc breaking change bắt buộc migrate
+- benchmark_data: tên benchmark, dataset, hoặc số liệu so sánh hiệu năng cụ thể
+
+BƯỚC 2 — LIỆT KÊ DẤU HIỆU NHIỄU:
+Liệt kê các lý do bài này có thể là noise (ý kiến cá nhân, PR, drama, không có action item kỹ thuật...).
+
+BƯỚC 3 — PHÁN QUYẾT:
+- CHỐNG SUY DIỄN VÀ BẪY TỪ KHÓA (ANTI-GENERALIZATION & BUZZWORD TRAP): Nếu bài báo KHÔNG giải quyết một bài toán kỹ thuật CỤ THỂ thuộc BỐI CẢNH CÔNG TY (mà chỉ đơn thuần nhắc tên công nghệ để PR dự án, quảng cáo, hoặc áp dụng cho ngành khác), bạn TUYỆT ĐỐI KHÔNG được suy diễn ẩn dụ. Hãy thẳng tay đánh trượt (pass_gate = false).
+- NGOẠI LỆ HỌC THUẬT (ACADEMIC EXCEPTION): NẾU bài báo là một tài liệu Nghiên cứu khoa học lõi (Core Research / Arxiv Paper / Whitepaper) về Thuật toán AI, Kiến trúc hệ thống, hoặc Cấu trúc dữ liệu có giá trị ĐÀO TẠO KỸ NĂNG CAO cho kỹ sư nền tảng, thì ĐƯỢC PHÉP cho qua (pass_gate = true) và chấm điểm ở mức 0.2-0.4 (Theoretical), bất kể nó có nhắc đến IoT/Smart Home hay không.
+- NGOẠI LỆ RỦI RO ĐỨT GÃY (DISRUPTION EXCEPTION): NẾU bài báo thông báo về việc CẤM VẬN, NGỪNG CẤP PHÉP, hoặc DEPRECATE một công nghệ lõi / AI model / Cloud service, đòi hỏi kỹ sư PHẢI MIGRATE sang nền tảng khác để tránh đứt gãy workflow → BẮT BUỘC cho qua (pass_gate = true) và chấm điểm ≥ 0.7 (Practical).
+- Nếu cả 3 trường evidence đều null VÀ không có action item kỹ thuật cụ thể → pass_gate = false
+- Nếu có ít nhất 1 bằng chứng cụ thể VÀ đáp ứng BỐI CẢNH CÔNG TY (hoặc đáp ứng các NGOẠI LỆ) → chấm điểm theo thang:
+  * Score ≥ 0.7 (Practical): có code/SDK/patch/benchmark cụ thể (hoặc thuộc NGOẠI LỆ RỦI RO ĐỨT GÃY) → pass_gate = true
+  * Score 0.4-0.7 (Strategic): policy/regulation/breaking change ảnh hưởng tech stack → pass_gate = true
+  * Score 0.2-0.4 (Theoretical): paper chưa có sản phẩm, opinion piece, giá trị học thuật cốt lõi → pass_gate = false (Lưu ý: Nếu pass NGOẠI LỆ HỌC THUẬT thì ở đây đổi thành pass_gate = true)
+  * Score < 0.2 (Noise): PR fluff, tin ngành khác, ý kiến chung chung → pass_gate = false
+
+--- VÍ DỤ 1 (NOISE) ---
+TIÊU ĐỀ: "Bộ Tư pháp Mỹ tịch thu trang web deepfake khiêu dâm sử dụng AI"
+{{
+  "evidence": {{"code_or_api": null, "cve_or_regulation": null, "benchmark_data": null}},
+  "noise_signals": ["Tin hình sự, không có lỗ hổng kỹ thuật", "Không có action item cho engineer"],
+  "actionability_score": 0.1,
+  "content_type": "noise",
+  "gate_reason": "Đây là tin hình sự, không có ý nghĩa kỹ thuật cho team.",
+  "pass_gate": false
+}}
+
+--- VÍ DỤ 2 (SIGNAL) ---
+TIÊU ĐỀ: "CVE-2024-3094: Backdoor trong xz-utils ảnh hưởng SSH trên Linux"
+{{
+  "evidence": {{"code_or_api": "xz-utils 5.6.0-5.6.1", "cve_or_regulation": "CVE-2024-3094", "benchmark_data": null}},
+  "noise_signals": [],
+  "actionability_score": 0.9,
+  "content_type": "practical",
+  "gate_reason": "Lỗ hổng bảo mật nghiêm trọng có CVE rõ ràng.",
+  "pass_gate": true
+}}
+--- HẾT VÍ DỤ ---
 
 Trả về ONLY valid JSON (không markdown, không code block):
-{{"actionability_score": <0.0-1.0>, "content_type": "<practical|strategic|theoretical|noise>", "gate_reason": "<1 câu ≤100 ký tự>", "pass_gate": <true|false>}}
+{{"evidence": {{"code_or_api": "<string hoặc null>", "cve_or_regulation": "<string hoặc null>", "benchmark_data": "<string hoặc null>"}}, "noise_signals": ["<lý do 1>"], "actionability_score": <0.0-1.0>, "content_type": "<practical|strategic|theoretical|noise>", "gate_reason": "<1 câu ≤100 ký tự>", "pass_gate": <true|false>}}
 
 TIÊU ĐỀ: {title}
 
@@ -79,7 +118,12 @@ NỘI DUNG (trích):
 # ---------------------------------------------------------------------------
 
 ANALYSIS_PROMPT = """\
-Bạn là chuyên gia phân tích AI cho team phần mềm Việt Nam. Phân tích bài viết sau và trả về JSON.
+Bạn là chuyên gia phân tích AI cho Rạng Đông (Rạng Đông Smart) — tập đoàn Việt Nam tập trung vào: Smart Home, Smart Lighting, IoT, Nông nghiệp công nghệ cao, Sản xuất thông minh, Tự động hóa công nghiệp (Robotics/Automation), Edge AI, và bảo mật thiết bị đầu cuối.
+
+PHÉP THỬ THAY THẾ & NGOẠI LỆ BẮT BUỘC: 
+1. CHỐNG VĂN MẪU: Khi viết tác động, "Nếu thay tên Rạng Đông bằng tiệm bánh mì mà câu này vẫn đúng" → Cần sửa lại cho sát với bài toán kỹ thuật.
+2. KHÔNG ÉP BUỘC LIÊN QUAN (NGOẠI LỆ): Nếu bài báo đánh giá năng lực/hiệu năng của một mô hình nền tảng mới (VD: o3, DeepSeek) trên một miền dữ liệu khác (như y tế, toán học), KHÔNG CẦN CỐ ÉP nó liên quan đến IoT/Smart Home. Hãy tập trung rút ra insight về sức mạnh cốt lõi của công nghệ để kỹ sư cập nhật tình hình chung.
+3. CHỐNG LIÊN QUAN NGƯỢC: Tuyệt đối không dùng logic "Bài viết không liên quan nên củng cố chiến lược hiện tại của chúng ta". Nếu bài không có giá trị cập nhật công nghệ chung và cũng không liên quan Rạng Đông, hãy đặt confidence < 0.5.
 
 QUY TẮC:
 - Chỉ sử dụng thông tin có trong bài viết
@@ -89,19 +133,13 @@ QUY TẮC:
 - topics chỉ chứa giá trị từ danh sách CHỦ ĐỀ CHO PHÉP
 - event_type chỉ chọn 1 giá trị từ danh sách LOẠI SỰ KIỆN CHO PHÉP
 - nature chỉ chọn 1 giá trị từ danh sách TÍNH CHẤT CHO PHÉP
-- affected_roles: chọn 1 hoặc nhiều vai trò từ danh sách VAI TRÒ CHO PHÉP bị ảnh hưởng bởi sự kiện này. Chọn role SPECIFIC nhất:
-  * DevOps: CI/CD, observability, deployment automation, container orchestration
-  * Infrastructure: cloud architecture, network, hardware, capacity planning
-  * Security: AppSec, container security, CVE, compliance kỹ thuật
-  * BA/QA: requirements analysis, test automation, quality processes
-  * Designer/UX: UI/UX design, design system, design tools
-  * Engineering: dùng làm fallback khi không khớp role specific nào ở trên
+- affected_roles: chọn 1 hoặc nhiều vai trò từ danh sách VAI TRÒ CHO PHÉP bị ảnh hưởng bởi sự kiện này.
 - Nếu không chắc chắn về phân loại, đặt confidence dưới 0.5
 
 QUY TẮC CHO CÁC TRƯỜNG ACTIONABLE:
 - signal: 1 câu CÔ ĐỌNG (≤200 ký tự) nêu cốt lõi tín hiệu/implication. PHẢI KHÁC title — title là sự kiện, signal là implication.
-- why_it_matters: 1-2 câu (≤300 ký tự) giải thích tại sao tin này QUAN TRỌNG VỚI TEAM PHẦN MỀM VIỆT NAM. Không lặp lại tóm tắt.
-- recommendations: dict, KEYS PHẢI ⊆ affected_roles (KHÔNG được thêm role ngoài affected_roles). Mỗi value là object {{"action_type": <enum>, "note": <1 câu tiếng Việt cụ thể>}}. action_type ∈ {action_types}.
+- why_it_matters: 1-2 câu (≤300 ký tự) giải thích TẠI SAO quan trọng. Ép buộc phải trả lời: "Sự kiện này tác động thế nào đến kiến trúc tổng thể (Tech Lead), quy trình làm việc của Dev, kho dữ liệu của Data Engineer, hoặc hệ thống của Security?". Không lặp lại tóm tắt.
+- recommendations: dict, KEYS PHẢI ⊆ affected_roles. Mỗi value là object {{"action_type": <enum>, "note": <1 câu lời khuyên cụ thể cho đúng role đó, ví dụ: Khuyên Security quét lỗ hổng, khuyên Tech Lead xem xét kiến trúc, khuyên Dev đọc docs>}}. action_type ∈ {action_types}.
 - risks: list[str] các rủi ro nếu adopt (license, security, privacy, vendor-lock, cost, maturity). Mỗi rủi ro 1 câu ngắn. Trả [] nếu không có rủi ro đáng kể.
 - so_what: 1 câu (≤200 ký tự) trả lời "bài này thay đổi gì cho team?" — PHẢI KHÁC signal và summary_short.
 - adoption_ring: chọn 1 giá trị duy nhất từ {adoption_rings}. Adopt = nên dùng ngay. Trial = thử nghiệm. Assess = đánh giá thêm. Hold = chưa nên dùng.
