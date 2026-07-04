@@ -118,6 +118,7 @@ class InsightRepository:
         momentum: list[str] | None = None,
         vietnam_relevance: list[str] | None = None,
         intelligence_tier: list[str] | None = None,
+        search: str | None = None,
     ) -> tuple[list[dict], int]:
         """Return paginated insights with optional role/source filters and sort."""
         offset = (page - 1) * size
@@ -147,6 +148,18 @@ class InsightRepository:
             base_query = base_query.where(Insight.vietnam_relevance.in_(vietnam_relevance))
         if intelligence_tier:
             base_query = base_query.where(Insight.intelligence_tier.in_(intelligence_tier))
+
+        if search:
+            search_clause = f"%{search}%"
+            base_query = base_query.where(
+                or_(
+                    Insight.title.ilike(search_clause),
+                    Insight.summary_short.ilike(search_clause),
+                    Insight.summary_medium.ilike(search_clause),
+                    Insight.signal.ilike(search_clause),
+                    Insight.so_what.ilike(search_clause),
+                )
+            )
 
         if sort_by == "published_at":
             order = (Insight.published_at.desc().nulls_last(),)

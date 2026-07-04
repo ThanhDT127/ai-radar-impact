@@ -31,3 +31,12 @@ node_modules/
 
 # Claude Code runtime
 .claude/*.lock
+
+# Temporary/Scratch files
+backend/source_stats.txt
+backend/scratch_analyse_sources.py
+
+# Documentation outputs & generated files
+docs/ignored/
+docs/generated/
+*.docx

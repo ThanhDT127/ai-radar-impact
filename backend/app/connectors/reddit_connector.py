@@ -1,7 +1,10 @@
-"""Reddit connector — fetches posts from a subreddit via the public .json endpoint."""
+"""Reddit connector — fetches posts from a subreddit via the public .rss endpoint."""
 
 import logging
+import re
 
+from bs4 import BeautifulSoup
+import feedparser
 import httpx
 
 from app.connectors.base import BaseConnector, ConnectorEntry
@@ -21,65 +24,103 @@ class RedditConnector(BaseConnector):
         self._web = WebArticleConnector()
 
     def fetch(self, source: Source) -> list[ConnectorEntry]:
-        """Fetch subreddit posts, filter by upvotes, extract content."""
+        """Fetch subreddit posts via RSS, filter and extract content."""
         config = source.config or {}
         max_items: int = config.get("max_items", 25)
-        min_upvotes: int = config.get("min_upvotes", 20)
         fetch_timeout: int = config.get("fetch_timeout", 10)
         subreddit: str = config.get("subreddit", "MachineLearning")
 
-        url = f"https://www.reddit.com/r/{subreddit}/.json?limit={max_items}"
+        url = f"https://www.reddit.com/r/{subreddit}/.rss"
 
         try:
             with httpx.Client(timeout=fetch_timeout, headers=REDDIT_HEADERS) as client:
                 resp = client.get(url)
                 resp.raise_for_status()
-                data = resp.json()
+                feed = feedparser.parse(resp.text)
         except Exception as e:
-            logger.error("Failed to fetch Reddit r/%s: %s", subreddit, e)
+            logger.error("Failed to fetch Reddit r/%s RSS: %s", subreddit, e)
             return []
 
-        posts = data.get("data", {}).get("children", [])
         entries: list[ConnectorEntry] = []
 
-        for child in posts:
-            post = child.get("data", {})
+        for entry in feed.entries[:max_items]:
+            try:
+                title: str = entry.get("title", "") or "Untitled"
+                permalink: str = entry.get("link", "") or ""
 
-            ups: int = post.get("ups", 0)
-            if ups < min_upvotes:
-                continue
+                # Parse summary HTML to find external links
+                summary_html = entry.get("summary", "") or ""
+                soup = BeautifulSoup(summary_html, "html.parser")
 
-            title: str = post.get("title", "") or "Untitled"
-            permalink: str = "https://www.reddit.com" + (post.get("permalink", "") or "")
-            post_url: str = post.get("url", "") or ""
-            is_self: bool = post.get("is_self", False)
+                # Extract link tag [link]
+                # Format: <span><a href="post_url">[link]</a></span>
+                link_tag = soup.find("a", string="[link]")
+                post_url = link_tag.get("href", "") if link_tag else permalink
 
-            if is_self:
-                raw_content = post.get("selftext", "") or ""
-                if not raw_content or raw_content == "[removed]" or raw_content == "[deleted]":
-                    logger.warning("Reddit self-post '%s' has no usable text — skipping", title[:60])
-                    continue
-                entries.append(ConnectorEntry(
-                    source_url=permalink,
-                    title=title,
-                    raw_content=raw_content,
-                    metadata={"upvotes": ups, "subreddit": subreddit},
-                ))
-            else:
-                result = self._web.extract(post_url, timeout=fetch_timeout)
-                if result is None:
-                    logger.warning("Failed to extract article from Reddit post '%s' (%s) — skipping", title[:60], post_url)
-                    continue
-                entries.append(ConnectorEntry(
-                    source_url=post_url,
-                    title=title,
-                    raw_content=result.content,
-                    author=result.author,
-                    metadata={"upvotes": ups, "subreddit": subreddit, "reddit_permalink": permalink},
-                ))
+                # If post_url is equal to permalink (or it's a reddit comments page), it's a self-post
+                is_self = (post_url == permalink) or (
+                    "reddit.com/r/" in post_url and "/comments/" in post_url
+                )
 
-        logger.info("Reddit r/%s: fetched %d entries (min_upvotes=%d)", subreddit, len(entries), min_upvotes)
+                if is_self:
+                    # Self-post: extract text content directly from summary HTML
+                    md_div = soup.find("div", class_="md")
+                    raw_content = md_div.get_text(separator=" ") if md_div else soup.get_text()
+
+                    # Collapse whitespace
+                    raw_content = re.sub(r"\s+", " ", raw_content).strip()
+
+                    if (
+                        not raw_content
+                        or raw_content == "[removed]"
+                        or raw_content == "[deleted]"
+                    ):
+                        logger.warning(
+                            "Reddit self-post '%s' has no usable text — skipping", title[:60]
+                        )
+                        continue
+
+                    entries.append(
+                        ConnectorEntry(
+                            source_url=permalink,
+                            title=title,
+                            raw_content=raw_content,
+                            author=entry.get("author"),
+                            metadata={"subreddit": subreddit, "is_self": True},
+                        )
+                    )
+                else:
+                    # Link-post: fetch external page using WebArticleConnector
+                    result = self._web.extract(post_url, timeout=fetch_timeout)
+                    if result is None:
+                        logger.warning(
+                            "Failed to extract article from Reddit link post '%s' (%s) — skipping",
+                            title[:60],
+                            post_url,
+                        )
+                        continue
+
+                    entries.append(
+                        ConnectorEntry(
+                            source_url=post_url,
+                            title=title,
+                            raw_content=result.content,
+                            author=result.author or entry.get("author"),
+                            metadata={
+                                "subreddit": subreddit,
+                                "reddit_permalink": permalink,
+                                "is_self": False,
+                            },
+                        )
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to process Reddit RSS entry '%s': %s", entry.get("title", ""), e
+                )
+
+        logger.info("Reddit r/%s: fetched %d entries via RSS", subreddit, len(entries))
         return entries
 
 
 ConnectorRegistry.register("reddit", RedditConnector)
+

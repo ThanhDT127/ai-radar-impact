@@ -72,7 +72,12 @@ class IngestionService:
                     normalized_content, fingerprint = normalize_entry(entry)
 
                     # Min content length filter
-                    if len(normalized_content) < settings.min_content_length:
+                    min_len = (
+                        source.config.get("min_content_length", settings.min_content_length)
+                        if source.config
+                        else settings.min_content_length
+                    )
+                    if len(normalized_content) < min_len:
                         logger.debug("Skipping short content (%d chars) from '%s'", len(normalized_content), entry.title[:60])
                         summary.skipped += 1
                         continue

@@ -8,8 +8,8 @@ interface SortDropdownProps {
 }
 
 const OPTIONS: Array<{ value: InsightSort; label: string }> = [
-  { value: 'created_at', label: 'Mới nhất' },
-  { value: 'published_at', label: 'Theo ngày xuất bản' },
+  { value: 'published_at', label: 'Mới nhất' },
+  { value: 'created_at', label: 'Theo ngày cào' },
   { value: 'urgency', label: 'Ảnh hưởng cao nhất' },
 ];
 
