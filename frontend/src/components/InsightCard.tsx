@@ -51,19 +51,15 @@ const TIER_GLOW: Record<string, string> = {
 };
 
 const ROLE_SHORT_LABEL: Record<string, string> = {
-  Executive: 'Leader',
-  Engineering: 'Kỹ sư',
-  'Data/AI': 'Data/AI',
-  Product: 'Sản phẩm',
-  'Content/Marketing': 'Marketing',
-  'Legal/Compliance': 'Pháp lý',
-  'HR/L&D': 'Nhân sự',
-  'Toàn công ty': 'Toàn công ty',
-  DevOps: 'DevOps',
-  Infrastructure: 'Hạ tầng',
+  'Data Analyst': 'Data Analyst',
+  'Data Scientist': 'Data Sci',
+  'AI Engineer': 'AI Eng',
+  'Data Engineer': 'Data Eng',
   Security: 'Bảo mật',
-  'BA/QA': 'BA/QA',
-  'Designer/UX': 'UX',
+  Dev: 'Dev',
+  'Tech Lead': 'Lead',
+  'Người dùng phổ thông': 'Người dùng',
+  'Toàn công ty': 'Toàn công ty',
 };
 
 function generateCardBullets(insight: InsightListItem, displayTitle?: string): string[] {

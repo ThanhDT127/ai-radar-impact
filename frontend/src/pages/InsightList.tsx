@@ -37,8 +37,8 @@ const PAGE_SIZE = 12;
 const SOURCE_PREVIEW_LIMIT = 12;
 
 const ROLE_OPTIONS = [
-  'Executive', 'Engineering', 'Data/AI', 'Product',
-  'Content/Marketing', 'Legal/Compliance', 'HR/L&D', 'Toàn công ty',
+  'Data Analyst', 'Data Scientist', 'AI Engineer', 'Data Engineer', 'Security',
+  'Dev', 'Tech Lead', 'Người dùng phổ thông', 'Toàn công ty',
 ];
 
 const URGENCY_ITEMS = [
@@ -61,25 +61,28 @@ const VIETNAM_ITEMS = [
 ];
 
 const TIER_ITEMS = [
-  { id: 'Tactical', label: '🎯 Hành động ngay (Tactical)' },
+  { id: 'Tactical', label: '🎯 Áp dụng thực tiễn (Tactical)' },
   { id: 'Operational', label: '⚙️ Vận hành (Operational)' },
   { id: 'Strategic', label: '🔭 Chiến lược (Strategic)' },
   { id: 'Informational', label: 'ℹ️ Tham khảo (Informational)' },
 ];
 
 const ROLE_LABELS: Record<string, string> = {
-  Executive: 'Leader 👔',
-  Engineering: 'Lập trình & Kỹ sư 💻',
-  'Data/AI': 'Dữ liệu & AI 📊',
-  Product: 'Quản lý sản phẩm 🚀',
-  'Content/Marketing': 'Marketing & Nội dung 📝',
-  'Legal/Compliance': 'Pháp lý & Tuân thủ 🛡️',
-  'HR/L&D': 'Nhân sự & Đào tạo 👥',
+  'Data Analyst': 'Data Analyst 📊',
+  'Data Scientist': 'Data Scientist 🧪',
+  'AI Engineer': 'AI Engineer 🤖',
+  'Data Engineer': 'Data Engineer ⚙️',
+  Security: 'Bảo mật 🛡️',
+  Dev: 'Lập trình viên 💻',
+  'Tech Lead': 'Tech Lead 🧭',
+  'Người dùng phổ thông': 'Người dùng phổ thông 👤',
   'Toàn công ty': 'Toàn công ty 🏢',
 };
 
 const PRESET_URGENT = ['critical', 'high'];
 const PRESET_MOMENTUM = ['rising', 'new'];
+const PRESET_THEORETICAL = ['Strategic', 'Informational'];
+const PRESET_ACTIONABLE = ['Tactical', 'Operational'];
 
 function SkeletonCard() {
   return (
@@ -213,6 +216,8 @@ export default function InsightList() {
   const presetUrgentActive = arraysEqual(selectedUrgency, PRESET_URGENT);
   const presetVietnamActive = selectedVietnam.length === 1 && selectedVietnam[0] === 'high';
   const presetMomentumActive = arraysEqual(selectedMomentum, PRESET_MOMENTUM);
+  const presetTheoreticalActive = arraysEqual(selectedTier, PRESET_THEORETICAL);
+  const presetActionableActive = arraysEqual(selectedTier, PRESET_ACTIONABLE);
 
   const togglePresetUrgent = () => {
     updateFilterParams('urgency', presetUrgentActive ? [] : PRESET_URGENT);
@@ -222,6 +227,12 @@ export default function InsightList() {
   };
   const togglePresetMomentum = () => {
     updateFilterParams('momentum', presetMomentumActive ? [] : PRESET_MOMENTUM);
+  };
+  const togglePresetTheoretical = () => {
+    updateFilterParams('intelligence_tier', presetTheoreticalActive ? [] : PRESET_THEORETICAL);
+  };
+  const togglePresetActionable = () => {
+    updateFilterParams('intelligence_tier', presetActionableActive ? [] : PRESET_ACTIONABLE);
   };
 
   const advancedCount =
@@ -381,6 +392,12 @@ export default function InsightList() {
               <span aria-hidden>🔥</span> Khẩn cấp
             </button>
             <button
+              className={presetActionableActive ? dashStyles.presetActive : dashStyles.preset}
+              onClick={togglePresetActionable}
+            >
+              <span aria-hidden>⚡</span> Thực tiễn
+            </button>
+            <button
               className={presetVietnamActive ? dashStyles.presetActive : dashStyles.preset}
               onClick={togglePresetVietnam}
             >
@@ -391,6 +408,12 @@ export default function InsightList() {
               onClick={togglePresetMomentum}
             >
               <span aria-hidden>📈</span> Đang nổi
+            </button>
+            <button
+              className={presetTheoreticalActive ? dashStyles.presetActive : dashStyles.preset}
+              onClick={togglePresetTheoretical}
+            >
+              <span aria-hidden>📚</span> Nghiên cứu & Điểm tin
             </button>
           </div>
           <div className={dashStyles.toolbarRight}>

@@ -7,35 +7,27 @@ interface RoleBadgeProps {
 }
 
 const ROLE_CLASS: Record<string, string> = {
-  Executive: 'roleExecutive',
-  Engineering: 'roleEngineering',
-  'Data/AI': 'roleDataAI',
-  Product: 'roleProduct',
-  'Content/Marketing': 'roleContent',
-  'Legal/Compliance': 'roleLegal',
-  'HR/L&D': 'roleHr',
-  'Toàn công ty': 'roleAll',
-  DevOps: 'roleDevops',
-  Infrastructure: 'roleInfrastructure',
+  'Data Analyst': 'roleDataAI',
+  'Data Scientist': 'roleDataAI',
+  'AI Engineer': 'roleDataAI',
+  'Data Engineer': 'roleDataAI',
   Security: 'roleSecurity',
-  'BA/QA': 'roleBaqa',
-  'Designer/UX': 'roleDesigner',
+  Dev: 'roleEngineering',
+  'Tech Lead': 'roleExecutive',
+  'Người dùng phổ thông': 'roleAll',
+  'Toàn công ty': 'roleAll',
 };
 
 export const ROLE_DISPLAY_LABEL: Record<string, string> = {
-  Executive: 'Leader',
-  Engineering: 'Lập trình & Kỹ sư',
-  'Data/AI': 'Dữ liệu & AI',
-  Product: 'Quản lý sản phẩm',
-  'Content/Marketing': 'Marketing & Nội dung',
-  'Legal/Compliance': 'Pháp lý & Tuân thủ',
-  'HR/L&D': 'Nhân sự & Đào tạo',
+  'Data Analyst': 'Data Analyst',
+  'Data Scientist': 'Data Scientist',
+  'AI Engineer': 'AI Engineer',
+  'Data Engineer': 'Data Engineer',
+  Security: 'Bảo mật',
+  Dev: 'Lập trình viên',
+  'Tech Lead': 'Tech Lead',
+  'Người dùng phổ thông': 'Người dùng',
   'Toàn công ty': 'Toàn công ty',
-  DevOps: 'DevOps',
-  Infrastructure: 'Hạ tầng mạng/Cloud',
-  Security: 'An toàn thông tin',
-  'BA/QA': 'BA/QA',
-  'Designer/UX': 'Thiết kế/UX',
 };
 
 export default function RoleBadge({ role }: RoleBadgeProps) {

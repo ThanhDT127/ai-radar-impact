@@ -11,7 +11,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U radar -d ai_radar"]
+      test: [ "CMD-SHELL", "pg_isready -U radar -d ai_radar" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -26,12 +26,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      cloak:
+        condition: service_healthy
     env_file:
       - .env
     volumes:
       - ./backend:/app
       # Service Account key for Vertex AI auth
-      - ./secrets/sa-key.json:/secrets/sa-key.json:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/secrets/sa-key.json:ro
+      # Playwright browser state files
+      - ./secrets/states:/secrets/states:ro
     environment:
       # Override DATABASE_URL so containers always resolve "db" hostname
       DATABASE_URL: postgresql+asyncpg://radar:radar_dev@db:5432/ai_radar
@@ -55,6 +59,21 @@ services:
     environment:
       VITE_API_PROXY_TARGET: http://backend:8000
     command: sh -c "npm install && npm run dev -- --host"
+
+  cloak:
+    image: cloakhq/cloakbrowser
+    container_name: ai_radar_cloak
+    command: cloakserve
+    restart: unless-stopped
+    ports:
+      - "9222:9222"
+    environment:
+      - CLOAK_HEADLESS=False
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9222/json/version" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:
