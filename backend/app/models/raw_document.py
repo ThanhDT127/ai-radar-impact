@@ -32,7 +32,9 @@ class RawDocument(Base):
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     processing_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
-    )  # pending, analyzed, failed
+    )  # pending, analyzed, low_signal, failed, expired
+    # Set khi doc đạt trạng thái terminal (analyzed/low_signal/failed) — dùng đếm daily cap.
+    analyzed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

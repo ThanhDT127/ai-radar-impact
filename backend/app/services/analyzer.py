@@ -1,7 +1,7 @@
 """Analyzer service — runs Gemini analysis on pending raw documents and creates insights."""
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,21 +15,8 @@ from app.repositories.raw_document_repo import RawDocumentRepository
 
 logger = logging.getLogger(__name__)
 
-# In-memory daily analysis counter — resets at midnight
-_daily_counter: dict[str, int] = {"date": "", "count": 0}
-
-
-def _get_daily_count() -> int:
-    today = str(date.today())
-    if _daily_counter["date"] != today:
-        _daily_counter["date"] = today
-        _daily_counter["count"] = 0
-    return _daily_counter["count"]  # type: ignore[return-value]
-
-
-def _increment_daily_count() -> None:
-    _get_daily_count()  # ensure reset if new day
-    _daily_counter["count"] = _daily_counter["count"] + 1  # type: ignore[assignment]
+# Daily analysis cap được đếm persist trong DB qua RawDocument.analyzed_at
+# (xem RawDocumentRepository.count_analyzed_today) — không còn counter RAM.
 
 # Rule-based trust score mapping from source trust_tier
 TRUST_SCORE_MAP: dict[str, float] = {
@@ -354,10 +341,10 @@ class AnalyzerService:
 
         Returns counts: { created, skipped, errors }.
         """
-        daily_used = _get_daily_count()
+        daily_used = await self.raw_doc_repo.count_analyzed_today()
         daily_remaining = settings.max_daily_analysis - daily_used
         if daily_remaining <= 0:
-            logger.warning("Daily analysis cap reached (%d). Skipping.", settings.max_daily_analysis)
+            logger.warning("Daily analysis cap reached (%d used / %d). Skipping.", daily_used, settings.max_daily_analysis)
             return {"created": 0, "skipped": 0, "errors": 0}
 
         effective_limit = min(limit, daily_remaining)
@@ -380,9 +367,10 @@ class AnalyzerService:
                 created = await self.analyze_document(raw_doc, source)
                 if created:
                     counts["created"] += 1
-                    _increment_daily_count()
                 else:
                     counts["skipped"] += 1
+                # Cap được đếm qua analyzed_at (set trong update_status ở mọi nhánh
+                # terminal: analyzed/low_signal/failed) — không tăng counter thủ công.
             except Exception as e:
                 logger.error("Unexpected error analyzing doc %s: %s", raw_doc.id, e)
                 counts["errors"] += 1

@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -106,6 +106,20 @@ class InsightRepository:
         insight = result.scalar_one_or_none()
         if insight is not None:
             insight.momentum = momentum
+
+    async def expire_older_than(self, cutoff: datetime) -> int:
+        """Tombstone-purge: ẩn insight có published_at < cutoff (status='expired').
+
+        Soft-purge (chỉ UPDATE) nên FK không ảnh hưởng; `list_paginated` vốn lọc
+        status='published' nên insight expired tự động biến khỏi dashboard.
+        Trả về số hàng bị ảnh hưởng.
+        """
+        result = await self.session.execute(
+            update(Insight)
+            .where(Insight.published_at < cutoff, Insight.status != "expired")
+            .values(status="expired")
+        )
+        return result.rowcount or 0
 
     async def list_paginated(
         self,
