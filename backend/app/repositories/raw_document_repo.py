@@ -51,10 +51,16 @@ class RawDocumentRepository:
         return doc
 
     async def get_pending(self, limit: int = 50) -> list[RawDocument]:
-        """Return raw documents with processing_status='pending'."""
+        """Return raw documents with processing_status='pending'.
+
+        Ưu tiên tin mới xuất bản trước (published_at DESC) để tin mới lên trang
+        trước và không lãng phí quota Gemini vào backlog cũ. Tin không có ngày
+        xuất bản (GitHub/HuggingFace) đẩy xuống cuối hàng đợi.
+        """
         result = await self.session.execute(
             select(RawDocument)
             .where(RawDocument.processing_status == "pending")
+            .order_by(RawDocument.published_at.desc().nulls_last())
             .limit(limit)
         )
         return list(result.scalars().all())
