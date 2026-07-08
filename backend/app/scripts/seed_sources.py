@@ -23,6 +23,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Technology", "Software Process", "AI"],
         "status": "active",
+        "target_roles": ["Engineering", "DevOps"],
         "config": {"max_items": 20, "language": "en"},
     },
     {
@@ -32,6 +33,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo"],
         "status": "active",
+        "target_roles": ["Executive", "Engineering", "Data/AI"],
         "config": {"max_items": 20, "language": "en", "fetch_full_content": True},
     },
     {
@@ -41,6 +43,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo", "Công nghệ"],
         "status": "active",
+        "target_roles": ["Executive", "Engineering", "Data/AI"],
         "config": {"max_items": 20, "language": "en", "fetch_full_content": True},
     },
     {
@@ -50,6 +53,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo"],
         "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {"max_items": 20, "language": "en", "fetch_full_content": True},
     },
     {
@@ -59,6 +63,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo", "Dữ liệu"],
         "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {"max_items": 20, "language": "en", "fetch_full_content": True},
     },
     {
@@ -68,6 +73,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Dịch vụ/Nền tảng"],
         "status": "active",
+        "target_roles": ["DevOps", "Infrastructure", "Engineering"],
         "config": {"max_items": 20, "language": "en"},
     },
     {
@@ -77,6 +83,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo", "Dữ liệu"],
         "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {"max_items": 20, "language": "en"},
     },
     {
@@ -86,6 +93,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Trí tuệ nhân tạo", "Công nghệ"],
         "status": "active",
+        "target_roles": ["Data/AI", "Infrastructure", "Engineering"],
         "config": {"max_items": 20, "language": "en"},
     },
     {
@@ -95,6 +103,7 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["An ninh mạng", "Dịch vụ/Nền tảng"],
         "status": "active",
+        "target_roles": ["Security", "Infrastructure", "DevOps"],
         "config": {"max_items": 20, "language": "en"},
     },
     {
@@ -104,6 +113,7 @@ INITIAL_SOURCES = [
         "trust_tier": "high",
         "topics": ["Trí tuệ nhân tạo"],
         "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {"max_items": 15, "language": "en"},
     },
     {
@@ -113,6 +123,7 @@ INITIAL_SOURCES = [
         "trust_tier": "high",
         "topics": ["Trí tuệ nhân tạo", "Dữ liệu"],
         "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {"max_items": 15, "language": "en"},
     },
     {
@@ -122,6 +133,7 @@ INITIAL_SOURCES = [
         "trust_tier": "high",
         "topics": ["Trí tuệ nhân tạo", "Dữ liệu"],
         "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {"max_items": 15, "language": "en"},
     },
     {
@@ -131,6 +143,7 @@ INITIAL_SOURCES = [
         "trust_tier": "high",
         "topics": ["Công nghệ", "Trí tuệ nhân tạo"],
         "status": "active",
+        "target_roles": ["Engineering", "Toàn công ty"],
         "config": {"max_items": 20, "language": "en"},
     },
     {
@@ -140,6 +153,7 @@ INITIAL_SOURCES = [
         "trust_tier": "high",
         "topics": ["Công nghệ", "An ninh mạng"],
         "status": "active",
+        "target_roles": ["Engineering", "Security"],
         "config": {"max_items": 20, "language": "en", "fetch_full_content": True},
     },
     {
@@ -149,6 +163,7 @@ INITIAL_SOURCES = [
         "trust_tier": "medium",
         "topics": ["Công nghệ", "Trí tuệ nhân tạo"],
         "status": "active",
+        "target_roles": ["Toàn công ty", "Executive"],
         "config": {"max_items": 20, "language": "vi", "fetch_full_content": True},
     },
     {
@@ -158,6 +173,7 @@ INITIAL_SOURCES = [
         "trust_tier": "medium",
         "topics": ["Công nghệ", "Trí tuệ nhân tạo", "Quy trình phần mềm"],
         "status": "active",
+        "target_roles": ["Engineering", "Data/AI"],
         "config": {"max_items": 15, "min_score": 50, "fetch_timeout": 10},
     },
     {
@@ -167,6 +183,7 @@ INITIAL_SOURCES = [
         "trust_tier": "medium",
         "topics": ["Trí tuệ nhân tạo", "Dữ liệu"],
         "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {"max_items": 25, "min_upvotes": 20, "fetch_timeout": 10, "subreddit": "MachineLearning"},
     },
     {
@@ -176,9 +193,10 @@ INITIAL_SOURCES = [
         "trust_tier": "medium",
         "topics": ["Trí tuệ nhân tạo"],
         "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {"max_items": 25, "min_upvotes": 20, "fetch_timeout": 10, "subreddit": "artificial"},
     },
-    # Sub-channel feeds (radar-polish-and-coverage 2026-05-09) — target_roles in config until P1 schema lands
+    # Sub-channel feeds (radar-polish-and-coverage 2026-05-09) — target_roles promoted to top-level column (w2-source-coverage)
     {
         "name": "AWS Security Blog",
         "source_type": "rss",
@@ -186,10 +204,10 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["An ninh mạng", "Dịch vụ/Nền tảng"],
         "status": "active",
+        "target_roles": ["Security", "DevOps", "Engineering"],
         "config": {
             "max_items": 15,
             "language": "en",
-            "target_roles": ["Security", "DevOps", "Engineering"],
         },
     },
     {
@@ -199,50 +217,91 @@ INITIAL_SOURCES = [
         "trust_tier": "very_high",
         "topics": ["Công nghệ", "Dịch vụ/Nền tảng"],
         "status": "active",
+        "target_roles": ["DevOps", "Infrastructure", "Engineering"],
         "config": {
             "max_items": 15,
             "language": "en",
-            "target_roles": ["DevOps", "Infrastructure", "Engineering"],
         },
     },
     {
         "name": "arXiv CS.IR",
         "source_type": "rss",
-        "feed_url": "https://export.arxiv.org/rss/cs.IR",
+        "feed_url": "https://rss.arxiv.org/rss/cs.IR",
         "trust_tier": "high",
         "topics": ["Trí tuệ nhân tạo", "Dữ liệu"],
         "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {
             "max_items": 10,
             "language": "en",
-            "target_roles": ["Data/AI", "Engineering"],
         },
     },
     {
         "name": "arXiv CS.SE",
         "source_type": "rss",
-        "feed_url": "https://export.arxiv.org/rss/cs.SE",
+        "feed_url": "https://rss.arxiv.org/rss/cs.SE",
         "trust_tier": "high",
         "topics": ["Quy trình phần mềm"],
-        "status": "active",
+        "status": "inactive",
+        "target_roles": ["Engineering", "BA/QA"],
         "config": {
             "max_items": 10,
             "language": "en",
-            "target_roles": ["Engineering", "BA/QA"],
         },
     },
     {
         "name": "arXiv CS.CR",
         "source_type": "rss",
-        "feed_url": "https://export.arxiv.org/rss/cs.CR",
+        "feed_url": "https://rss.arxiv.org/rss/cs.CR",
         "trust_tier": "high",
         "topics": ["An ninh mạng"],
-        "status": "active",
+        "status": "inactive",
+        "target_roles": ["Security", "Engineering"],
         "config": {
             "max_items": 10,
             "language": "en",
-            "target_roles": ["Security", "Engineering"],
         },
+    },
+    # arXiv thực dụng cho Smart City/IoT — thị giác, âm thanh, robotics, HCI (w2-source-coverage 2026-07-08)
+    {
+        "name": "arXiv CS.CV",
+        "source_type": "rss",
+        "feed_url": "https://rss.arxiv.org/rss/cs.CV",
+        "trust_tier": "high",
+        "topics": ["Trí tuệ nhân tạo", "Công nghệ"],
+        "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "arXiv EESS.AS",
+        "source_type": "rss",
+        "feed_url": "https://rss.arxiv.org/rss/eess.AS",
+        "trust_tier": "high",
+        "topics": ["Trí tuệ nhân tạo", "Công nghệ"],
+        "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "arXiv CS.RO",
+        "source_type": "rss",
+        "feed_url": "https://rss.arxiv.org/rss/cs.RO",
+        "trust_tier": "high",
+        "topics": ["Trí tuệ nhân tạo", "Công nghệ"],
+        "status": "active",
+        "target_roles": ["Data/AI", "Engineering", "Infrastructure"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "arXiv CS.HC",
+        "source_type": "rss",
+        "feed_url": "https://rss.arxiv.org/rss/cs.HC",
+        "trust_tier": "high",
+        "topics": ["Trí tuệ nhân tạo", "Công nghệ"],
+        "status": "active",
+        "target_roles": ["Designer/UX", "Product", "Data/AI"],
+        "config": {"max_items": 10, "language": "en"},
     },
     # China AI sources (add-china-ai-sources 2026-05-09)
     # Note: HuggingFace org feed.xml requires auth (401) — defer to future HF Papers API connector.
@@ -692,7 +751,12 @@ INITIAL_SOURCES = [
         "name": "MLOpsVN Blog",
         "source_type": "playwright",
         "feed_url": "https://mlops.vn/blog",
+        "trust_tier": "medium",
+        "topics": ["Quy trình phần mềm", "Dữ liệu"],
         "status": "inactive",
+        "region": "vietnam",
+        "target_roles": ["Data/AI", "DevOps", "Engineering"],
+        "config": {},
     },
     # Experimental Social Media Sources (Playwright/CloakBrowser benchmark)
     {
@@ -703,7 +767,7 @@ INITIAL_SOURCES = [
         "topics": ["Trí tuệ nhân tạo"],
         "status": "active",
         "region": "global",
-        "target_roles": ["Data Scientist", "AI Engineer", "Tech Lead"],
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {
             "link_selector": "a",
             "link_pattern": r"/OpenAI/status/\d+/?(?:\?.*)?$",
@@ -720,7 +784,7 @@ INITIAL_SOURCES = [
         "topics": ["Trí tuệ nhân tạo", "An ninh mạng"],
         "status": "active",
         "region": "global",
-        "target_roles": ["Data Scientist", "AI Engineer", "Security", "Tech Lead"],
+        "target_roles": ["Data/AI", "Security", "Engineering"],
         "config": {
             "link_selector": "a",
             "link_pattern": r"/AnthropicAI/status/\d+/?(?:\?.*)?$",
@@ -737,7 +801,7 @@ INITIAL_SOURCES = [
         "topics": ["Trí tuệ nhân tạo"],
         "status": "active",
         "region": "global",
-        "target_roles": ["Data Scientist", "AI Engineer", "Tech Lead"],
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {
             "link_selector": ".feed-shared-update-v2",
             "link_pattern": r"/posts/openai_",
@@ -756,7 +820,7 @@ INITIAL_SOURCES = [
         "topics": ["Trí tuệ nhân tạo", "An ninh mạng"],
         "status": "active",
         "region": "global",
-        "target_roles": ["Data Scientist", "AI Engineer", "Security", "Tech Lead"],
+        "target_roles": ["Data/AI", "Security", "Engineering"],
         "config": {
             "link_selector": ".feed-shared-update-v2",
             "link_pattern": r"/posts/anthropic_",
@@ -775,7 +839,7 @@ INITIAL_SOURCES = [
         "topics": ["An ninh mạng"],
         "status": "active",
         "region": "global",
-        "target_roles": ["Security", "Tech Lead", "DevOps", "Dev"],
+        "target_roles": ["Security", "Engineering", "DevOps"],
         "config": {
             "link_selector": "a",
             "link_pattern": r"/ProjectZero/status/\d+/?(?:\?.*)?$",
@@ -792,7 +856,7 @@ INITIAL_SOURCES = [
         "topics": ["An ninh mạng", "Quy trình phần mềm"],
         "status": "active",
         "region": "global",
-        "target_roles": ["Security", "Dev", "Tech Lead"],
+        "target_roles": ["Security", "Engineering"],
         "config": {
             "link_selector": ".feed-shared-update-v2",
             "link_pattern": r"/posts/owasp_",
@@ -811,7 +875,7 @@ INITIAL_SOURCES = [
         "topics": ["Trí tuệ nhân tạo", "Dữ liệu"],
         "status": "active",
         "region": "global",
-        "target_roles": ["Data Scientist", "AI Engineer", "Tech Lead"],
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {
             "link_selector": ".feed-shared-update-v2",
             "link_pattern": r"/posts/andrewyng",
@@ -830,7 +894,7 @@ INITIAL_SOURCES = [
         "topics": ["Công nghệ", "Quy trình phần mềm"],
         "status": "active",
         "region": "global",
-        "target_roles": ["DevOps", "Tech Lead", "Dev"],
+        "target_roles": ["DevOps", "Engineering"],
         "config": {
             "link_selector": "a",
             "link_pattern": r"/kelseyhightower/status/\d+/?(?:\?.*)?$",
@@ -846,11 +910,148 @@ INITIAL_SOURCES = [
         "trust_tier": "high",
         "topics": ["AI/ML Nghiên cứu", "Trí tuệ nhân tạo"],
         "status": "active",
+        "target_roles": ["Data/AI", "Engineering"],
         "config": {
             "max_items": 3,
             "language": "en",
-            "target_roles": ["Data Scientist", "AI Engineer", "Data Engineer"],
         },
+    },
+    # T6 seed bù — nâng vai trò kỹ thuật mỏng lên ≥5 (w2-source-coverage 2026-07-08)
+    # BA/QA (test automation, requirements) — trước đó 0 nguồn active sau khi tắt cs.SE
+    {
+        "name": "Google Testing Blog",
+        "source_type": "rss",
+        "feed_url": "https://testing.googleblog.com/feeds/posts/default",
+        "trust_tier": "high",
+        "topics": ["Quy trình phần mềm", "Công nghệ"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["BA/QA", "Engineering"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "Postman Blog",
+        "source_type": "rss",
+        "feed_url": "https://blog.postman.com/feed/",
+        "trust_tier": "medium",
+        "topics": ["Quy trình phần mềm", "Công nghệ"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["BA/QA", "Engineering"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "Applitools Blog",
+        "source_type": "rss",
+        "feed_url": "https://applitools.com/blog/feed/",
+        "trust_tier": "medium",
+        "topics": ["Quy trình phần mềm", "Trí tuệ nhân tạo"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["BA/QA", "Engineering"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "Cypress Blog",
+        "source_type": "rss",
+        "feed_url": "https://www.cypress.io/blog/rss.xml",
+        "trust_tier": "medium",
+        "topics": ["Quy trình phần mềm", "Công nghệ"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["BA/QA", "Engineering"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "BrowserStack Blog",
+        "source_type": "rss",
+        "feed_url": "https://www.browserstack.com/blog/feed/",
+        "trust_tier": "medium",
+        "topics": ["Quy trình phần mềm", "Công nghệ"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["BA/QA", "Engineering"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    # Designer/UX — trước đó 1 nguồn (cs.HC)
+    {
+        "name": "Nielsen Norman Group",
+        "source_type": "rss",
+        "feed_url": "https://www.nngroup.com/feed/rss/",
+        "trust_tier": "high",
+        "topics": ["Dịch vụ/Nền tảng", "Công nghệ"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["Designer/UX", "Product"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "UX Collective",
+        "source_type": "rss",
+        "feed_url": "https://uxdesign.cc/feed",
+        "trust_tier": "medium",
+        "topics": ["Dịch vụ/Nền tảng", "Công nghệ"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["Designer/UX", "Product"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "Smashing Magazine",
+        "source_type": "rss",
+        "feed_url": "https://www.smashingmagazine.com/feed/",
+        "trust_tier": "high",
+        "topics": ["Quy trình phần mềm", "Công nghệ"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["Designer/UX", "Engineering"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "A List Apart",
+        "source_type": "rss",
+        "feed_url": "https://alistapart.com/main/feed/",
+        "trust_tier": "high",
+        "topics": ["Quy trình phần mềm", "Công nghệ"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["Designer/UX", "Engineering"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    # Product — trước đó 2 nguồn
+    {
+        "name": "Lenny's Newsletter",
+        "source_type": "rss",
+        "feed_url": "https://www.lennysnewsletter.com/feed",
+        "trust_tier": "high",
+        "topics": ["Dịch vụ/Nền tảng", "Thị trường/Đối thủ"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["Product", "Executive"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    {
+        "name": "Silicon Valley Product Group",
+        "source_type": "rss",
+        "feed_url": "https://www.svpg.com/articles/feed/",
+        "trust_tier": "high",
+        "topics": ["Dịch vụ/Nền tảng", "Quản trị nội bộ"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["Product"],
+        "config": {"max_items": 10, "language": "en"},
+    },
+    # Legal/Compliance — trước đó 4 nguồn
+    {
+        "name": "EFF Deeplinks",
+        "source_type": "rss",
+        "feed_url": "https://www.eff.org/rss/updates.xml",
+        "trust_tier": "high",
+        "topics": ["Pháp lý/Tuân thủ", "An ninh mạng"],
+        "status": "active",
+        "region": "global",
+        "target_roles": ["Legal/Compliance", "Security"],
+        "config": {"max_items": 10, "language": "en"},
     },
 ]
 
@@ -871,6 +1072,7 @@ async def seed() -> None:
                 existing.topics = data.get("topics", [])
                 existing.region = data.get("region", "global")
                 existing.target_roles = data.get("target_roles", [])
+                existing.status = data.get("status", "active")
                 session.add(existing)
                 await session.commit()
                 logger.info("Updated source configuration: %s", data["name"])

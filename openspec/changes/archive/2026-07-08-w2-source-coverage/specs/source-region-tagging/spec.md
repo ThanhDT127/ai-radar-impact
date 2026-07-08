@@ -1,20 +1,4 @@
-# source-region-tagging Specification
-
-## Purpose
-TBD - created by archiving change add-china-ai-sources. Update Purpose after archive.
-## Requirements
-### Requirement: Source phải có thuộc tính `region`
-
-Mọi source trong `sources` table MUST có giá trị `region` thuộc closed set.
-
-#### Scenario: Region values
-- **WHEN** tạo hoặc cập nhật source
-- **THEN** `region` ∈ {`global`, `china`, `vietnam`}
-- **THEN** mặc định = `global` nếu không truyền
-
-#### Scenario: Backfill 18 sources cũ
-- **WHEN** migration được chạy
-- **THEN** mọi source cũ có `region` = `global` (trừ VnExpress Số hóa = `vietnam`)
+## MODIFIED Requirements
 
 ### Requirement: Source phải có thuộc tính `target_roles`
 
@@ -32,13 +16,7 @@ Source MUST có ARRAY các vai trò mà nguồn này phục vụ chính. Giá tr
 - **WHEN** tạo source không truyền `target_roles`
 - **THEN** value = `[]` (không null)
 
-### Requirement: Source response API trả `region` và `target_roles`
-
-Admin API MUST trả `region` và `target_roles` trong source response.
-
-#### Scenario: Admin GET source
-- **WHEN** admin gọi `GET /api/v1/admin/sources`
-- **THEN** mỗi source trong response có `region` và `target_roles`
+## ADDED Requirements
 
 ### Requirement: Backfill target_roles cho nguồn chưa gắn
 
@@ -61,4 +39,3 @@ Hệ thống MUST cung cấp cách đếm số nguồn active theo từng vai tr
 #### Scenario: Vai trò ngoài phạm vi ưu tiên
 - **WHEN** vai trò `Content/Marketing` hoặc `HR/L&D` chưa đạt 5 nguồn
 - **THEN** được phép < 5 nếu công ty không ưu tiên (quyết định phạm vi ghi trong change), không tính là thất bại DoD
-
