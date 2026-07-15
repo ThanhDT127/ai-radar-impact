@@ -7,7 +7,8 @@
       "Bash(docker info *)",
       "Bash(docker context *)",
       "Bash(python -c ' *)",
-      "PowerShell(New-Item *)"
+      "PowerShell(New-Item *)",
+      "Bash(docker compose *)"
     ]
   }
 }

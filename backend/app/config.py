@@ -42,8 +42,13 @@ class Settings(BaseSettings):
     # Rate-limit tránh 429/403
     ingest_source_delay_seconds: float = 1.0   # delay cố định giữa các nguồn
     ingest_jitter_seconds: float = 2.0         # jitter ngẫu nhiên cộng thêm
+    ingest_article_delay_seconds: float = 2.0  # delay giữa các bài TRONG một phiên (Playwright/MXH)
     fetch_max_retries: int = 3                  # số lần thử lại khi fetch lỗi
     fetch_backoff_base_seconds: float = 2.0     # cơ số exponential backoff
+
+    # Anti-bot crawl (W3) — CloakBrowser CDP endpoint.
+    # Rỗng = bỏ qua CloakBrowser, dùng Chromium local trực tiếp (dùng cho PoC A/B).
+    cloak_cdp_url: str = "http://cloak:9222"
 
     # Content gate (two-pass pipeline)
     enable_gate: bool = True
