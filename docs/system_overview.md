@@ -361,6 +361,18 @@ curl -X POST http://localhost:8000/api/v1/admin/sources `
 curl http://localhost:8000/api/v1/admin/sources -H "Authorization: Bearer changeme"
 ```
 
+### Chạy delivery Telegram thủ công (alert / digest)
+
+```powershell
+docker-compose exec backend python -m app.scripts.run_delivery --alert
+docker-compose exec backend python -m app.scripts.run_delivery --digest
+```
+
+Bật delivery tự động: đặt `TELEGRAM_BOT_TOKEN` (từ @BotFather) và `DELIVERY_ENABLED=true` trong `.env`.
+Bot worker (long-polling) + alert job (mỗi 5 phút) + digest job (8h sáng VN) khởi động cùng backend.
+Người dùng nhắn bot: `/start` → `/subscribe` chọn role → nhận alert critical + digest sáng theo role.
+Lưu ý: không bật delivery kèm `--reload` (long-polling trùng → Telegram 409 Conflict).
+
 ### Xem kết quả
 
 - UI: `http://localhost:5173`
@@ -404,7 +416,7 @@ Bản này chưa phải nền tảng hoàn chỉnh. Các phần sau chưa có ho
 - đã có Admin API (Bearer token) cho ingestion, analysis, source management — chưa có Admin UI
 - chưa có scheduler tự động
 - chưa có search / filter nâng cao
-- chưa có notification
+- đã có delivery Telegram (alert critical + digest ngày, subscribe theo role) — Zalo/email/Teams chưa có (adapter interface đã chừa chỗ)
 - chưa có workflow review / approve
 - đã có HackerNews, Reddit, Web article connector — 18 nguồn đang active
 - đã có semantic dedup (TF-IDF, threshold 0.6) — Phase 2 có thể nâng lên vector embedding (pgvector)

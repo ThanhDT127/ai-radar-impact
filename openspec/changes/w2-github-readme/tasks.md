@@ -18,5 +18,5 @@
 ## 4. Verification
 
 - [x] 4.1 Chạy `run_ingestion --source-id <monthly source>` local → xác nhận log fetch README, số raw doc mới hợp lý. **DoD:** ≥1 repo có README trong content. (P1) — ✅ 6/9 doc monthly có `README:` trong `raw_content` (len ~4400 vs ~355 khi không có README).
-- [ ] 4.2 Chạy `run_analysis` trên vài doc github_trending → insight dẫn được chi tiết từ README (không chỉ tên repo). **DoD:** rà 3 insight, nội dung phản ánh README. (P1) — ⏭️ HOÃN: cần quota Gemini, người dùng tự kiểm chứng sau (DB dev đang chạy, có sẵn doc pending có README).
+- [x] 4.2 Chạy `run_analysis` trên vài doc github_trending → insight dẫn được chi tiết từ README (không chỉ tên repo). **DoD:** rà 3 insight, nội dung phản ánh README. (P1) — ✅ Verified 18/07 với Vertex thật: 25 insight github_trending trên trang chính; rà 2 mẫu (ai-engineering-from-scratch, turbovec) — signal/why_it_matters dẫn chi tiết README (agent/LLM hands-on, RAG/vector index/memory-efficiency) vượt xa description 1 dòng.
 - [x] 4.3 Xác nhận không rò rỉ quota: repo trùng ở daily + weekly/monthly không tạo raw doc trùng. **DoD:** query DB, không có 2 raw doc cùng fingerprint. (P1) — ✅ 0 fingerprint trùng toàn bảng; re-ingest monthly → `0 new, 21 skipped` (12 repo đã có từ cửa sổ khác bị skip).

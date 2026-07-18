@@ -39,6 +39,10 @@ docker-compose exec backend python -m app.scripts.run_analysis
 # Maintenance
 docker-compose exec backend python -m app.scripts.reset_failed       # re-queue failed docs
 docker-compose exec backend python -m app.scripts.cleanup_en_insights # remove English insights
+
+# Delivery (Telegram) — run alert cycle / digest manually
+docker-compose exec backend python -m app.scripts.run_delivery --alert
+docker-compose exec backend python -m app.scripts.run_delivery --digest
 ```
 
 ## Architecture
@@ -64,6 +68,9 @@ Layered architecture with strict separation:
 - **`models/`** — SQLAlchemy async ORM (UUIDs, PostgreSQL arrays)
 - **`schemas/`** — Pydantic v2 request/response validation
 - **`routes/`** — FastAPI endpoints under `/api/v1/`
+- **`channels/`** — `ChannelAdapter` interface + `DeliveryMessage` (channel-neutral) + `TelegramAdapter`/`TelegramAPI` (HTML parse mode, escape động, split >4096 chars). Registry pattern như connectors.
+- **`bot/`** — Telegram transport: `worker.py` (long-polling `getUpdates`, backoff, heartbeat), `router.py` (route lệnh/callback/text; `register_chat_handler()` là hook cho chatbot-qa qua `app.state.bot_router`), `handlers.py` (subscription flow `/start` `/subscribe` `/unsubscribe` `/status` — inline keyboard đa chọn 9 `ALLOWED_ROLES`)
+- **`services/delivery_engine.py`** — M7 Delivery: alert critical (job 5 phút, lookback 24h, trần alert/giờ → gom tổng hợp) + digest ngày (giờ VN, lookback 48h, cap 15 hiển thị nhưng log hết); chống trùng qua `delivery_log` unique (insight_id, chat_id, kind); thuần template, KHÔNG gọi Gemini
 - **`config.py`** — `BaseSettings` reads from `.env`; `database.py` creates async engine
 
 Key rules in `AnalyzerService`:
@@ -84,7 +91,7 @@ State: TanStack Query for all server state. Local React state for UI (page, filt
 
 PostgreSQL 16. All PKs are UUIDs. Deduplication uses SHA256 fingerprints computed from **`source_url` + `title`** (see `normalizer.make_fingerprint`), not from content body. Migrations are in `backend/alembic/`.
 
-Key models: `Source` (RSS feeds with trust_tier, **`region`** ∈ `global`/`china`/`vietnam`, **`target_roles`** VARCHAR[]) → `RawDocument` (fetched content, processing_status) → `Insight` (analyzed output).
+Key models: `Source` (RSS feeds with trust_tier, **`region`** ∈ `global`/`china`/`vietnam`, **`target_roles`** VARCHAR[]) → `RawDocument` (fetched content, processing_status) → `Insight` (analyzed output). Delivery: `Subscriber` (chat_id BigInteger PK, roles[] từ `ALLOWED_ROLES`, active) + `DeliveryLog` (unique insight_id+chat_id+kind — idempotent).
 
 `Source.region` tagging (added 2026-05-09): `global` (default for Western sources), `china` (China AI orgs + analyst newsletters like Interconnects/ChinaTalk/ChinAI), `vietnam` (Vietnamese news/community). `target_roles` is hint metadata for ingestion strategy.
 
@@ -181,6 +188,7 @@ Minimum confidence to publish: **0.3** (below this → `failed`, no insight crea
 - **AWS What's New source name**: The source name contains a Unicode right single quotation mark (`'`, U+2019) instead of a regular apostrophe. Exact-match DB lookups against this source name must use the correct character.
 - **Content limit in prompt**: Gemini prompt truncates content to 6000 chars (`prompts.py:87`). Longer articles are silently cut — this affects arXiv and long blog posts.
 - **Confidence threshold mismatch**: `openspec/specs/ai-analysis/spec.md` says confidence < 0.5 → `needs_review`, but actual code uses 0.3 as the discard threshold with no `needs_review` state. The spec is aspirational; code is authoritative.
+- **Delivery + --reload**: `DELIVERY_ENABLED=true` cần `TELEGRAM_BOT_TOKEN`; không chạy kèm `uvicorn --reload` (long-polling trùng sau reload → Telegram trả 409 Conflict). Env liên quan: `DELIVERY_DIGEST_HOUR` (giờ **VN**, không phải UTC), `DELIVERY_ALERT_INTERVAL_MINUTES`, `DELIVERY_MAX_ALERTS_PER_HOUR`, `DELIVERY_ALERT_LOOKBACK_HOURS`/`DELIVERY_DIGEST_LOOKBACK_HOURS`, `DASHBOARD_BASE_URL`. Subscription roles dùng 9 `ALLOWED_ROLES` trong `prompts.py`, KHÔNG phải 13 `target_roles` của Source.
 - **Playwright / CloakBrowser crawl** (`source_type: playwright`): `PlaywrightConnector` prefers CloakBrowser via CDP (`CLOAK_CDP_URL`, default `http://cloak:9222`; set empty to force local Chromium). X/LinkedIn sources need a valid login session file (`config.cookie_file` → `/secrets/states/*.json`) created via `playwright codegen --save-storage=...` — see `docs/session_bootstrap.md`. Sessions self-renew (sliding refresh) after successful runs, so the `secrets/states` mount is **rw** (not `:ro`). Fingerprint is URL+title, so N different URLs returning the same shell page would each be stored — `PlaywrightConnector._dedup_by_content` drops in-batch content duplicates to prevent that.
 
 ## Documentation Map

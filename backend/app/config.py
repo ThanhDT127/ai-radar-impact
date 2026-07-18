@@ -37,8 +37,8 @@ class Settings(BaseSettings):
 
     # Scheduler (W1 auto-operation) — mặc định TẮT; chỉ bật ở production (KHÔNG --reload).
     enable_scheduler: bool = False
-    scheduler_hours: str = "7,13,19"  # giờ (UTC) chạy ingest+analysis mỗi ngày
-    purge_hour: int = 3               # giờ (UTC) chạy tombstone-purge hằng ngày
+    scheduler_hours: str = "7,13,19"  # giờ VN (Asia/Ho_Chi_Minh) chạy ingest+analysis mỗi ngày
+    purge_hour: int = 3               # giờ VN chạy tombstone-purge hằng ngày
     # Rate-limit tránh 429/403
     ingest_source_delay_seconds: float = 1.0   # delay cố định giữa các nguồn
     ingest_jitter_seconds: float = 2.0         # jitter ngẫu nhiên cộng thêm
@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     # Content gate (two-pass pipeline)
     enable_gate: bool = True
     gate_threshold: float = 0.4
+
+    # Delivery (M7) — Telegram bot, alert/digest. Mặc định TẮT.
+    # LƯU Ý: không bật kèm --reload (long-polling trùng → Telegram 409 Conflict).
+    telegram_bot_token: str = ""
+    delivery_enabled: bool = False
+    delivery_digest_hour: int = 8                # giờ VN (Asia/Ho_Chi_Minh) gửi digest hằng ngày
+    delivery_alert_interval_minutes: int = 5     # chu kỳ quét insight critical
+    delivery_max_alerts_per_hour: int = 10       # trần alert/giờ/chat, vượt → gom 1 tin tổng hợp
+    delivery_alert_lookback_hours: int = 24      # alert chỉ xét insight created_at trong cửa sổ này
+    delivery_digest_lookback_hours: int = 48     # digest chỉ xét insight created_at trong cửa sổ này
+    dashboard_base_url: str = "http://localhost:5173"  # gốc link "xem trên dashboard" trong message
 
     # Admin API
     admin_api_key: str = "changeme"
