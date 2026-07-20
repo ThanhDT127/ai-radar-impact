@@ -1,6 +1,7 @@
 """PlaywrightConnector — headless Chromium / CloakBrowser scraper for JS-rendered sites."""
 
 import hashlib
+import json
 import logging
 import os
 import random
@@ -25,20 +26,41 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 # Login-wall detection (W3/T8): URL markers hệ thống bị đẩy về khi phiên hết hạn.
 LOGIN_WALL_URL_MARKERS = {
     "linkedin.com": ("/authwall", "/login", "/checkpoint", "/uas/login"),
-    "x.com": ("/i/flow/login", "/login", "/account/access"),
-    "twitter.com": ("/i/flow/login", "/login", "/account/access"),
 }
 # Selector form đăng nhập đặc trưng (fallback khi URL không đổi nhưng trang là login).
-LOGIN_FORM_SELECTOR = (
-    "input[name='session_key'], input[name='session_password'], "
-    "input[name='text'][autocomplete='username']"
-)
+LOGIN_FORM_SELECTOR = "input[name='session_key'], input[name='session_password']"
 # Login URL để in kèm hướng dẫn tạo lại session bằng codegen.
 LOGIN_URLS = {
     "linkedin.com": "https://www.linkedin.com/login",
-    "x.com": "https://x.com/login",
-    "twitter.com": "https://x.com/login",
 }
+# Cookie mang trạng thái đăng nhập — mất nó là mất phiên. Dùng để chặn sliding refresh
+# ghi đè bằng một state đã rụng auth (xem `_save_storage_state`).
+AUTH_COOKIE_NAMES = {"li_at"}
+
+# Selector thân bài của feed card (thử theo thứ tự) — tách nội dung post khỏi vỏ thẻ.
+CARD_BODY_SELECTORS = (
+    ".update-components-text",
+    ".feed-shared-update-v2__description",
+    ".break-words",
+)
+# Dự phòng khi không có selector nào khớp: các dòng của vỏ thẻ đổi giữa các lần cào
+# (số follower/reaction/comment/repost, thời gian tương đối, chrome trình phát video).
+# Giữ lại chúng trong định danh sẽ khiến mỗi lần cào sinh ra một "bài mới".
+VOLATILE_CARD_LINE = re.compile(
+    r"^\s*(?:"
+    r"[\d,]+\s+followers"
+    r"|[\d,]+\s+(?:comments?|reposts?|impressions?)"
+    r"|[\d,]+"
+    r"|\d+[smhdwy]\s*•?.*"
+    r"|.*Visible to anyone on or off LinkedIn.*"
+    r"|Feed post number \d+"
+    r"|Follow|Like|Comment|Repost|Send|…more"
+    r"|Activate to view larger image,?"
+    r"|Play|Pause|Media is loading|Loaded:.*|Mute|Unmute|Fullscreen"
+    r"|Current time.*|Duration.*|Seek.*|Video Player.*|Captions.*"
+    r")\s*$",
+    re.IGNORECASE,
+)
 
 
 def _login_url_for(index_url: str) -> str:
@@ -183,17 +205,56 @@ class PlaywrightConnector(BaseConnector):
         return browser.new_context(**context_options)
 
     def _save_storage_state(self, context, cookie_file: str) -> None:
-        """Ghi đè cookie_file bằng storage_state hiện tại (atomic: tạm + rename)."""
+        """Ghi đè cookie_file bằng storage_state hiện tại (atomic: tạm + rename).
+
+        Chỉ ghi đè khi state mới còn giữ đủ cookie xác thực đang có trong file cũ.
+        `context.storage_state()` qua CDP CloakBrowser có thể trả về state THIẾU cookie
+        auth (đã quan sát: LinkedIn `li_at` biến mất) — ghi đè khi đó sẽ giết phiên đang
+        sống, đúng thứ sliding refresh phải tránh.
+        """
+        tmp = None
         try:
             directory = os.path.dirname(cookie_file) or "."
             os.makedirs(directory, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
             os.close(fd)
             context.storage_state(path=tmp)
+
+            lost = self._lost_auth_cookies(cookie_file, tmp)
+            if lost:
+                logger.warning(
+                    "Sliding refresh BỎ QUA cho %s — state mới mất cookie xác thực %s. "
+                    "Giữ nguyên file cũ để không giết phiên đang sống.",
+                    cookie_file, sorted(lost),
+                )
+                return
+
             os.replace(tmp, cookie_file)
+            tmp = None
             logger.info("Sliding refresh: gia hạn storage_state -> %s", cookie_file)
         except Exception as e:
             logger.warning("Không lưu được storage_state vào %s: %s", cookie_file, e)
+        finally:
+            if tmp and os.path.exists(tmp):
+                try:
+                    os.unlink(tmp)
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _cookie_names(path: str) -> set[str]:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return {c.get("name", "") for c in json.load(f).get("cookies", [])}
+        except Exception:
+            return set()
+
+    def _lost_auth_cookies(self, old_file: str, new_file: str) -> set[str]:
+        """Cookie xác thực có trong file cũ nhưng mất ở state mới."""
+        if not os.path.exists(old_file):
+            return set()
+        old_auth = self._cookie_names(old_file) & AUTH_COOKIE_NAMES
+        return old_auth - self._cookie_names(new_file)
 
     # --- Anti-bot helpers ---------------------------------------------------
 
@@ -217,6 +278,41 @@ class PlaywrightConnector(BaseConnector):
             "Tạo lại session: playwright codegen --save-storage=%s %s",
             source_name, index_url, cookie_file or "<cookie_file>", _login_url_for(index_url),
         )
+
+    def _card_body(self, card) -> str:
+        """Thân bài của một feed card, bỏ vỏ thẻ.
+
+        Ưu tiên selector thân bài (LinkedIn render nội dung post trong
+        `.update-components-text`); nếu không thấy thì rơi về `inner_text()` của cả
+        thẻ và lọc các dòng biến động. Dự phòng cần thiết vì class LinkedIn hay đổi.
+        """
+        for selector in CARD_BODY_SELECTORS:
+            try:
+                node = card.query_selector(selector)
+            except Exception:
+                node = None
+            if node:
+                text = (node.inner_text() or "").strip()
+                if text:
+                    return text
+
+        raw = (card.inner_text() or "").strip()
+        kept = [
+            line.strip() for line in raw.split("\n")
+            if line.strip() and not VOLATILE_CARD_LINE.match(line.strip())
+        ]
+        return "\n".join(kept)
+
+    @staticmethod
+    def _card_title(body: str) -> str:
+        """Dòng đầu có nghĩa của thân bài làm title.
+
+        Trước đây title lấy dòng đầu của `inner_text()` cả thẻ, tức luôn là nhãn
+        accessibility `Feed post number N` — vô nghĩa và lọt cả vào insight published.
+        """
+        lines = [l.strip() for l in body.split("\n") if l.strip()]
+        first = next((l for l in lines if len(l) > 25), lines[0] if lines else "")
+        return first[:120] + "…" if len(first) > 120 else first
 
     def _article_delay_seconds(self) -> float:
         """Delay giữa các bài trong một phiên (base + jitter) — nhịp giống người."""
@@ -275,19 +371,29 @@ class PlaywrightConnector(BaseConnector):
                 page.wait_for_timeout(2000)
 
             cards = page.query_selector_all(card_selector)
+            # Redirect authwall của LinkedIn xảy ra phía client, SAU `domcontentloaded` —
+            # check lúc mới goto có thể chưa thấy. Không có card nào là dấu hiệu: kiểm lại
+            # để phiên chết báo ERROR thay vì âm thầm trả 0 bài (T8/4.1).
+            if not cards and self._is_login_wall(page, index_url):
+                self._log_login_wall(session["source_name"], index_url, session["cookie_file"])
+                session["login_wall"] = True
+                return []
+
             for card in cards:
                 if len(entries) >= max_items:
                     break
-                content = (card.inner_text() or "").strip()
+                content = self._card_body(card)
                 if len(content) < 100:
                     continue
 
-                fake_hash = hashlib.md5(content[:50].encode()).hexdigest()
-                url = f"{index_url}#feed-{fake_hash}"
-                title = content.split('\n')[0][:100] + "..."
+                # Định danh phải ổn định giữa các lần cào: hash THÂN BÀI, không hash
+                # inner_text cả thẻ. Vỏ thẻ chứa số follower / reaction / comment và
+                # cả text của trình phát video (Play/Pause/Loaded: 3.80%) — đổi liên
+                # tục, khiến mỗi lần cào sinh fingerprint mới và nhân bản document.
+                url = f"{index_url}#post-{hashlib.sha256(content.encode()).hexdigest()[:16]}"
                 entries.append(ConnectorEntry(
                     source_url=url,
-                    title=title,
+                    title=self._card_title(content),
                     raw_content=content,
                     author=None,
                     published_at=None,
@@ -333,6 +439,12 @@ class PlaywrightConnector(BaseConnector):
                 page.wait_for_timeout(2000)
 
             anchors = page.query_selector_all(link_selector)
+            # Cùng lý do như nhánh feed-card: redirect authwall đến sau `domcontentloaded`.
+            if not anchors and self._is_login_wall(page, index_url):
+                self._log_login_wall(session["source_name"], index_url, session["cookie_file"])
+                session["login_wall"] = True
+                return []
+
             base_domain = urlparse(index_url).netloc
             seen: set[str] = set()
             urls: list[str] = []
