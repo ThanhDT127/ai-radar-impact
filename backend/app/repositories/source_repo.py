@@ -69,10 +69,14 @@ class SourceRepository:
                 func.count(Insight.id).label("insight_count"),
             )
             .outerjoin(RawDocument, RawDocument.source_id == Source.id)
+            # `is_primary` nằm trong điều kiện ON của outer join, KHÔNG phải where:
+            # đưa vào where sẽ làm biến mất mọi nguồn không có insight primary, hỏng
+            # nhóm "chưa có insight" trên UI. Ở ON thì hàng vẫn còn, count về 0.
             .outerjoin(
                 Insight,
                 (Insight.raw_document_id == RawDocument.id)
-                & (Insight.status == "published"),
+                & (Insight.status == "published")
+                & (Insight.is_primary == True),  # noqa: E712
             )
             .group_by(Source.id)
             .order_by(Source.name.asc())

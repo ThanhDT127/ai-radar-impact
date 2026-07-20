@@ -263,7 +263,11 @@ class InsightRepository:
                 func.count(Insight.id)
                 .filter(Insight.nature.in_(["Cơ hội", "Opportunity"]))
                 .label("opportunities"),
-            ).where(Insight.status == "published")
+            )
+            # Chỉ đếm đại diện cụm dedup — phải khớp với `list_paginated`, nếu không
+            # KPI sẽ lớn hơn số thẻ người dùng bấm vào xem được.
+            .where(Insight.status == "published")
+            .where(Insight.is_primary == True)  # noqa: E712
         )
         active_sources = await self.session.execute(
             select(func.count(Source.id)).where(Source.status == "active")
