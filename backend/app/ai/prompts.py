@@ -46,7 +46,22 @@ ALLOWED_ROLES = [
 
 ALLOWED_ACTION_TYPES = ["watch", "read", "test", "PoC", "roadmap"]
 
+# Mức ảnh hưởng của một tin tới RIÊNG một vai trò, nằm trong
+# `insights.recommendations[role].urgency`. Dùng để quyết định có alert cho vai
+# trò đó không (ngưỡng: "high").
+#
+# KHÁC với cột vô hướng `insights.urgency` (critical|high|medium|low) — cột đó
+# là mức ảnh hưởng của tin NÓI CHUNG, suy tất định từ `impact_label`, dùng cho
+# dashboard/sort. Cố ý bỏ "critical" ở đây để không ai nhầm hai khái niệm:
+# ngữ nghĩa alert là "đáng đọc ngay với vai trò của bạn", không phải "khẩn cấp
+# phải vá ngay".
+ALLOWED_ROLE_URGENCY = ["high", "medium", "low"]
+
 ALLOWED_ADOPTION_RINGS = ["Adopt", "Trial", "Assess", "Hold"]
+
+# Phân loại nội dung do gate chấm. Khai báo một lần ở đây; `response_schema` và
+# `_parse_gate_response` đều đọc từ hằng số này, không chép tay (design D2).
+ALLOWED_CONTENT_TYPES = ["practical", "strategic", "theoretical", "noise"]
 
 # ---------------------------------------------------------------------------
 # Gate Prompt — pre-screening with Burden of Proof + Negative Persona
@@ -147,7 +162,12 @@ NGUYÊN TẮC HÀNH VĂN TIẾNG VIỆT (BẮT BUỘC - NEGATIVE CONSTRAINTS):
 QUY TẮC CHO CÁC TRƯỜNG ACTIONABLE:
 - signal: 1 câu CÔ ĐỌNG (≤200 ký tự) nêu cốt lõi tín hiệu/implication. PHẦI KHÁC title — title là sự kiện, signal là implication.
 - why_it_matters: 1-2 câu (≤300 ký tự) giải thích TẠI SAO quan trọng. Ép buộc phải trả lời: "Sự kiện này tác động thế nào đến kiến trúc tổng thể (Tech Lead), quy trình làm việc của Dev, kho dữ liệu của Data Engineer, hoặc hệ thống của Security?". Không lặp lại tóm tắt.
-- recommendations: dict, KEYS PHẢI ⊆ affected_roles. Mỗi value là object {{"action_type": <enum>, "note": <1 câu lời khuyên cụ thể cho đúng role đó, ví dụ: Khuyên Security quét lỗ hổng, khuyên Tech Lead xem xét kiến trúc, khuyên Dev đọc docs>}}. action_type ∈ {action_types}.
+- recommendations: dict, KEYS PHẢI ⊆ affected_roles (và do đó ⊆ VAI TRÒ CHO PHÉP). Mỗi value là object {{"action_type": <enum>, "note": <1 câu lời khuyên cụ thể cho đúng role đó, ví dụ: Khuyên Security quét lỗ hổng, khuyên Tech Lead xem xét kiến trúc, khuyên Dev đọc docs>, "urgency": <enum>}}. action_type ∈ {action_types}. urgency ∈ {role_urgencies}.
+- urgency (trong recommendations): mức ảnh hưởng tới RIÊNG vai trò đó, KHÔNG phải mức nghiêm trọng của tin nói chung. Chấm TIẾT KIỆM:
+  * "high" — vai trò đó cần đọc NGAY TRONG NGÀY vì tin đổi việc họ đang làm (breaking change trên công cụ họ dùng, lỗ hổng trên stack họ vận hành, model/API mới thay thế được thứ họ đang chạy). Một tin thường chỉ có 0-1 vai trò đạt "high"; nhiều bài KHÔNG có vai trò nào "high" — đó là bình thường.
+  * "medium" — đáng đọc trong tuần, chưa cần đổi việc gì ngay.
+  * "low" — biết cho rộng, không hành động.
+  KHÔNG suy urgency từ action_type: một "read" vẫn có thể "high", một "test" vẫn có thể "low".
 - risks: list[str] các rủi ro nếu adopt (license, security, privacy, vendor-lock, cost, maturity). Mỗi rủi ro 1 câu ngắn. Trả [] nếu không có rủi ro đáng kể.
 - so_what: 1 câu (≤200 ký tự) trả lời "bài này thay đổi gì cho team?" — PHẦI KHÁC signal và summary_short.
 - adoption_ring: chọn 1 giá trị duy nhất từ {adoption_rings}. Adopt = nên dùng ngay. Trial = thử nghiệm. Assess = đánh giá thêm. Hold = chưa nên dùng.
@@ -173,13 +193,13 @@ VÍ DỤ 1:
   "nature": "Cơ hội",
   "summary_short": "NPM ra mắt staged publishing yêu cầu 2FA khi phát hành gói và bổ sung các cờ kiểm soát quyền truy cập tệp/mạng khi cài đặt.",
   "summary_medium": "Cập nhật mới của NPM tập trung vào bảo mật chuỗi cung ứng. Tính năng staged publishing cho phép nhà phát triển trì hoãn phát hành gói để chờ phê duyệt qua 2FA. Đồng thời, các cờ cài đặt mới như --allow-file và --allow-remote giúp giới hạn quyền truy cập của gói vào tài nguyên máy hoặc mạng trong quá trình cài đặt.",
-  "affected_roles": ["DevOps", "Security"],
+  "affected_roles": ["Dev", "Security"],
   "confidence": 0.95,
   "signal": "NPM siết chặt bảo mật chuỗi cung ứng bằng cách ép xác thực 2FA khi publish và cô lập môi trường cài đặt gói.",
   "why_it_matters": "Giúp ngăn chặn tấn công đầu độc mã nguồn qua các gói phụ thuộc độc hại và bảo vệ hệ thống CI/CD khỏi việc cài đặt gói tùy tiện.",
   "recommendations": {{
-    "DevOps": {{"action_type": "test", "note": "Thử nghiệm cấu hình các cờ cài đặt mới trên môi trường build local."}},
-    "Security": {{"action_type": "read", "note": "Đánh giá chính sách phê duyệt 2FA đối với các gói npm nội bộ trước khi release."}}
+    "Dev": {{"action_type": "test", "note": "Thử nghiệm cấu hình các cờ cài đặt mới trên môi trường build local.", "urgency": "medium"}},
+    "Security": {{"action_type": "read", "note": "Đánh giá chính sách phê duyệt 2FA đối với các gói npm nội bộ trước khi release.", "urgency": "high"}}
   }},
   "risks": ["Một số tool CI/CD cũ có thể không tương thích với các cờ cài đặt mới và cần nâng cấp npm CLI."],
   "so_what": "Quy trình phát hành và cài đặt gói npm giờ đây bắt buộc phải kiểm soát chặt chẽ hơn thông qua 2FA và cô lập tài nguyên.",
@@ -204,13 +224,13 @@ VÍ DỤ 2:
   "nature": "Cơ hội",
   "summary_short": "PyTorch 2.6 ra mắt tối ưu hóa biên dịch dynamic shape giúp tăng 15% tốc độ huấn luyện mô hình Transformer và giảm bộ nhớ tiêu thụ.",
   "summary_medium": "Phiên bản PyTorch 2.6 tập trung vào cải thiện hiệu năng huấn luyện. Nhờ tối ưu hóa cơ chế biên dịch dynamic shape, thời gian huấn luyện Transformer được rút ngắn 15%. Các số liệu thực tế đo đạc trên GPU H100 cho thấy dung lượng bộ nhớ tiêu thụ giảm từ 45GB xuống còn 38GB đối với pipeline huấn luyện LLaMA.",
-  "affected_roles": ["Data/AI", "Infrastructure"],
+  "affected_roles": ["AI Engineer", "Tech Lead"],
   "confidence": 0.9,
   "signal": "PyTorch 2.6 nâng cấp hiệu năng huấn luyện Transformer đáng kể thông qua tối ưu dynamic shape compiler.",
   "why_it_matters": "Giảm trực tiếp chi phí hạ tầng tính toán (GPU) và rút ngắn thời gian thử nghiệm cho các dự án AI quy mô lớn.",
   "recommendations": {{
-    "Data/AI": {{"action_type": "test", "note": "Chạy thử nghiệm huấn luyện mô hình hiện tại với PyTorch 2.6 trên GPU dev."}},
-    "Infrastructure": {{"action_type": "watch", "note": "Theo dõi mức độ sử dụng tài nguyên GPU của các team AI khi nâng cấp."}}
+    "AI Engineer": {{"action_type": "test", "note": "Chạy thử nghiệm huấn luyện mô hình hiện tại với PyTorch 2.6 trên GPU dev.", "urgency": "high"}},
+    "Tech Lead": {{"action_type": "watch", "note": "Theo dõi mức độ sử dụng tài nguyên GPU của các team AI khi nâng cấp.", "urgency": "low"}}
   }},
   "risks": ["Các thư viện custom CUDA cũ có thể cần biên dịch lại để tương thích với PyTorch 2.6."],
   "so_what": "Huấn luyện AI trên PyTorch nay nhanh hơn và tiết kiệm tài nguyên GPU hơn.",
@@ -236,7 +256,7 @@ Trả về ONLY valid JSON (không markdown, không code block):
   "signal": "<1 câu cô đọng implication, khác title>",
   "why_it_matters": "<1-2 câu vì sao quan trọng với team VN>",
   "recommendations": {{
-    "<role trong affected_roles>": {{"action_type": "<watch|read|test|PoC|roadmap>", "note": "<1 câu khuyến nghị>"}}
+    "<role trong affected_roles>": {{"action_type": "<watch|read|test|PoC|roadmap>", "note": "<1 câu khuyến nghị>", "urgency": "<high|medium|low>"}}
   }},
   "risks": ["<rủi ro 1>", "<rủi ro 2>"],
   "so_what": "<1 câu trả lời bài này thay đổi gì cho team>",
@@ -273,6 +293,7 @@ def build_prompt(title: str, content: str) -> str:
         natures=", ".join(ALLOWED_NATURES),
         roles=", ".join(ALLOWED_ROLES),
         action_types=", ".join(ALLOWED_ACTION_TYPES),
+        role_urgencies=", ".join(ALLOWED_ROLE_URGENCY),
         adoption_rings=", ".join(ALLOWED_ADOPTION_RINGS),
         title=title,
         content=content[:6000],

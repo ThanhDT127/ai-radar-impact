@@ -123,7 +123,7 @@ The `insights` table has 7 actionable fields (added 2026-05-09). 4 are AI-genera
 **AI-generated (Gemini, may be NULL on parse failure):**
 - `signal` (TEXT) — 1 câu cô đọng implication, KHÁC title
 - `why_it_matters` (TEXT) — 1-2 câu vì sao quan trọng với team VN
-- `recommendations` (JSONB) — `{ role: { action_type, note } }`, keys ⊆ `affected_roles`
+- `recommendations` (JSONB) — `{ role: { action_type, note, urgency } }`, keys ⊆ `affected_roles`
 - `risks` (TEXT[]) — danh sách rủi ro nếu adopt; có thể `[]`
 
 **Rule-based (computed in `AnalyzerService` / `DeduplicationEngine`):**
@@ -132,6 +132,19 @@ The `insights` table has 7 actionable fields (added 2026-05-09). 4 are AI-genera
 - `vietnam_relevance` (`high` | `medium` | `low`) — `_compute_vietnam_relevance(source, topics)`
 
 **Closed set `ALLOWED_ACTION_TYPES`** (in `app/ai/prompts.py`): `watch`, `read`, `test`, `PoC`, `roadmap`.
+
+### ⚠️ Hai khái niệm `urgency` khác nhau — đừng nhầm
+
+| | `insights.urgency` (cột) | `recommendations[role].urgency` (khoá JSONB) |
+|---|---|---|
+| Nghĩa | Mức ảnh hưởng của tin **nói chung** | Mức ảnh hưởng tới **riêng một vai trò** |
+| Tập giá trị | `critical`/`high`/`medium`/`low` | `high`/`medium`/`low` (`ALLOWED_ROLE_URGENCY`, **không có** `critical`) |
+| Nguồn | Rule-based, suy tất định từ `impact_label` | Gemini chấm cho từng vai trò |
+| Dùng để | Dashboard, sort, emoji trong digest | **Quyết định gửi alert** (ngưỡng `high`) |
+
+Cột `insights.urgency` **không còn** quyết định alert/digest (đổi 2026-07-20, change `role-aware-alert`).
+Thiếu khoá `urgency` hoặc giá trị ngoài tập đóng → coi như `medium` → không alert; nhờ vậy insight cũ
+không bắn alert hồi tố.
 
 Backwards compatible: insights cũ chưa có 7 fields trả `null`; UI hide gracefully (không render placeholder).
 
@@ -150,10 +163,12 @@ Phát hành mới, Thay đổi chính sách, Cập nhật quy định, Cảnh b�
 **Nature (`ALLOWED_NATURES`):**
 Rủi ro, Cơ hội, Tuân thủ, Thông tin chung, Theo dõi
 
-**Affected Roles (`ALLOWED_ROLES`):**
-Executive, Engineering, Data/AI, Product, Content/Marketing, Legal/Compliance, HR/L&D, DevOps, Infrastructure, Security, BA/QA, Designer/UX, Toàn công ty
+**Affected Roles (`ALLOWED_ROLES`) — 9 vai trò:**
+Data Analyst, Data Scientist, AI Engineer, Data Engineer, Security, Dev, Tech Lead, Người dùng phổ thông, Toàn công ty
 
-5 vai trò technical (DevOps/Infrastructure/Security/BA/QA/Designer/UX) thêm vào 2026-05-09 — Gemini chọn role specific nhất; Engineering là fallback nếu không match. Chi tiết phân biệt: DevOps (CI/CD, deployment), Infrastructure (cloud, network), Security (AppSec, CVE, compliance kỹ thuật), BA/QA (requirements, test automation), Designer/UX (design system).
+Đây là bộ **chức danh** dùng cho `insights.affected_roles`, keys của `insights.recommendations`, và `Subscriber.roles` (bot Telegram). Frontend map nhãn hiển thị trong `RoleBadge.tsx` (`ROLE_DISPLAY_LABEL`) và `TooltipContent.ts` — sửa `ALLOWED_ROLES` phải sửa kèm cả hai.
+
+> ⚠️ **KHÔNG nhầm với `Source.target_roles`** — một taxonomy **khác**, 13 giá trị theo *chức năng phòng ban* (Executive, Engineering, Data/AI, Product, Content/Marketing, Legal/Compliance, HR/L&D, DevOps, Infrastructure, Security, BA/QA, Designer/UX, Toàn công ty). Nó là metadata chiến lược nguồn (đo độ phủ), không bao giờ xuất hiện trên insight. Định nghĩa tại `app/scripts/audit_target_roles.py::TARGET_ROLE_TAXONOMY`. Hai bộ chỉ trùng nhau ở `Security` và `Toàn công ty`.
 
 ### Rule-Based Mappings (in `AnalyzerService`)
 
@@ -189,6 +204,7 @@ Minimum confidence to publish: **0.3** (below this → `failed`, no insight crea
 - **AWS What's New source name**: The source name contains a Unicode right single quotation mark (`'`, U+2019) instead of a regular apostrophe. Exact-match DB lookups against this source name must use the correct character.
 - **Content limit in prompt**: Gemini prompt truncates content to 6000 chars (`prompts.py:87`). Longer articles are silently cut — this affects arXiv and long blog posts.
 - **Confidence threshold mismatch**: `openspec/specs/ai-analysis/spec.md` says confidence < 0.5 → `needs_review`, but actual code uses 0.3 as the discard threshold with no `needs_review` state. The spec is aspirational; code is authoritative.
+- **Tính tỉ lệ qua gate phải lọc `gate_skipped = false`**: khi gate lỗi parse, code fail-open cho doc đi thẳng vào deep analysis. Doc đó kết thúc ở `analyzed` y hệt doc qua gate thật, nên nếu đếm cả nó thì tỉ lệ qua gate bị thổi lên (đo 20/07/2026: thô 18/24/26/36% so với thật 13/17/20/22%, lệch gần gấp rưỡi). Cột `raw_documents.gate_skipped` (migration 009) đánh dấu nhóm này. **Số liệu trước 20/07/2026 có nhiễu** vì chưa có cột — doc cũ mặc định `false` và không backfill được, đừng so trực tiếp với số sau ngày đó.
 - **Delivery + --reload**: `DELIVERY_ENABLED=true` cần `TELEGRAM_BOT_TOKEN`; không chạy kèm `uvicorn --reload` (long-polling trùng sau reload → Telegram trả 409 Conflict). Env liên quan: `DELIVERY_DIGEST_HOUR` (giờ **VN**, không phải UTC), `DELIVERY_ALERT_INTERVAL_MINUTES`, `DELIVERY_MAX_ALERTS_PER_HOUR`, `DELIVERY_ALERT_LOOKBACK_HOURS`/`DELIVERY_DIGEST_LOOKBACK_HOURS`, `DASHBOARD_BASE_URL`. Subscription roles dùng 9 `ALLOWED_ROLES` trong `prompts.py`, KHÔNG phải 13 `target_roles` của Source.
 - **Playwright / CloakBrowser crawl** (`source_type: playwright`): `PlaywrightConnector` prefers CloakBrowser via CDP (`CLOAK_CDP_URL`, default `http://cloak:9222`; set empty to force local Chromium). LinkedIn sources need a valid login session file (`config.cookie_file` → `/secrets/states/linkedin_state.json`) created via `playwright codegen --save-storage=...` — see `docs/session_bootstrap.md`. X/Twitter sources were removed on 2026-07-20 (tweets too short to yield insights, duplicated official RSS) — `LOGIN_WALL_URL_MARKERS`/`LOGIN_URLS` cover LinkedIn only. Sessions self-renew (sliding refresh) after successful runs, so the `secrets/states` mount is **rw** (not `:ro`). Fingerprint is URL+title, so N different URLs returning the same shell page would each be stored — `PlaywrightConnector._dedup_by_content` drops in-batch content duplicates to prevent that.
 

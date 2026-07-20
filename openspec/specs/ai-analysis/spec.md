@@ -113,9 +113,25 @@ Sau khi insight được tạo, backend MUST tính 3 trường rule-based dựa 
 - **THEN** `topics` chứa Vietnamese-specific topic → `medium`
 - **THEN** còn lại → `low`
 
+### Requirement: `recommendations` mang mức ảnh hưởng theo từng vai trò
+
+Mỗi entry trong `recommendations` MUST có thêm khoá `urgency` thuộc tập đóng
+`high | medium | low` (`ALLOWED_ROLE_URGENCY`), thể hiện mức ảnh hưởng của tin **tới riêng vai trò
+đó** — KHÔNG phải mức ảnh hưởng của tin nói chung (đã có ở `insights.urgency`). Prompt MUST hướng dẫn
+Gemini chấm tiết kiệm: `high` chỉ dành cho tin mà người giữ vai trò đó cần đọc ngay trong ngày.
+
+#### Scenario: Cùng một tin, mức khác nhau theo vai trò
+- **WHEN** Gemini phân tích một lỗ hổng bảo mật trong thư viện hệ thống với `affected_roles = [Security, Dev]`
+- **THEN** `recommendations["Security"].urgency` = `high` còn `recommendations["Dev"].urgency` có thể là `medium` hoặc `low`
+
+#### Scenario: Tin không phải bảo mật vẫn có thể `high`
+- **WHEN** Gemini phân tích một bản phát hành model lớn với `affected_roles` chứa `AI Engineer`
+- **THEN** `recommendations["AI Engineer"].urgency` ĐƯỢC PHÉP là `high`, không phụ thuộc `event_type` hay `insights.urgency`
+
 ### Requirement: Validate `recommendations` post-parse
 
-Sau khi parse Gemini output, backend MUST validate `recommendations` để loại bỏ keys hallucinate.
+Sau khi parse Gemini output, backend MUST validate `recommendations` để loại bỏ keys hallucinate và
+giá trị ngoài tập đóng, bao gồm cả khoá `urgency`.
 
 #### Scenario: Drop role không trong affected_roles
 - **WHEN** Gemini trả `recommendations` có key không thuộc `affected_roles`
@@ -127,23 +143,33 @@ Sau khi parse Gemini output, backend MUST validate `recommendations` để loạ
 - **THEN** backend remove cả entry đó
 - **THEN** log warning
 
-### Requirement: ALLOWED_ROLES mở rộng thêm 5 vai trò technical
+#### Scenario: `urgency` không hợp lệ hoặc thiếu
+- **WHEN** `recommendations[role]` có `urgency` không thuộc `high|medium|low`, hoặc không có khoá `urgency`
+- **THEN** backend đặt `urgency = "medium"` cho entry đó và giữ nguyên phần còn lại của entry
+- **THEN** log warning nêu rõ role và giá trị bị thay
 
-`ALLOWED_ROLES` trong `app/ai/prompts.py` MUST chứa thêm 5 vai trò: `DevOps`, `Infrastructure`, `Security`, `BA/QA`, `Designer/UX` (tổng 13 roles).
+### Requirement: ALLOWED_ROLES là bộ 9 chức danh
 
-#### Scenario: Prompt expose 5 role mới
+`ALLOWED_ROLES` trong `app/ai/prompts.py` MUST là đúng 9 giá trị chức danh: `Data Analyst`,
+`Data Scientist`, `AI Engineer`, `Data Engineer`, `Security`, `Dev`, `Tech Lead`,
+`Người dùng phổ thông`, `Toàn công ty`.
+
+Bộ này MUST tách bạch với `Source.target_roles` (13 giá trị theo chức năng phòng ban — xem spec
+`source-region-tagging`). `affected_roles` và keys của `recommendations` chỉ nhận giá trị từ
+`ALLOWED_ROLES`.
+
+#### Scenario: Prompt expose đúng 9 vai trò
 - **WHEN** `build_prompt` được gọi
-- **THEN** prompt chứa danh sách 13 vai trò trong `VAI TRÒ CHO PHÉP`
-- **THEN** Gemini có thể trả `affected_roles` chứa giá trị mới (ví dụ `["DevOps", "Security"]`)
+- **THEN** prompt chứa đúng 9 vai trò trong `VAI TRÒ CHO PHÉP`
+- **THEN** Gemini trả `affected_roles` là tập con của 9 giá trị này
 
-#### Scenario: Recommendations hợp lệ với role mới
-- **WHEN** Gemini trả `recommendations = {"DevOps": {"action_type": "test", "note": "..."}}`
-- **THEN** `_validate_recommendations` giữ nguyên entry vì `DevOps` ∈ `affected_roles`
-- **THEN** insight lưu recommendation cho DevOps
+#### Scenario: Từ chối vai trò thuộc taxonomy target_roles
+- **WHEN** Gemini trả `affected_roles` chứa `DevOps` hoặc `Engineering` (giá trị của `target_roles`, không thuộc `ALLOWED_ROLES`)
+- **THEN** backend drop giá trị đó và log warning
 
-#### Scenario: Backwards compatible với insight cũ
-- **WHEN** insight cũ có `affected_roles = ["Engineering"]` (8 role taxonomy cũ)
-- **THEN** không bị invalidate; vẫn render bình thường
+#### Scenario: Frontend label đồng bộ
+- **WHEN** thêm/đổi tên giá trị trong `ALLOWED_ROLES`
+- **THEN** `ROLE_DISPLAY_LABEL` + `ROLE_CLASS` (`RoleBadge.tsx`) và `TOOLTIP.role` (`TooltipContent.ts`) phải cập nhật cùng lúc, nếu không badge render không có nhãn/màu
 
 ### Requirement: Tìm kiếm Insights theo từ khóa từ Database (search-insights-backend)
 
@@ -201,4 +227,52 @@ Hệ thống SHALL giới hạn số tài liệu phân tích mỗi ngày (`max_d
 
 - **WHEN** sang ngày mới (theo UTC)
 - **THEN** `daily_used` tính lại từ 0 do đếm theo `analyzed_at::date = today`
+
+### Requirement: Đầu ra gate ràng buộc bằng schema
+
+Lần gọi Gemini cho **gate pre-screening** MUST khai báo `response_schema` cho API, không chỉ
+`response_mime_type` (vốn chỉ gợi ý định dạng, không ép cấu trúc). Tập đóng `content_type` MUST được
+biểu diễn thành enum trong schema, và schema MUST dựng từ chính hằng số `ALLOWED_CONTENT_TYPES` trong
+`app/ai/prompts.py` — KHÔNG chép tay giá trị, để schema không trôi khỏi tập đóng.
+
+Lần gọi **deep analysis** MUST KHÔNG dùng `response_schema`. Đã thử và đo (20/07/2026): ràng buộc
+schema khiến model sinh trường văn bản tự do (`why_it_matters`) lặp vô nghĩa tới ~6500 ký tự cho tới
+khi chạm `max_output_tokens` và bị cắt giữa chuỗi, làm 100% document qua gate lỗi parse.
+`max_length` trong schema KHÔNG cứu được vì Vertex không thực thi ràng buộc đó. Tập đóng ở nhánh này
+do lớp validate post-parse bảo đảm.
+
+#### Scenario: Gate không trả được `content_type` ngoài tập đóng
+- **WHEN** Gemini gate định gán `content_type = "tutorial"` (không thuộc `ALLOWED_CONTENT_TYPES`)
+- **THEN** API từ chối giá trị đó do ràng buộc enum
+
+#### Scenario: Thêm giá trị vào tập đóng
+- **WHEN** một giá trị mới được thêm vào `ALLOWED_CONTENT_TYPES` trong `prompts.py`
+- **THEN** schema gửi cho Gemini tự động chứa giá trị đó, không cần sửa thêm chỗ nào khác
+
+#### Scenario: Deep analysis giữ đầu ra không ràng buộc schema
+- **WHEN** `analyze` gọi Gemini
+- **THEN** config KHÔNG chứa `response_schema`; tập đóng được bảo đảm bởi `_validate_recommendations` / `_validate_affected_roles` / `_validate_adoption_ring`
+
+### Requirement: Fail-open phải để lại dấu vết
+
+Khi gate lỗi và document được cho đi thẳng vào deep analysis (fail-open), hệ thống MUST ghi lại rằng
+document đó **chưa được gate chấm** (`raw_documents.gate_skipped`). Thống kê tỉ lệ qua gate MUST loại
+các document này ra, vì chúng không phải bằng chứng nội dung đạt chuẩn.
+
+#### Scenario: Gate lỗi parse
+- **WHEN** `gate_analyze` trả về lỗi parse JSON cho một document
+- **THEN** document vẫn được deep analysis (giữ nguyên fail-open) **và** `gate_skipped = true`
+
+#### Scenario: Thống kê không tính document bỏ qua gate
+- **WHEN** tính tỉ lệ qua gate của một nguồn
+- **THEN** các document có `gate_skipped = true` không được tính vào tử số lẫn mẫu số
+
+### Requirement: Log đủ dài để chẩn đoán lỗi parse
+
+Khi parse JSON thất bại, hệ thống MUST log phần raw response đủ dài để nhìn thấy vị trí gây lỗi, kèm
+tổng độ dài response. Log dài chỉ áp dụng ở nhánh lỗi, không áp cho đường chạy bình thường.
+
+#### Scenario: Lỗi ở vị trí xa đầu chuỗi
+- **WHEN** JSON hỏng ở ký tự thứ 517 của response
+- **THEN** log chứa đủ nội dung để thấy ký tự đó, không bị cắt trước vị trí lỗi
 

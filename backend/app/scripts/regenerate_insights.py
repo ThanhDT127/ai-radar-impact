@@ -27,6 +27,7 @@ from app.services.analyzer import (
     TRUST_SCORE_MAP,
     _compute_urgency,
     _compute_vietnam_relevance,
+    _validate_affected_roles,
     _validate_recommendations,
 )
 
@@ -75,14 +76,15 @@ async def main(limit: int, since: str | None, source_id: str | None) -> None:
                 continue
 
             impact_label = IMPACT_LABEL_MAP.get(ai.event_type or "", ins.impact_label)
-            recs = _validate_recommendations(ai.recommendations, ai.affected_roles)
+            affected_roles = _validate_affected_roles(ai.affected_roles)
+            recs = _validate_recommendations(ai.recommendations, affected_roles)
 
             ins.summary_short = ai.summary_short or ins.summary_short
             ins.summary_medium = ai.summary_medium or ins.summary_medium
             ins.topics = ai.topics or ins.topics
             ins.event_type = ai.event_type or ins.event_type
             ins.nature = ai.nature or ins.nature
-            ins.affected_roles = ai.affected_roles or ins.affected_roles
+            ins.affected_roles = affected_roles or ins.affected_roles
             ins.confidence = ai.confidence or ins.confidence
             ins.impact_label = impact_label
             ins.trust_score = TRUST_SCORE_MAP.get(source.trust_tier, ins.trust_score)

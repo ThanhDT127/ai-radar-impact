@@ -3,10 +3,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, JSON, String, Text
+from sqlalchemy import Boolean, ForeignKey, JSON, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import false, func
 
 from app.database import Base
 
@@ -35,6 +35,12 @@ class RawDocument(Base):
     )  # pending, analyzed, low_signal, failed, expired
     # Set khi doc đạt trạng thái terminal (analyzed/low_signal/failed) — dùng đếm daily cap.
     analyzed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # True khi gate lỗi parse và doc được cho đi thẳng vào deep analysis (fail-open).
+    # Thống kê tỉ lệ qua gate PHẢI lọc `gate_skipped == False`, nếu không sẽ đếm cả
+    # doc chưa từng được gate chấm. Doc trước 2026-07-20 mang false (không backfill được).
+    gate_skipped: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false(), default=False
+    )
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

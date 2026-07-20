@@ -9,12 +9,18 @@ from dataclasses import dataclass, field
 from google import genai
 from google.genai import types
 
-from app.ai.prompts import build_gate_prompt, build_prompt
+from app.ai.prompts import ALLOWED_CONTENT_TYPES, build_gate_prompt, build_prompt
+from app.ai.schemas import build_gate_schema
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 MODEL_ID = settings.gemini_model_id
+
+# Chỗ JSON vỡ quan sát được ở char 517 và 1308, nên `text[:200]` không bao giờ
+# chạm tới nguyên nhân. Chỉ log dài ở nhánh exception nên không phình log lúc chạy
+# bình thường (design D5).
+RAW_LOG_CHARS = 2000
 
 
 @dataclass
@@ -83,6 +89,7 @@ class GeminiClient:
                         temperature=0.0,
                         max_output_tokens=4096,
                         response_mime_type="application/json",
+                        response_schema=build_gate_schema(),
                     ),
                 )
                 raw_text = response.text or ""
@@ -114,12 +121,15 @@ class GeminiClient:
         try:
             data = json.loads(text)
         except json.JSONDecodeError as e:
-            logger.warning("Failed to parse gate JSON: %s | raw: %s", e, text[:200])
+            logger.warning(
+                "Failed to parse gate JSON: %s | raw (%d chars): %s",
+                e, len(text), text[:RAW_LOG_CHARS],
+            )
             return GateResult(pass_gate=True, error=f"Gate JSON parse error: {e}")
 
         score = float(data.get("actionability_score", 0.0))
         content_type = data.get("content_type", "noise")
-        if content_type not in ("practical", "strategic", "theoretical", "noise"):
+        if content_type not in ALLOWED_CONTENT_TYPES:
             content_type = "noise"
 
         return GateResult(
@@ -134,6 +144,15 @@ class GeminiClient:
 
         Returns an AnalysisResult. On error, returns result with error field set.
         Retries up to 3 times on 429 rate-limit errors with exponential backoff.
+
+        CHƯA bật `response_schema` ở đây (khác với `gate_analyze`). Đo 20/07/2026 trên
+        2 batch: bật schema cho lần gọi này làm model sinh `why_it_matters` lan man
+        (~6500 ký tự, giới hạn prompt là 300) cho tới khi chạm `max_output_tokens` và
+        bị cắt giữa chuỗi → 16/16 doc qua gate đều lỗi `Unterminated string`, 0 insight
+        tạo được. Thêm `max_length` vào schema KHÔNG cứu được: Vertex không thực thi
+        ràng buộc đó. Gate thì ngược lại — schema chạy sạch (0 lỗi so với nền 3-9/50).
+        Đúng thứ tự Migration Plan của change: bật cho gate trước, analyze để sau khi
+        tìm được cách chặn runaway generation.
         """
         prompt = build_prompt(title=title, content=content)
         _retry_delays = [5, 15, 45]
@@ -188,7 +207,10 @@ class GeminiClient:
         try:
             data = json.loads(text)
         except json.JSONDecodeError as e:
-            logger.warning("Failed to parse Gemini JSON response: %s | raw: %s", e, text[:300])
+            logger.warning(
+                "Failed to parse Gemini JSON response: %s | raw (%d chars): %s",
+                e, len(text), text[:RAW_LOG_CHARS],
+            )
             return AnalysisResult(error=f"JSON parse error: {e}", raw_response={"raw": raw_text})
 
         # v2 actionable fields — graceful: missing/wrong type → None

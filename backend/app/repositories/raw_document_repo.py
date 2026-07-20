@@ -69,6 +69,17 @@ class RawDocumentRepository:
         )
         return list(result.scalars().all())
 
+    async def mark_gate_skipped(self, doc_id: uuid.UUID) -> None:
+        """Đánh dấu doc đi vào deep analysis mà chưa qua gate (fail-open do gate lỗi).
+
+        Thống kê tỉ lệ qua gate phải lọc `gate_skipped == False`, nếu không doc này
+        bị đếm như "qua gate thật".
+        """
+        doc = await self.session.get(RawDocument, doc_id)
+        if doc:
+            doc.gate_skipped = True
+            await self.session.flush()
+
     async def update_status(self, doc_id: uuid.UUID, status: str) -> None:
         """Update processing_status of a raw document.
 

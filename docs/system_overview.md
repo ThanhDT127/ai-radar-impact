@@ -370,8 +370,36 @@ docker-compose exec backend python -m app.scripts.run_delivery --digest
 
 Bật delivery tự động: đặt `TELEGRAM_BOT_TOKEN` (từ @BotFather) và `DELIVERY_ENABLED=true` trong `.env`.
 Bot worker (long-polling) + alert job (mỗi 5 phút) + digest job (8h sáng VN) khởi động cùng backend.
-Người dùng nhắn bot: `/start` → `/subscribe` chọn role → nhận alert critical + digest sáng theo role.
+Người dùng nhắn bot: `/start` → `/subscribe` chọn role → nhận alert + digest sáng theo role.
 Lưu ý: không bật delivery kèm `--reload` (long-polling trùng → Telegram 409 Conflict).
+
+**Alert được gửi cho ai** (đổi 2026-07-20):
+
+Alert nghĩa là **"tin có ảnh hưởng lớn tới vai trò của bạn, đáng đọc ngay"** — KHÔNG phải "khẩn cấp,
+phải xử lý ngay". Một tin được alert cho bạn khi Gemini chấm `urgency = high` cho **đúng vai trò bạn
+đã đăng ký**, đọc từ `insights.recommendations[role].urgency`.
+
+Hệ quả thực tế:
+- Cùng một tin có thể là **alert** với người này và chỉ nằm trong **digest** của người kia. Ví dụ tin
+  lỗ hổng bảo mật: Security nhận alert, Dev chỉ thấy trong digest sáng.
+- Tin **không phải bảo mật** vẫn alert được. Một model/API mới quan trọng sẽ alert cho AI Engineer —
+  trước đây chuỗi cũ (chỉ `Cảnh báo bảo mật` mới đạt `critical`) không bao giờ làm được.
+- Digest là **phần còn lại theo từng người**: mọi tin khớp vai trò mà bạn không nhận alert.
+- Insight tạo trước 2026-07-20 không có dữ liệu urgency theo vai trò nên **không alert** cho ai; chúng
+  vẫn vào digest như thường.
+
+Nếu alert quá nhiều/quá ít, chỉnh mức chặt tay của prompt trong `app/ai/prompts.py` (phần quy tắc
+`urgency` của `recommendations`) rồi đo lại; `DELIVERY_MAX_ALERTS_PER_HOUR` vẫn là lưới an toàn gom
+alert thành 1 tin tổng hợp khi vượt trần.
+
+**Tiêu đề tin Telegram** dùng chung luật với dashboard: `insights.title` là tiêu đề gốc của bài (phần
+lớn nguồn tiếng Anh), nên khi title không có dấu tiếng Việt thì hiển thị `summary_short` (do Gemini
+viết tiếng Việt) thay thế. Luật này nằm ở `delivery_engine.display_title()` và
+`InsightCard.tsx::makeDisplayTitle` — **sửa một bên phải sửa bên kia**, nếu không cùng một tin sẽ mang
+hai tiêu đề khác nhau ở hai nơi. Dòng digest cắt ở 110 ký tự cho dễ quét; tin alert không cắt.
+
+Lưu ý tên chủ đề (`📌 DevTools & Frameworks`, `AI/ML Ứng dụng`…) vẫn hiển thị nguyên giá trị taxonomy
+v3, giống hệt dashboard. Muốn Việt hoá thì phải làm bảng nhãn dùng chung cho cả hai nơi.
 
 ### Xem kết quả
 
@@ -416,7 +444,7 @@ Bản này chưa phải nền tảng hoàn chỉnh. Các phần sau chưa có ho
 - đã có Admin API (Bearer token) cho ingestion, analysis, source management — chưa có Admin UI
 - chưa có scheduler tự động
 - chưa có search / filter nâng cao
-- đã có delivery Telegram (alert critical + digest ngày, subscribe theo role) — Zalo/email/Teams chưa có (adapter interface đã chừa chỗ)
+- đã có delivery Telegram (alert theo mức ảnh hưởng tới vai trò + digest ngày, subscribe theo role) — Zalo/email/Teams chưa có (adapter interface đã chừa chỗ)
 - chưa có workflow review / approve
 - đã có HackerNews, Reddit, Web article connector — 18 nguồn đang active
 - đã có semantic dedup (TF-IDF, threshold 0.6) — Phase 2 có thể nâng lên vector embedding (pgvector)

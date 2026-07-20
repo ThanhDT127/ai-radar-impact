@@ -199,8 +199,12 @@ class InsightRepository:
         items = [self._serialize_insight(item) for item in result.scalars().unique().all()]
         return items, total
 
-    async def list_for_delivery(self, since: datetime, critical: bool) -> list[Insight]:
-        """Insight published/primary tạo từ `since` — cho alert (critical) / digest (còn lại).
+    async def list_for_delivery(self, since: datetime) -> list[Insight]:
+        """Insight published/primary tạo từ `since` — dùng cho CẢ alert lẫn digest.
+
+        Không còn phân hoạch theo `Insight.urgency == "critical"`: việc một tin là alert
+        hay digest nay phụ thuộc vai trò của từng người nhận
+        (`recommendations[role].urgency`), nên chỉ tầng service quyết định được.
 
         Trả ORM entities (không serialize) vì delivery cần fields thô để render template.
         """
@@ -210,10 +214,6 @@ class InsightRepository:
             .where(Insight.is_primary == True)  # noqa: E712
             .where(Insight.created_at >= since)
         )
-        if critical:
-            query = query.where(Insight.urgency == "critical")
-        else:
-            query = query.where(or_(Insight.urgency != "critical", Insight.urgency.is_(None)))
         result = await self.session.execute(query.order_by(Insight.created_at.asc()))
         return list(result.scalars().all())
 
