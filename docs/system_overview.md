@@ -361,17 +361,13 @@ curl -X POST http://localhost:8000/api/v1/admin/sources `
 curl http://localhost:8000/api/v1/admin/sources -H "Authorization: Bearer changeme"
 ```
 
-### Chạy delivery Telegram thủ công (alert / digest)
+### Delivery (transport telegram đã gỡ 21/07 — đang làm lại bằng email)
 
-```powershell
-docker-compose exec backend python -m app.scripts.run_delivery --alert
-docker-compose exec backend python -m app.scripts.run_delivery --digest
-```
-
-Bật delivery tự động: đặt `TELEGRAM_BOT_TOKEN` (từ @BotFather) và `DELIVERY_ENABLED=true` trong `.env`.
-Bot worker (long-polling) + alert job (mỗi 5 phút) + digest job (8h sáng VN) khởi động cùng backend.
-Người dùng nhắn bot: `/start` → `/subscribe` chọn role → nhận alert + digest sáng theo role.
-Lưu ý: không bật delivery kèm `--reload` (long-polling trùng → Telegram 409 Conflict).
+Transport Telegram (bot `/start` `/subscribe`, worker long-polling, `run_delivery.py`) **đã gỡ** ngày
+21/07/2026. Delivery engine (alert/digest, chống trùng, chọn người theo vai trò) là **channel-neutral**
+và được giữ nguyên — chỉ thiếu adapter. Đang làm lại bằng **email**: thêm `EmailAdapter` đăng ký với key
+`DELIVERY_CHANNEL = "email"` (trong `scheduler.py`) + CLI trigger mới, rồi bật `DELIVERY_ENABLED=true`.
+Logic "alert được gửi cho ai" bên dưới không đổi theo transport.
 
 **Alert được gửi cho ai** (đổi 2026-07-20):
 
@@ -392,7 +388,7 @@ Nếu alert quá nhiều/quá ít, chỉnh mức chặt tay của prompt trong `
 `urgency` của `recommendations`) rồi đo lại; `DELIVERY_MAX_ALERTS_PER_HOUR` vẫn là lưới an toàn gom
 alert thành 1 tin tổng hợp khi vượt trần.
 
-**Tiêu đề tin Telegram** dùng chung luật với dashboard: `insights.title` là tiêu đề gốc của bài (phần
+**Tiêu đề tin gửi đi** dùng chung luật với dashboard: `insights.title` là tiêu đề gốc của bài (phần
 lớn nguồn tiếng Anh), nên khi title không có dấu tiếng Việt thì hiển thị `summary_short` (do Gemini
 viết tiếng Việt) thay thế. Luật này nằm ở `delivery_engine.display_title()` và
 `InsightCard.tsx::makeDisplayTitle` — **sửa một bên phải sửa bên kia**, nếu không cùng một tin sẽ mang
@@ -444,7 +440,7 @@ Bản này chưa phải nền tảng hoàn chỉnh. Các phần sau chưa có ho
 - đã có Admin API (Bearer token) cho ingestion, analysis, source management — chưa có Admin UI
 - chưa có scheduler tự động
 - chưa có search / filter nâng cao
-- đã có delivery Telegram (alert theo mức ảnh hưởng tới vai trò + digest ngày, subscribe theo role) — Zalo/email/Teams chưa có (adapter interface đã chừa chỗ)
+- delivery engine (alert theo mức ảnh hưởng tới vai trò + digest ngày, subscribe theo role) là channel-neutral — transport Telegram đã gỡ 21/07, **đang làm lại bằng email** (adapter interface đã chừa chỗ)
 - chưa có workflow review / approve
 - đã có HackerNews, Reddit, Web article connector — 18 nguồn đang active
 - đã có semantic dedup (TF-IDF, threshold 0.6) — Phase 2 có thể nâng lên vector embedding (pgvector)

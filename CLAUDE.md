@@ -40,9 +40,8 @@ docker-compose exec backend python -m app.scripts.run_analysis
 docker-compose exec backend python -m app.scripts.reset_failed       # re-queue failed docs
 docker-compose exec backend python -m app.scripts.cleanup_en_insights # remove English insights
 
-# Delivery (Telegram) — run alert cycle / digest manually
-docker-compose exec backend python -m app.scripts.run_delivery --alert
-docker-compose exec backend python -m app.scripts.run_delivery --digest
+# Delivery: transport Telegram đã gỡ (21/07). Đang làm lại bằng email — CLI trigger sẽ thêm lại
+# cùng EmailAdapter. Delivery engine (alert/digest) là channel-neutral, giữ nguyên.
 ```
 
 ## Architecture
@@ -68,9 +67,8 @@ Layered architecture with strict separation:
 - **`models/`** — SQLAlchemy async ORM (UUIDs, PostgreSQL arrays)
 - **`schemas/`** — Pydantic v2 request/response validation
 - **`routes/`** — FastAPI endpoints under `/api/v1/`
-- **`channels/`** — `ChannelAdapter` interface + `DeliveryMessage` (channel-neutral) + `TelegramAdapter`/`TelegramAPI` (HTML parse mode, escape động, split >4096 chars). Registry pattern như connectors.
-- **`bot/`** — Telegram transport: `worker.py` (long-polling `getUpdates`, backoff, heartbeat), `router.py` (route lệnh/callback/text; `register_chat_handler()` là hook cho chatbot-qa qua `app.state.bot_router`), `handlers.py` (subscription flow `/start` `/subscribe` `/unsubscribe` `/status` — inline keyboard đa chọn 9 `ALLOWED_ROLES`)
-- **`services/delivery_engine.py`** — M7 Delivery: alert critical (job 5 phút, lookback 24h, trần alert/giờ → gom tổng hợp) + digest ngày (giờ VN, lookback 48h, cap 15 hiển thị nhưng log hết); chống trùng qua `delivery_log` unique (insight_id, chat_id, kind); thuần template, KHÔNG gọi Gemini
+- **`channels/`** — `ChannelAdapter` interface + `DeliveryMessage` (channel-neutral) + Registry pattern như connectors. **`TelegramAdapter` + toàn bộ `bot/` transport đã gỡ 21/07** (đang làm lại bằng email); chỉ còn lớp abstraction trung lập để gắn `EmailAdapter`.
+- **`services/delivery_engine.py`** — M7 Delivery: alert critical (job 5 phút, lookback 24h, trần alert/giờ → gom tổng hợp) + digest ngày (giờ VN, lookback 48h, cap 15 hiển thị nhưng log hết); chống trùng qua `delivery_log` unique (insight_id, chat_id, kind); thuần template, KHÔNG gọi Gemini. **Channel-neutral** (nhận `ChannelAdapter`) — dùng lại được cho email; `subscribers.chat_id`/`delivery_log.chat_id` còn là định danh Telegram, sẽ đổi sang email khi làm lại.
 - **`config.py`** — `BaseSettings` reads from `.env`; `database.py` creates async engine
 
 Key rules in `AnalyzerService`:
@@ -166,7 +164,7 @@ Rủi ro, Cơ hội, Tuân thủ, Thông tin chung, Theo dõi
 **Affected Roles (`ALLOWED_ROLES`) — 9 vai trò:**
 Data Analyst, Data Scientist, AI Engineer, Data Engineer, Security, Dev, Tech Lead, Người dùng phổ thông, Toàn công ty
 
-Đây là bộ **chức danh** dùng cho `insights.affected_roles`, keys của `insights.recommendations`, và `Subscriber.roles` (bot Telegram). Frontend map nhãn hiển thị trong `RoleBadge.tsx` (`ROLE_DISPLAY_LABEL`) và `TooltipContent.ts` — sửa `ALLOWED_ROLES` phải sửa kèm cả hai.
+Đây là bộ **chức danh** dùng cho `insights.affected_roles`, keys của `insights.recommendations`, và `Subscriber.roles` (delivery). Frontend map nhãn hiển thị trong `RoleBadge.tsx` (`ROLE_DISPLAY_LABEL`) và `TooltipContent.ts` — sửa `ALLOWED_ROLES` phải sửa kèm cả hai.
 
 > ⚠️ **KHÔNG nhầm với `Source.target_roles`** — một taxonomy **khác**, 13 giá trị theo *chức năng phòng ban* (Executive, Engineering, Data/AI, Product, Content/Marketing, Legal/Compliance, HR/L&D, DevOps, Infrastructure, Security, BA/QA, Designer/UX, Toàn công ty). Nó là metadata chiến lược nguồn (đo độ phủ), không bao giờ xuất hiện trên insight. Định nghĩa tại `app/scripts/audit_target_roles.py::TARGET_ROLE_TAXONOMY`. Hai bộ chỉ trùng nhau ở `Security` và `Toàn công ty`.
 
@@ -205,7 +203,8 @@ Minimum confidence to publish: **0.3** (below this → `failed`, no insight crea
 - **Content limit in prompt**: Gemini prompt truncates content to 6000 chars (`prompts.py:87`). Longer articles are silently cut — this affects arXiv and long blog posts.
 - **Confidence threshold mismatch**: `openspec/specs/ai-analysis/spec.md` says confidence < 0.5 → `needs_review`, but actual code uses 0.3 as the discard threshold with no `needs_review` state. The spec is aspirational; code is authoritative.
 - **Tính tỉ lệ qua gate phải lọc `gate_skipped = false`**: khi gate lỗi parse, code fail-open cho doc đi thẳng vào deep analysis. Doc đó kết thúc ở `analyzed` y hệt doc qua gate thật, nên nếu đếm cả nó thì tỉ lệ qua gate bị thổi lên (đo 20/07/2026: thô 18/24/26/36% so với thật 13/17/20/22%, lệch gần gấp rưỡi). Cột `raw_documents.gate_skipped` (migration 009) đánh dấu nhóm này. **Số liệu trước 20/07/2026 có nhiễu** vì chưa có cột — doc cũ mặc định `false` và không backfill được, đừng so trực tiếp với số sau ngày đó.
-- **Delivery + --reload**: `DELIVERY_ENABLED=true` cần `TELEGRAM_BOT_TOKEN`; không chạy kèm `uvicorn --reload` (long-polling trùng sau reload → Telegram trả 409 Conflict). Env liên quan: `DELIVERY_DIGEST_HOUR` (giờ **VN**, không phải UTC), `DELIVERY_ALERT_INTERVAL_MINUTES`, `DELIVERY_MAX_ALERTS_PER_HOUR`, `DELIVERY_ALERT_LOOKBACK_HOURS`/`DELIVERY_DIGEST_LOOKBACK_HOURS`, `DASHBOARD_BASE_URL`. Subscription roles dùng 9 `ALLOWED_ROLES` trong `prompts.py`, KHÔNG phải 13 `target_roles` của Source.
+- **Gate phán theo 4 TRỤ CỘT công ty (không phải IoT-only)**: `GATE_PROMPT` đánh giá impact-vs-thông-báo theo phạm vi Rạng Đông gồm **① IoT/R&D · ② Agent/AI/Data Science (phòng AI/DS) · ③ Smart Home · ④ Bảo mật hệ thống/dữ liệu (duyệt mạnh)** — sửa 21/07/2026 (change `w4-gate-accuracy`, T10). Bài chạm ≥1 trụ mới đáng xét; không chạm trụ nào → loại. **Ngoại lệ học thuật (thể loại) đã BỎ** — arXiv/paper nay xét theo *relevance trụ cột + tính chuyển-giao* (chuyển-giao-được vs incrementalism leaderboard), không còn "là arXiv → pass". `ANALYSIS_PROMPT` bối cảnh đã sync theo. Đo trên 54 doc có nhãn tay: accuracy **70%→94%**, recall **53%→100%** (0 FN), precision 92% (3 FP). Benchmark 54-doc + nhãn ở `openspec/changes/w4-gate-accuracy/eval/` — **chạy lại khi sửa `GATE_PROMPT`** (không có unit test cho tiêu chí gate). Gate đọc **2000 ký tự đầu** content (`build_gate_prompt`), khác deep-analysis 6000.
+- **Delivery (transport telegram đã gỡ 21/07, đang làm lại bằng email)**: đã xoá `bot/`, `channels/telegram.py`, `run_delivery.py`, spec `telegram-bot-transport` + `delivery-subscription`, config `telegram_bot_token`. **Giữ** lớp channel-neutral: `channels/base.py` (`ChannelAdapter`/`DeliveryMessage`), `services/delivery_engine.py`, models `Subscriber`/`DeliveryLog` (còn `chat_id`, sẽ đổi email), spec `delivery-engine`. Env delivery **channel-neutral** vẫn dùng: `DELIVERY_DIGEST_HOUR` (giờ **VN**), `DELIVERY_ALERT_INTERVAL_MINUTES`, `DELIVERY_MAX_ALERTS_PER_HOUR`, `DELIVERY_ALERT_LOOKBACK_HOURS`/`DELIVERY_DIGEST_LOOKBACK_HOURS`, `DASHBOARD_BASE_URL`. `scheduler.py` gọi delivery job qua `DELIVERY_CHANNEL = "email"` (đăng ký `EmailAdapter` với key này khi làm lại). Subscription roles dùng 9 `ALLOWED_ROLES` trong `prompts.py`, KHÔNG phải 13 `target_roles` của Source. ⚠️ Change `chatbot-qa` (đang mở) từng hook vào `app.state.bot_router` — hook đó đã mất theo `bot/`, cần respec khi làm chatbot.
 - **Playwright / CloakBrowser crawl** (`source_type: playwright`): `PlaywrightConnector` prefers CloakBrowser via CDP (`CLOAK_CDP_URL`, default `http://cloak:9222`; set empty to force local Chromium). LinkedIn sources need a valid login session file (`config.cookie_file` → `/secrets/states/linkedin_state.json`) created via `playwright codegen --save-storage=...` — see `docs/session_bootstrap.md`. X/Twitter sources were removed on 2026-07-20 (tweets too short to yield insights, duplicated official RSS) — `LOGIN_WALL_URL_MARKERS`/`LOGIN_URLS` cover LinkedIn only. Sessions self-renew (sliding refresh) after successful runs, so the `secrets/states` mount is **rw** (not `:ro`). Fingerprint is URL+title, so N different URLs returning the same shell page would each be stored — `PlaywrightConnector._dedup_by_content` drops in-batch content duplicates to prevent that.
 
 ## Documentation Map

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Đẩy insight tới người dùng qua kênh ngoài (Telegram) thay vì bắt họ mở dashboard: alert cho tin cần
+Đẩy insight tới người dùng qua kênh ngoài (channel-neutral; transport telegram đã gỡ 21/07, đang làm lại bằng email) thay vì bắt họ mở dashboard: alert cho tin cần
 biết ngay, digest gom tin còn lại theo ngày. Chọn người nhận theo vai trò đăng ký, chống gửi trùng
 bằng `delivery_log`, và render message thuần template (không gọi AI).
 
@@ -108,7 +108,7 @@ Message SHALL được render thuần từ template + fields có sẵn của ins
 - **THEN** message chứa title, signal, why_it_matters, link về dashboard và nút inline "💬 Hỏi về tin này", không có lượt gọi Gemini nào phát sinh
 
 ### Requirement: Nội dung gửi đi phải là tiếng Việt và khớp dashboard
-Mọi text hiển thị trong tin Telegram SHALL là tiếng Việt. Tiêu đề tin SHALL dùng cùng luật với
+Mọi text hiển thị trong tin gửi đi SHALL là tiếng Việt. Tiêu đề tin SHALL dùng cùng luật với
 dashboard (`InsightCard.tsx::makeDisplayTitle`): nếu `insights.title` không chứa ký tự có dấu tiếng
 Việt và `summary_short` tồn tại thì hiển thị `summary_short`, ngược lại hiển thị `title`.
 
@@ -120,11 +120,11 @@ hiển thị nguyên giá trị đó.
 
 #### Scenario: Tiêu đề gốc tiếng Anh
 - **WHEN** insight có `title = "Microsoft Patches a Record 570 Security Flaws"` và `summary_short` tiếng Việt
-- **THEN** tin Telegram hiển thị `summary_short`, KHÔNG hiển thị tiêu đề tiếng Anh
+- **THEN** tin gửi đi hiển thị `summary_short`, KHÔNG hiển thị tiêu đề tiếng Anh
 
 #### Scenario: Tiêu đề gốc đã là tiếng Việt
 - **WHEN** insight có `title = "Việt Nam ra mắt nền tảng AI mới"`
-- **THEN** tin Telegram giữ nguyên `title`
+- **THEN** tin gửi đi giữ nguyên `title`
 
 #### Scenario: Dòng digest quá dài
 - **WHEN** tiêu đề hiển thị dài hơn 110 ký tự (thường do dùng `summary_short`)

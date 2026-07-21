@@ -54,9 +54,8 @@ class Settings(BaseSettings):
     enable_gate: bool = True
     gate_threshold: float = 0.4
 
-    # Delivery (M7) — Telegram bot, alert/digest. Mặc định TẮT.
-    # LƯU Ý: không bật kèm --reload (long-polling trùng → Telegram 409 Conflict).
-    telegram_bot_token: str = ""
+    # Delivery (M7) — channel-neutral (alert/digest). Transport telegram đã gỡ 21/07;
+    # đang làm lại bằng email. Mặc định TẮT cho tới khi có EmailAdapter.
     delivery_enabled: bool = False
     delivery_digest_hour: int = 8                # giờ VN (Asia/Ho_Chi_Minh) gửi digest hằng ngày
     delivery_alert_interval_minutes: int = 5     # chu kỳ quét insight critical

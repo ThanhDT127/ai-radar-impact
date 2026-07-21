@@ -23,6 +23,10 @@ from app.services.ingestion import IngestionService
 
 logger = logging.getLogger(__name__)
 
+# Key kênh delivery trong ChannelRegistry. Transport telegram đã gỡ 21/07;
+# TODO(gmail): đăng ký EmailAdapter với key này khi làm lại delivery.
+DELIVERY_CHANNEL = "email"
+
 
 async def scheduled_pipeline() -> None:
     """Cào toàn bộ nguồn active rồi phân tích (drain backlog trong daily cap)."""
@@ -46,22 +50,22 @@ async def scheduled_purge() -> None:
 
 
 async def scheduled_alert_cycle() -> None:
-    """Quét insight critical mới → alert Telegram (M7 Delivery)."""
+    """Quét insight critical mới → alert (M7 Delivery, channel-neutral)."""
     from app.channels.base import ChannelRegistry
     from app.services.delivery_engine import DeliveryEngine
 
     async with async_session_maker() as session:
-        await DeliveryEngine(session, ChannelRegistry.get("telegram")).run_alert_cycle()
+        await DeliveryEngine(session, ChannelRegistry.get(DELIVERY_CHANNEL)).run_alert_cycle()
 
 
 async def scheduled_digest() -> None:
-    """Digest hằng ngày (M7 Delivery)."""
+    """Digest hằng ngày (M7 Delivery, channel-neutral)."""
     from app.channels.base import ChannelRegistry
     from app.services.delivery_engine import DeliveryEngine
 
     logger.info("[scheduler] Bắt đầu digest hằng ngày")
     async with async_session_maker() as session:
-        await DeliveryEngine(session, ChannelRegistry.get("telegram")).run_digest()
+        await DeliveryEngine(session, ChannelRegistry.get(DELIVERY_CHANNEL)).run_digest()
 
 
 def create_scheduler(include_pipeline: bool = True, include_delivery: bool = False) -> AsyncIOScheduler:

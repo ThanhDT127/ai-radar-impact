@@ -5,7 +5,6 @@ from app.channels.base import (
     MessageButton,
     SendResult,
 )
-from app.channels.telegram import TelegramAdapter, TelegramAPI
 
 __all__ = [
     "ChannelAdapter",
@@ -13,6 +12,4 @@ __all__ = [
     "DeliveryMessage",
     "MessageButton",
     "SendResult",
-    "TelegramAdapter",
-    "TelegramAPI",
 ]

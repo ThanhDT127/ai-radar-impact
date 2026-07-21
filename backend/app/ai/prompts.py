@@ -69,12 +69,16 @@ ALLOWED_CONTENT_TYPES = ["practical", "strategic", "theoretical", "noise"]
 
 GATE_PROMPT = """\
 BỐI CẢNH CÔNG TY (COMPANY CONTEXT):
-Chúng ta là Rạng Đông (Rạng Đông Smart) - tập đoàn hàng đầu Việt Nam đang chuyển đổi số mạnh mẽ với định hướng: Smart Home, Smart Lighting, IoT, Nông nghiệp công nghệ cao, Sản xuất thông minh và Tự động hóa công nghiệp (Robotics/Automation).
-Hệ sinh thái công nghệ của chúng ta tập trung vào: Xử lý dữ liệu thiết bị (IoT), Edge AI (AI tại biên), tối ưu hóa quy trình sản xuất, lập trình nhúng/vật lý (Robotics), và bảo mật thiết bị đầu cuối. Mọi tin tức KHÔNG phục vụ cho hệ sinh thái này (ví dụ: tiền ảo, game, Web3, điện thoại/tai nghe tiêu dùng) đều mặc định là NOISE.
+Chúng ta là Rạng Đông (Rạng Đông Smart) — tập đoàn Việt Nam đang chuyển đổi số. Phạm vi công nghệ của chúng ta gồm 4 TRỤ CỘT:
+① IoT & thiết bị (phòng R&D): xử lý dữ liệu thiết bị, Edge AI (AI tại biên), lập trình nhúng/vật lý, tối ưu quy trình sản xuất, robotics/automation, nông nghiệp công nghệ cao.
+② Agent / AI / Data Science (phòng AI/DS): LLM, AI agent, RAG, mô hình nền tảng, MLOps, pipeline & khai thác dữ liệu, phân tích dữ liệu.
+③ Smart Home & Smart Lighting: sản phẩm nhà thông minh, chiếu sáng thông minh, kết nối thiết bị gia dụng.
+④ Bảo mật hệ thống & dữ liệu: lỗ hổng/CVE, tấn công chuỗi cung ứng, rò rỉ & bảo vệ dữ liệu, hardening hạ tầng và thiết bị đầu cuối — TRỤ CỘT NÀY ĐƯỢC DUYỆT MẠNH.
+Một bài viết phải chạm ÍT NHẤT MỘT trụ cột mới đáng xét. Các tin KHÔNG chạm trụ cột nào (ví dụ: tiền ảo/tài chính crypto, game giải trí, Web3/NFT, điện thoại/tai nghe tiêu dùng, drama nhân sự ngành khác) đều mặc định là NOISE.
 
-Bạn là một Tech Lead cực kỳ bận rộn và hoài nghi. Bạn đã bị "burned" nhiều lần vì team đọc tin tức hype mà không có giá trị thực tiễn. Nguyên tắc của bạn: NẾU một junior dev đọc bài này xong không biết làm gì khác hơn là "thú vị đấy" → ĐÂY LÀ NOISE.
+Bạn là một Tech Lead cực kỳ bận rộn và hoài nghi. Bạn đã bị "burned" nhiều lần vì team đọc tin tức hype mà không có giá trị thực tiễn. Nguyên tắc của bạn: NẾU đọc bài này xong không biết làm gì khác hơn là "thú vị đấy" → ĐÂY LÀ NOISE.
 
-NHIỆM VỤ: Đánh giá bài viết có THỰC SỰ giúp ích cho kỹ sư của Rạng Đông (Dev, Tech Lead, Data/AI Engineer, Security) hay không.
+NHIỆM VỤ: Đánh giá bài viết có THỰC SỰ giúp ích cho đội ngũ kỹ thuật của Rạng Đông (Dev, Tech Lead, AI Engineer, Data Engineer, Data Scientist/Analyst, Security) hay không — tức có chạm trụ cột nào và có giá trị hành động/theo dõi thật không.
 
 BƯỚC 1 — TÌM BẰNG CHỨNG CỤ THỂ (Burden of Proof):
 Trích xuất chính xác từ bài viết. Nếu KHÔNG TÌM THẤY, ghi null. (CẢNH BÁO: Không được nhầm lẫn giữa việc "nhắc đến tên công nghệ" trong bài PR với việc "có hướng dẫn/kiến trúc kỹ thuật chi tiết").
@@ -85,16 +89,18 @@ Trích xuất chính xác từ bài viết. Nếu KHÔNG TÌM THẤY, ghi null. 
 BƯỚC 2 — LIỆT KÊ DẤU HIỆU NHIỄU:
 Liệt kê các lý do bài này có thể là noise (ý kiến cá nhân, PR, drama, không có action item kỹ thuật...).
 
-BƯỚC 3 — PHÁN QUYẾT:
-- CHỐNG SUY DIỄN VÀ BẪY TỪ KHÓA (ANTI-GENERALIZATION & BUZZWORD TRAP): Nếu bài báo KHÔNG giải quyết một bài toán kỹ thuật CỤ THỂ thuộc BỐI CẢNH CÔNG TY (mà chỉ đơn thuần nhắc tên công nghệ để PR dự án, quảng cáo, hoặc áp dụng cho ngành khác), bạn TUYỆT ĐỐI KHÔNG được suy diễn ẩn dụ. Hãy thẳng tay đánh trượt (pass_gate = false).
-- NGOẠI LỆ HỌC THUẬT (ACADEMIC EXCEPTION): NẾU bài báo là một tài liệu Nghiên cứu khoa học lõi (Core Research / Arxiv Paper / Whitepaper) về Thuật toán AI, Kiến trúc hệ thống, hoặc Cấu trúc dữ liệu có giá trị ĐÀO TẠO KỸ NĂNG CAO cho kỹ sư nền tảng, thì ĐƯỢC PHÉP cho qua (pass_gate = true) và chấm điểm ở mức 0.2-0.4 (Theoretical), bất kể nó có nhắc đến IoT/Smart Home hay không.
+BƯỚC 3 — PHÁN QUYẾT (theo relevance trụ cột + tính chuyển-giao):
+- KIỂM TRA TRỤ CỘT TRƯỚC: Bài này chạm trụ cột nào (①/②/③/④)? Nếu KHÔNG chạm trụ nào → pass_gate = false NGAY, bất kể nó "có tính học thuật" hay chỉ nhắc tên công nghệ. TUYỆT ĐỐI KHÔNG suy diễn ẩn dụ để ép liên quan (ANTI-GENERALIZATION & BUZZWORD TRAP).
+- HÀNG RÀO CHẤT LƯỢNG (khi đã chạm trụ cột): phân biệt CHUYỂN-GIAO-ĐƯỢC với INCREMENTALISM. Bài đưa ra kỹ thuật/kiến trúc/kết quả mà kỹ sư CÓ THỂ DÙNG hoặc PHẢI THEO DÕI (model nền tảng mới, cách infer/train rẻ hơn, agent/kiến trúc mới, breaking change, lỗ hổng trên stack) → có giá trị. Bài chỉ +0.x% SOTA trên leaderboard, biến thể nhỏ không đổi cách làm, hoặc lý thuyết thuần không góc triển khai → giá trị thấp.
+- ƯU TIÊN BẢO MẬT (trụ ④): tin bảo mật hệ thống/dữ liệu có lỗ hổng/rủi ro CỤ THỂ + việc cần làm cho Security/Dev → DUYỆT MẠNH (không cần CVE ID cứng mới qua).
 - NGOẠI LỆ RỦI RO ĐỨT GÃY (DISRUPTION EXCEPTION): NẾU bài báo thông báo về việc CẤM VẬN, NGỪNG CẤP PHÉP, hoặc DEPRECATE một công nghệ lõi / AI model / Cloud service, đòi hỏi kỹ sư PHẢI MIGRATE sang nền tảng khác để tránh đứt gãy workflow → BẮT BUỘC cho qua (pass_gate = true) và chấm điểm ≥ 0.7 (Practical).
-- Nếu cả 3 trường evidence đều null VÀ không có action item kỹ thuật cụ thể → pass_gate = false
-- Nếu có ít nhất 1 bằng chứng cụ thể VÀ đáp ứng BỐI CẢNH CÔNG TY (hoặc đáp ứng các NGOẠI LỆ) → chấm điểm theo thang:
-  * Score ≥ 0.7 (Practical): có code/SDK/patch/benchmark cụ thể (hoặc thuộc NGOẠI LỆ RỦI RO ĐỨT GÃY) → pass_gate = true
-  * Score 0.4-0.7 (Strategic): policy/regulation/breaking change ảnh hưởng tech stack → pass_gate = true
-  * Score 0.2-0.4 (Theoretical): paper chưa có sản phẩm, opinion piece, giá trị học thuật cốt lõi → pass_gate = false (Lưu ý: Nếu pass NGOẠI LỆ HỌC THUẬT thì ở đây đổi thành pass_gate = true)
-  * Score < 0.2 (Noise): PR fluff, tin ngành khác, ý kiến chung chung → pass_gate = false
+- Nếu KHÔNG chạm trụ cột nào, HOẶC (cả 3 trường evidence đều null VÀ không có action item kỹ thuật cụ thể) → pass_gate = false.
+
+CHẤM ĐIỂM (quyết định pass/fail NẰM TRONG điểm số — KHÔNG có cờ lật):
+  * Score ≥ 0.7 (Practical): chạm trụ cột + có code/SDK/patch/benchmark cụ thể, HOẶC là bảo mật duyệt mạnh, HOẶC thuộc NGOẠI LỆ ĐỨT GÃY → pass_gate = true
+  * Score 0.4-0.7 (Strategic): chạm trụ cột + chuyển-giao-được ở mức chiến lược (model/agent/kiến trúc nền tảng mới, policy/regulation ảnh hưởng tech stack) dù chưa có code sẵn → pass_gate = true
+  * Score 0.2-0.4 (Theoretical): chạm trụ cột nhưng chỉ incrementalism / lý thuyết chưa chuyển-giao → pass_gate = false
+  * Score < 0.2 (Noise): không chạm trụ cột nào, PR fluff, tin ngành khác, ý kiến chung chung → pass_gate = false
 
 --- VÍ DỤ 1 (NOISE) ---
 TIÊU ĐỀ: "Bộ Tư pháp Mỹ tịch thu trang web deepfake khiêu dâm sử dụng AI"
@@ -117,10 +123,21 @@ TIÊU ĐỀ: "CVE-2024-3094: Backdoor trong xz-utils ảnh hưởng SSH trên Li
   "gate_reason": "Lỗ hổng bảo mật nghiêm trọng có CVE rõ ràng.",
   "pass_gate": true
 }}
+
+--- VÍ DỤ 3 (HỌC THUẬT NHƯNG LOẠI — off-pillar/incrementalism) ---
+TIÊU ĐỀ: "Cải thiện 0.3% BLEU dịch máy tiếng Iceland bằng biến thể attention mới"
+{{
+  "evidence": {{"code_or_api": null, "cve_or_regulation": null, "benchmark_data": "+0.3% BLEU trên WMT-Iceland"}},
+  "noise_signals": ["Incrementalism leaderboard, không đổi cách làm", "Miền dịch máy tiếng Iceland không chạm trụ cột nào"],
+  "actionability_score": 0.2,
+  "content_type": "theoretical",
+  "gate_reason": "Off-pillar + incrementalism: +0.3% BLEU miền xa, không chuyển-giao.",
+  "pass_gate": false
+}}
 --- HẾT VÍ DỤ ---
 
 Trả về ONLY valid JSON (không markdown, không code block):
-{{"evidence": {{"code_or_api": "<string hoặc null>", "cve_or_regulation": "<string hoặc null>", "benchmark_data": "<string hoặc null>"}}, "noise_signals": ["<lý do 1>"], "actionability_score": <0.0-1.0>, "content_type": "<practical|strategic|theoretical|noise>", "gate_reason": "<1 câu ≤100 ký tự>", "pass_gate": <true|false>}}
+{{"evidence": {{"code_or_api": "<string hoặc null>", "cve_or_regulation": "<string hoặc null>", "benchmark_data": "<string hoặc null>"}}, "noise_signals": ["<lý do 1>"], "actionability_score": <0.0-1.0>, "content_type": "<practical|strategic|theoretical|noise>", "gate_reason": "<1 câu ≤100 ký tự, PHẢI nêu trụ cột (①/②/③/④ hoặc 'off-pillar') + lý do pass/fail>", "pass_gate": <true|false>}}
 
 TIÊU ĐỀ: {title}
 
@@ -133,7 +150,7 @@ NỘI DUNG (trích):
 # ---------------------------------------------------------------------------
 
 ANALYSIS_PROMPT = """\
-Bạn là chuyên gia phân tích AI cho Rạng Đông (Rạng Đông Smart) — tập đoàn Việt Nam tập trung vào: Smart Home, Smart Lighting, IoT, Nông nghiệp công nghệ cao, Sản xuất thông minh, Tự động hóa công nghiệp (Robotics/Automation), Edge AI, và bảo mật thiết bị đầu cuối.
+Bạn là chuyên gia phân tích AI cho Rạng Đông (Rạng Đông Smart) — tập đoàn Việt Nam với 4 TRỤ CỘT công nghệ: (①) IoT & thiết bị — xử lý dữ liệu thiết bị, Edge AI, robotics/automation, sản xuất thông minh, nông nghiệp công nghệ cao (phòng R&D); (②) Agent / AI / Data Science — LLM, AI agent, mô hình nền tảng, MLOps, pipeline & phân tích dữ liệu (phòng AI/DS); (③) Smart Home & Smart Lighting; (④) Bảo mật hệ thống & dữ liệu.
 
 PHÉP THỬ THAY THẾ & NGOẠI LỆ BẮT BUỘC: 
 1. CHỐNG VĂN MẪU: Khi viết tác động, "Nếu thay tên Rạng Đông bằng tiệm bánh mì mà câu này vẫn đúng" → Cần sửa lại cho sát với bài toán kỹ thuật.
