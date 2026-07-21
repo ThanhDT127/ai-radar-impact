@@ -15,12 +15,18 @@ class MessageButton:
 
 @dataclass
 class DeliveryMessage:
-    """Message trung lập kênh — adapter tự render sang định dạng kênh."""
+    """Message trung lập kênh — adapter tự render sang định dạng kênh.
+
+    `body` luôn là bản plain-text đọc được độc lập; `html_body` là bản giàu định dạng
+    tuỳ chọn (email gửi cả hai dạng multipart/alternative).
+    """
 
     title: str
     body: str
     url: str | None = None
     buttons: list[MessageButton] = field(default_factory=list)
+    html_body: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -39,8 +45,20 @@ class ChannelAdapter(ABC):
 
     @abstractmethod
     async def send(self, recipient_ref: str, message: DeliveryMessage) -> SendResult:
-        """Gửi message tới recipient (định danh dạng chuỗi, vd. Telegram chat_id)."""
+        """Gửi message tới recipient (định danh dạng chuỗi, vd. địa chỉ email)."""
         ...
+
+    async def open(self) -> None:
+        """Mở tài nguyên dùng chung cho cả một lượt gửi (mặc định no-op).
+
+        SMTP mở 1 kết nối cho cả run thay vì mỗi email một kết nối — vừa nhanh hơn
+        vừa tránh bị nhà cung cấp throttle.
+        """
+        return None
+
+    async def close(self) -> None:
+        """Đóng tài nguyên đã mở ở `open()` (mặc định no-op)."""
+        return None
 
 
 class ChannelRegistry:

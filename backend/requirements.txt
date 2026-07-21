@@ -32,6 +32,9 @@ scikit-learn==1.5.2
 # Playwright — headless browser for SPA scraping
 playwright==1.49.0
 
+# Email delivery (M7) — SMTP async
+aiosmtplib==3.0.2
+
 # Utilities
 python-dotenv==1.0.1
 pytest>=8.0.0

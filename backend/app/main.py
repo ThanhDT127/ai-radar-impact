@@ -12,6 +12,8 @@ from app.routes.health import router as health_router
 from app.routes.insights import router as insights_router
 from app.routes.insights_stats import router as insights_stats_router
 from app.routes.sources import router as sources_router
+from app.routes.subscribers import router as subscribers_router
+from app.routes.subscribers import unsubscribe_router
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +22,8 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Khởi động scheduler nhúng (pipeline) nếu bật.
 
-    Delivery transport (telegram) đã gỡ 21/07 — đang làm lại bằng email; delivery jobs
-    tạm TẮT cho tới khi có EmailAdapter.
+    Delivery job bật/tắt theo DELIVERY_ENABLED — mặc định tắt để migration xong không
+    tự bắn mail; bật tay sau khi `run_delivery --dry-run` cho kết quả đúng.
     LƯU Ý: scheduler không nên chạy kèm --reload (job trùng).
     """
     scheduler = None
@@ -29,7 +31,9 @@ async def lifespan(app: FastAPI):
     if settings.enable_scheduler:
         from app.scheduler import create_scheduler
 
-        scheduler = create_scheduler(include_pipeline=True, include_delivery=False)
+        scheduler = create_scheduler(
+            include_pipeline=True, include_delivery=settings.delivery_enabled
+        )
         scheduler.start()
         logger.info(
             "Scheduler ĐÃ BẬT — pipeline giờ (VN): %s, purge %dh30",
@@ -65,3 +69,5 @@ app.include_router(insights_stats_router)
 app.include_router(insights_router)
 app.include_router(sources_router)
 app.include_router(admin_router)
+app.include_router(subscribers_router)
+app.include_router(unsubscribe_router)

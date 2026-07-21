@@ -1,4 +1,6 @@
-"""Data access cho bảng subscribers (delivery-telegram)."""
+"""Data access cho bảng subscribers (người nhận bản tin qua email)."""
+
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,56 +8,88 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.subscriber import Subscriber
 
 
+def normalize_email(email: str) -> str:
+    """Chuẩn hoá địa chỉ để so trùng không phụ thuộc hoa/thường và khoảng trắng."""
+    return email.strip().lower()
+
+
 class SubscriberRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get(self, chat_id: int) -> Subscriber | None:
+    async def get_by_id(self, subscriber_id: uuid.UUID) -> Subscriber | None:
+        return await self.session.get(Subscriber, subscriber_id)
+
+    async def get_by_email(self, email: str) -> Subscriber | None:
         result = await self.session.execute(
-            select(Subscriber).where(Subscriber.chat_id == chat_id)
+            select(Subscriber).where(Subscriber.email == normalize_email(email))
         )
         return result.scalar_one_or_none()
 
-    async def ensure_exists(self, chat_id: int, display_name: str | None = None) -> Subscriber:
-        """Upsert từ /start: tạo bản ghi (roles=[], active) nếu chưa có.
+    async def get_by_unsubscribe_token(self, token: str) -> Subscriber | None:
+        result = await self.session.execute(
+            select(Subscriber).where(Subscriber.unsubscribe_token == token)
+        )
+        return result.scalar_one_or_none()
 
-        Không auto-reactivate người đã /unsubscribe — chỉ /subscribe mới bật lại.
-        """
-        sub = await self.get(chat_id)
-        if sub is None:
-            sub = Subscriber(chat_id=chat_id, roles=[], active=True, display_name=display_name)
-            self.session.add(sub)
-        elif display_name and sub.display_name != display_name:
-            sub.display_name = display_name
-        await self.session.commit()
-        return sub
-
-    async def set_roles(self, chat_id: int, roles: list[str], display_name: str | None = None) -> Subscriber:
-        """Lưu lựa chọn /subscribe; đăng ký lại cũng bật active."""
-        sub = await self.get(chat_id)
-        if sub is None:
-            sub = Subscriber(chat_id=chat_id, roles=roles, active=True, display_name=display_name)
-            self.session.add(sub)
-        else:
-            sub.roles = roles
-            sub.active = True
-            if display_name:
-                sub.display_name = display_name
-        await self.session.commit()
-        return sub
-
-    async def deactivate(self, chat_id: int) -> bool:
-        """/unsubscribe: active=false, giữ bản ghi. Trả False nếu chưa từng đăng ký."""
-        sub = await self.get(chat_id)
-        if sub is None:
-            return False
-        sub.active = False
-        await self.session.commit()
-        return True
+    async def list_all(self) -> list[Subscriber]:
+        result = await self.session.execute(select(Subscriber).order_by(Subscriber.created_at))
+        return list(result.scalars().all())
 
     async def list_active(self) -> list[Subscriber]:
-        """Subscriber đang nhận tin (active và đã chọn ít nhất 1 role)."""
+        """Người đang nhận bản tin: active và đã chọn ít nhất 1 role."""
         result = await self.session.execute(
             select(Subscriber).where(Subscriber.active == True)  # noqa: E712
         )
         return [s for s in result.scalars().all() if s.roles]
+
+    async def create(
+        self, email: str, roles: list[str], display_name: str | None = None
+    ) -> Subscriber:
+        sub = Subscriber(
+            email=normalize_email(email),
+            roles=roles,
+            display_name=display_name,
+            active=True,
+        )
+        self.session.add(sub)
+        await self.session.commit()
+        await self.session.refresh(sub)
+        return sub
+
+    async def update(
+        self,
+        subscriber_id: uuid.UUID,
+        roles: list[str] | None = None,
+        active: bool | None = None,
+        display_name: str | None = None,
+    ) -> Subscriber | None:
+        sub = await self.get_by_id(subscriber_id)
+        if sub is None:
+            return None
+        if roles is not None:
+            sub.roles = roles
+        if active is not None:
+            sub.active = active
+        if display_name is not None:
+            sub.display_name = display_name
+        await self.session.commit()
+        await self.session.refresh(sub)
+        return sub
+
+    async def delete(self, subscriber_id: uuid.UUID) -> bool:
+        sub = await self.get_by_id(subscriber_id)
+        if sub is None:
+            return False
+        await self.session.delete(sub)
+        await self.session.commit()
+        return True
+
+    async def deactivate_by_token(self, token: str) -> Subscriber | None:
+        """Hủy nhận từ link trong email — giữ bản ghi, chỉ tắt active."""
+        sub = await self.get_by_unsubscribe_token(token)
+        if sub is None:
+            return None
+        sub.active = False
+        await self.session.commit()
+        return sub

@@ -1,8 +1,10 @@
-"""Delivery Engine (M7) — rule-based push: alert theo vai trò + digest hằng ngày.
+"""Delivery Engine (M7) — bản tin định kỳ qua email, nhóm theo vai trò.
 
-Rule v2 (change `role-aware-alert`): `recommendations[role].urgency == "high"` cho đúng vai
-trò người nhận → alert trong ≤5 phút; còn lại → digest sáng.
-Lookback window thay cho "mốc bật delivery"; delivery_log chống gửi trùng.
+Chọn tin bằng XẾP HẠNG rồi lấy top-N cứng, không lọc theo ngưỡng: đo trên dữ liệu thật
+(cửa sổ 108h) vai trò `Security` có 26 tin `urgency=high` còn `Data Scientist` có 0 —
+lọc ngưỡng vừa làm ngập người này vừa bỏ đói người kia.
+
+Vì mỗi kỳ chỉ gửi tối đa 3 tin nên mỗi tin render đầy đủ như trang chi tiết dashboard.
 Format thuần template từ fields có sẵn — KHÔNG gọi Gemini ($0 AI).
 
 Mọi text gửi đi phải là tiếng Việt, khớp dashboard — xem `display_title()`.
@@ -14,7 +16,8 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.channels.base import ChannelAdapter, DeliveryMessage, MessageButton
+from app.channels.base import ChannelAdapter, DeliveryMessage
+from app.channels.email_templates import render_brief
 from app.config import settings
 from app.models.insight import Insight
 from app.models.subscriber import Subscriber
@@ -24,12 +27,15 @@ from app.repositories.subscriber_repo import SubscriberRepository
 
 logger = logging.getLogger(__name__)
 
-DIGEST_DISPLAY_CAP = 15
+DELIVERY_KIND = "brief"
+COMPANY_WIDE_ROLE = "Toàn công ty"
 
-_URGENCY_EMOJI = {"critical": "🚨", "high": "🔴", "medium": "🟠", "low": "🟢"}
-
-# Ngưỡng alert: chỉ `high` mới bắn alert; medium/low rơi vào digest (design D3).
-ALERT_URGENCY_THRESHOLD = "high"
+# Thang điểm xếp hạng — thiếu khoá `urgency` hoặc giá trị ngoài tập đóng coi như medium,
+# nhờ vậy insight cũ không bị đẩy lên đầu cũng không bị loại.
+_ROLE_URGENCY_RANK = {"high": 3, "medium": 2, "low": 1}
+_DEFAULT_URGENCY = "medium"
+_IMPACT_RANK = {"Nghiêm trọng": 4, "Cao": 3, "Trung bình": 2, "Thấp": 1, "Theo dõi": 0}
+_PRACTICAL_KEYS = ("has_security_patch", "has_api_change", "has_migration_guide")
 
 # Dấu tiếng Việt — dùng để nhận biết title đã là tiếng Việt hay còn nguyên bản tiếng Anh.
 # Giữ ĐỒNG BỘ với `hasVietnamese` trong `frontend/src/components/InsightCard.tsx`.
@@ -41,21 +47,6 @@ _VIETNAMESE_CHARS = re.compile(
 
 def has_vietnamese(text: str | None) -> bool:
     return bool(text) and bool(_VIETNAMESE_CHARS.search(text))
-
-
-DIGEST_TITLE_MAX = 110
-
-
-def shorten(text: str, limit: int = DIGEST_TITLE_MAX) -> str:
-    """Cắt ở ranh giới từ cho digest — 1 dòng/tin phải quét nhanh được.
-
-    Cần vì `display_title` có thể trả `summary_short` (tới ~200 ký tự), dài hơn hẳn
-    tiêu đề gốc. Alert không cắt: chỉ có 1 tin nên đọc đầy đủ được.
-    """
-    if len(text) <= limit:
-        return text
-    cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,.;:–-")
-    return f"{cut}…"
 
 
 def display_title(insight: Insight) -> str:
@@ -73,98 +64,108 @@ def display_title(insight: Insight) -> str:
 
 
 def roles_match(subscriber_roles: list[str], affected_roles: list[str] | None) -> bool:
-    """Subscriber nhận insight khi giao role khác rỗng; 'Toàn công ty' → mọi người.
-
-    Đây là điều kiện của DIGEST. Alert dùng `alert_roles_match` — hẹp hơn.
-    """
+    """Subscriber nhận insight khi giao role khác rỗng; 'Toàn công ty' → mọi người."""
     if not subscriber_roles:
         return False
     affected = affected_roles or []
-    if "Toàn công ty" in affected:
+    if COMPANY_WIDE_ROLE in affected:
         return True
     return bool(set(subscriber_roles) & set(affected))
 
 
-def matched_alert_roles(subscriber_roles: list[str], insight: Insight) -> list[str]:
-    """Các vai trò của subscriber được chấm `high` cho tin này — dùng để log lý do gửi."""
-    recs = insight.recommendations or {}
-    if not isinstance(recs, dict):
-        return []
-    return [
-        role
-        for role in subscriber_roles or []
-        if isinstance(recs.get(role), dict)
-        and recs[role].get("urgency") == ALERT_URGENCY_THRESHOLD
-    ]
+def role_urgency(insight: Insight, role: str) -> str:
+    """`recommendations[role].urgency` — mức ảnh hưởng tới RIÊNG vai trò đó.
 
-
-def alert_roles_match(subscriber_roles: list[str], insight: Insight) -> bool:
-    """True khi ≥1 vai trò của subscriber được chấm `urgency = "high"` cho tin này.
-
-    Đọc `insights.recommendations[role].urgency` — mức ảnh hưởng tới RIÊNG vai trò đó,
-    KHÔNG phải cột vô hướng `insights.urgency`.
-
-    Vai trò có trong `affected_roles` nhưng vắng trong `recommendations` ⇒ không đủ tín
-    hiệu ⇒ không alert (rơi về digest). Insight cũ chưa có khoá `urgency` cũng rơi vào
-    nhánh này nên không alert hồi tố.
+    KHÔNG phải cột vô hướng `insights.urgency` (cột đó suy tất định từ impact_label và
+    trên dữ liệu thật không có giá trị `high` nào).
     """
-    if not subscriber_roles:
-        return False
     recs = insight.recommendations or {}
     if not isinstance(recs, dict):
-        return False
-    for role in subscriber_roles:
-        entry = recs.get(role)
-        if isinstance(entry, dict) and entry.get("urgency") == ALERT_URGENCY_THRESHOLD:
-            return True
-    return False
+        return _DEFAULT_URGENCY
+    entry = recs.get(role)
+    if not isinstance(entry, dict):
+        return _DEFAULT_URGENCY
+    value = entry.get("urgency")
+    return value if value in _ROLE_URGENCY_RANK else _DEFAULT_URGENCY
 
 
-def render_alert(insight: Insight, base_url: str) -> DeliveryMessage:
-    body_parts = [p for p in [insight.signal, insight.why_it_matters] if p]
-    return DeliveryMessage(
-        title=f"🔴 {display_title(insight)}",
-        body="\n\n".join(body_parts),
-        url=f"{base_url}/insights/{insight.id}",
-        buttons=[MessageButton(text="💬 Hỏi về tin này", callback_data=f"ask:{insight.id}")],
+def has_practical_indicator(insight: Insight) -> bool:
+    """Có dấu hiệu cụ thể làm được ngay (bản vá, đổi API, hướng dẫn chuyển đổi)."""
+    raw = insight.practical_indicators or {}
+    return isinstance(raw, dict) and any(raw.get(k) for k in _PRACTICAL_KEYS)
+
+
+def score_for_role(insight: Insight, role: str) -> tuple:
+    """Điểm xếp hạng của một tin đối với MỘT vai trò — so sánh bằng tuple giảm dần."""
+    when = insight.published_at or insight.created_at
+    return (
+        _ROLE_URGENCY_RANK[role_urgency(insight, role)],
+        _IMPACT_RANK.get(insight.impact_label or "", 0),
+        1 if has_practical_indicator(insight) else 0,
+        insight.actionability_score or 0.0,
+        1 if insight.intelligence_tier == "Strategic" else 0,
+        insight.trust_score or 0.0,
+        when.timestamp() if when else 0.0,
     )
 
 
-def render_alert_summary(insights: list[Insight], base_url: str) -> DeliveryMessage:
-    """Tin tổng hợp khi vượt trần alert/giờ — 1 dòng/insight, không nút."""
-    lines = [f"• {shorten(display_title(i))}" for i in insights]
-    return DeliveryMessage(
-        title=f"🔴 {len(insights)} tin đáng đọc ngay (gom do vượt trần tin/giờ)",
-        body="\n".join(lines),
-        url=base_url,
-    )
+def owning_role(subscriber_roles: list[str], insight: Insight) -> str:
+    """Vai trò 'sở hữu' tin trong email — tin khớp nhiều vai trò chỉ hiện một lần.
+
+    Ưu tiên vai trò giao với `affected_roles` và có điểm cao nhất; tin toàn công ty mà
+    người nhận không đăng ký vai trò cụ thể nào thì xếp vào section "Toàn công ty".
+    """
+    affected = insight.affected_roles or []
+    intersect = [r for r in subscriber_roles if r in affected]
+    if not intersect:
+        return COMPANY_WIDE_ROLE
+    return max(intersect, key=lambda r: score_for_role(insight, r))
 
 
-def render_digest(insights: list[Insight], base_url: str) -> DeliveryMessage:
-    """Digest nhóm theo topic đầu tiên, 1 dòng/insight, cap 15 hiển thị."""
-    shown = insights[:DIGEST_DISPLAY_CAP]
-    overflow = len(insights) - len(shown)
+def select_for_subscriber(
+    sub: Subscriber,
+    insights: list[Insight],
+    max_per_role: int | None = None,
+    max_per_email: int | None = None,
+) -> tuple[list[tuple[str, list[Insight]]], int]:
+    """Chọn và sắp tin cho một người nhận.
 
-    by_topic: dict[str, list[Insight]] = {}
-    for insight in shown:
-        topic = insight.topics[0] if insight.topics else "Khác"
-        by_topic.setdefault(topic, []).append(insight)
+    Trả `(sections, overflow)` — sections là `[(vai trò, [insight đã sắp])]` xếp từ khẩn
+    cấp cao xuống thấp; overflow là số tin khớp nhưng không đủ chỗ.
+    """
+    per_role = max_per_role or settings.delivery_max_items_per_role
+    per_email = max_per_email or settings.delivery_max_items_per_email
 
-    lines: list[str] = []
-    for topic, items in by_topic.items():
-        lines.append(f"📌 {topic}")
-        for i in items:
-            emoji = _URGENCY_EMOJI.get(i.urgency or "", "⚪")
-            lines.append(f"  {emoji} {shorten(display_title(i))}")
-        lines.append("")
-    if overflow > 0:
-        lines.append(f"+{overflow} tin khác — xem trên dashboard")
+    candidates = [i for i in insights if roles_match(sub.roles, i.affected_roles)]
+    if not candidates:
+        return [], 0
 
-    return DeliveryMessage(
-        title=f"📰 Bản tin AI Radar {datetime.now():%d/%m}",
-        body="\n".join(lines).strip(),
-        url=base_url,
-    )
+    by_role: dict[str, list[tuple[tuple, Insight]]] = {}
+    for insight in candidates:
+        role = owning_role(sub.roles, insight)
+        by_role.setdefault(role, []).append((score_for_role(insight, role), insight))
+
+    # Trần mỗi vai trò trước, rồi trần toàn email trên phần còn lại
+    ranked: list[tuple[tuple, str, Insight]] = []
+    for role, scored in by_role.items():
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        ranked.extend((score, role, insight) for score, insight in scored[:per_role])
+
+    ranked.sort(key=lambda triple: triple[0], reverse=True)
+    selected = ranked[:per_email]
+    overflow = len(candidates) - len(selected)
+
+    # Gom lại thành section, giữ thứ tự: vai trò có tin khẩn cấp nhất lên trước
+    sections: list[tuple[str, list[Insight]]] = []
+    for _, role, insight in selected:
+        for existing_role, items in sections:
+            if existing_role == role:
+                items.append(insight)
+                break
+        else:
+            sections.append((role, [insight]))
+
+    return sections, overflow
 
 
 class DeliveryEngine:
@@ -174,107 +175,98 @@ class DeliveryEngine:
         self.log_repo = DeliveryLogRepository(session)
         self.adapter = adapter
 
-    async def run_alert_cycle(self) -> dict[str, int]:
-        """Quét insight trong lookback, alert cho subscriber có vai trò bị ảnh hưởng cao."""
-        since = datetime.utcnow() - timedelta(hours=settings.delivery_alert_lookback_hours)
-        insights = await self.insight_repo.list_for_delivery(since)
-        if not insights:
-            return {"sent": 0, "skipped": 0}
+    def _unsubscribe_url(self, sub: Subscriber) -> str:
+        return f"{settings.public_api_base_url}/api/v1/unsubscribe?token={sub.unsubscribe_token}"
 
-        subscribers = await self.subscriber_repo.list_active()
-        sent = skipped = 0
-        for sub in subscribers:
-            sent_count, skipped_count = await self._alert_subscriber(sub, insights)
-            sent += sent_count
-            skipped += skipped_count
-        if sent:
-            logger.info("[delivery] Alert cycle: sent=%d skipped=%d", sent, skipped)
-        return {"sent": sent, "skipped": skipped}
-
-    async def _alert_subscriber(
-        self, sub: Subscriber, insights: list[Insight]
-    ) -> tuple[int, int]:
-        candidates = [i for i in insights if alert_roles_match(sub.roles, i)]
-        if not candidates:
-            return 0, 0
-        for i in candidates:
-            logger.info(
-                "[delivery] chat=%s nhận alert '%s' vì vai trò %s được chấm urgency=%s",
-                sub.chat_id,
-                (i.title or "")[:60],
-                matched_alert_roles(sub.roles, i),
-                ALERT_URGENCY_THRESHOLD,
-            )
-        already = await self.log_repo.sent_insight_ids(
-            sub.chat_id, "alert", [i.id for i in candidates]
+    def _build_message(
+        self, sub: Subscriber, sections: list[tuple[str, list[Insight]]], overflow: int
+    ) -> DeliveryMessage:
+        titles = {i.id: display_title(i) for _, items in sections for i in items}
+        unsubscribe_url = self._unsubscribe_url(sub)
+        subject, text_body, html_body = render_brief(
+            sections, titles, overflow, settings.dashboard_base_url, unsubscribe_url
         )
-        todo = [i for i in candidates if i.id not in already]
-        if not todo:
-            return 0, len(candidates)
+        return DeliveryMessage(
+            title=subject,
+            body=text_body,
+            html_body=html_body,
+            url=settings.dashboard_base_url,
+            headers={
+                "List-Unsubscribe": f"<{unsubscribe_url}>",
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
+        )
 
-        recent = await self.log_repo.count_alerts_last_hour(sub.chat_id)
-        if recent + len(todo) > settings.delivery_max_alerts_per_hour:
-            # Bão alert → gom thành 1 tin tổng hợp thay vì gửi lẻ
-            result = await self.adapter.send(
-                str(sub.chat_id), render_alert_summary(todo, settings.dashboard_base_url)
-            )
-            if result.ok:
-                await self.log_repo.log_sent([i.id for i in todo], sub.chat_id, "alert")
-                return len(todo), len(already)
-            return 0, len(already)
+    async def build_for_subscriber(
+        self, sub: Subscriber, insights: list[Insight]
+    ) -> tuple[DeliveryMessage, list[Insight]] | None:
+        """Dựng bản tin của một người, đã loại tin từng gửi. None nếu không có gì để gửi."""
+        candidates = [i for i in insights if roles_match(sub.roles, i.affected_roles)]
+        if not candidates:
+            return None
+        already = await self.log_repo.sent_insight_ids(
+            sub.id, DELIVERY_KIND, [i.id for i in candidates]
+        )
+        fresh = [i for i in candidates if i.id not in already]
+        if not fresh:
+            return None
 
-        sent = 0
-        for insight in todo:
-            result = await self.adapter.send(
-                str(sub.chat_id), render_alert(insight, settings.dashboard_base_url)
-            )
-            # Chỉ log khi gửi OK — lỗi thì chu kỳ sau tự retry nhờ không có log
-            if result.ok:
-                await self.log_repo.log_sent([insight.id], sub.chat_id, "alert")
-                sent += 1
-        return sent, len(already)
+        sections, overflow = select_for_subscriber(sub, fresh)
+        if not sections:
+            return None
+        chosen = [i for _, items in sections for i in items]
+        return self._build_message(sub, sections, overflow), chosen
 
-    async def run_digest(self) -> dict[str, int]:
-        """Gom phần còn lại trong lookback thành 1 digest/subscriber.
+    async def run_brief(self, dry_run: bool = False, force: bool = False) -> dict[str, int]:
+        """Một kỳ bản tin: mỗi người nhận tối đa 1 email, tin sắp theo mức khẩn cấp.
 
-        "Phần còn lại" tính THEO TỪNG NGƯỜI: một tin alert cho Security vẫn là tin digest
-        của người chỉ đăng ký Dev. Loại khỏi digest đúng những tin mà chính subscriber này
-        đủ điều kiện nhận alert, tránh gửi hai lần cùng một tin.
+        `dry_run` dựng nội dung nhưng không gửi và không ghi log.
+        `force` bỏ qua chốt chặn chu kỳ — chỉ dùng khi test.
         """
         since = datetime.utcnow() - timedelta(hours=settings.delivery_digest_lookback_hours)
         insights = await self.insight_repo.list_for_delivery(since)
         subscribers = await self.subscriber_repo.list_active()
 
-        digests_sent = 0
-        for sub in subscribers:
-            candidates = [
-                i
-                for i in insights
-                if roles_match(sub.roles, i.affected_roles)
-                and not alert_roles_match(sub.roles, i)
-            ]
-            if not candidates:
-                continue
-            ids = [i.id for i in candidates]
-            already = await self.log_repo.sent_insight_ids(sub.chat_id, "digest", ids)
-            # Đã alert cho chính người này thì không nhắc lại trong digest. `alert_roles_match`
-            # ở trên đã lo phần lớn; truy vấn này bắt nốt insight cũ từng alert theo luật
-            # critical trước 2026-07-20 (không có role urgency nên lọt qua bộ lọc kia).
-            already_alerted = await self.log_repo.sent_insight_ids(sub.chat_id, "alert", ids)
-            todo = [
-                i for i in candidates if i.id not in already and i.id not in already_alerted
-            ]
-            if not todo:
-                continue  # không gửi digest rỗng
+        sent = failed = skipped = 0
+        if not dry_run:
+            # dry-run không được mở kết nối SMTP thật — chỉ dựng nội dung
+            await self.adapter.open()
+        try:
+            for sub in subscribers:
+                # Chốt chặn chu kỳ: unique constraint chỉ chặn GỬI LẠI CÙNG MỘT TIN.
+                # Lần chạy thừa trong cùng kỳ sẽ lấy 3 tin xếp hạng kế tiếp — vẫn là tin
+                # khác nên lọt qua constraint. Guard này mới là thứ chặn nó.
+                if not force and await self.log_repo.sent_within(
+                    sub.id, DELIVERY_KIND, settings.delivery_min_gap_hours
+                ):
+                    skipped += 1
+                    continue
 
-            result = await self.adapter.send(
-                str(sub.chat_id), render_digest(todo, settings.dashboard_base_url)
-            )
-            if result.ok:
-                # Log MỌI insight trong kỳ, kể cả phần "+N tin khác" —
-                # digest là bản tin, không phải hàng đợi (không dồn sang hôm sau)
-                await self.log_repo.log_sent([i.id for i in todo], sub.chat_id, "digest")
-                digests_sent += 1
+                built = await self.build_for_subscriber(sub, insights)
+                if built is None:
+                    skipped += 1  # không gửi email rỗng
+                    continue
+                message, chosen = built
 
-        logger.info("[delivery] Digest run: %d digest(s) sent", digests_sent)
-        return {"digests": digests_sent}
+                if dry_run:
+                    print(f"\n{'=' * 70}\nTO: {sub.email}\nSUBJECT: {message.title}\n{'=' * 70}")
+                    print(message.body)
+                    sent += 1
+                    continue
+
+                result = await self.adapter.send(sub.email, message)
+                if result.ok:
+                    # Chỉ log tin THỰC SỰ gửi — tin bị loại vì trần còn cạnh tranh kỳ sau
+                    await self.log_repo.log_sent([i.id for i in chosen], sub.id, DELIVERY_KIND)
+                    sent += 1
+                else:
+                    failed += 1
+        finally:
+            if not dry_run:
+                await self.adapter.close()
+
+        logger.info(
+            "[delivery] Bản tin: sent=%d failed=%d skipped=%d (dry_run=%s)",
+            sent, failed, skipped, dry_run,
+        )
+        return {"sent": sent, "failed": failed, "skipped": skipped}

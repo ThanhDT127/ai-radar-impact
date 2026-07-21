@@ -13,7 +13,6 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
 from app.database import async_session_maker
@@ -23,9 +22,9 @@ from app.services.ingestion import IngestionService
 
 logger = logging.getLogger(__name__)
 
-# Key kênh delivery trong ChannelRegistry. Transport telegram đã gỡ 21/07;
-# TODO(gmail): đăng ký EmailAdapter với key này khi làm lại delivery.
-DELIVERY_CHANNEL = "email"
+# Key kênh delivery trong ChannelRegistry — `EmailAdapter` tự đăng ký khi import
+# `app.channels`.
+DELIVERY_CHANNEL = settings.delivery_channel
 
 
 async def scheduled_pipeline() -> None:
@@ -49,23 +48,15 @@ async def scheduled_purge() -> None:
         await purge_expired(session)
 
 
-async def scheduled_alert_cycle() -> None:
-    """Quét insight critical mới → alert (M7 Delivery, channel-neutral)."""
+async def scheduled_brief() -> None:
+    """Bản tin định kỳ theo vai trò (M7 Delivery, channel-neutral)."""
+    import app.channels  # noqa: F401 — import để adapter tự đăng ký vào registry
     from app.channels.base import ChannelRegistry
     from app.services.delivery_engine import DeliveryEngine
 
+    logger.info("[scheduler] Bắt đầu kỳ bản tin")
     async with async_session_maker() as session:
-        await DeliveryEngine(session, ChannelRegistry.get(DELIVERY_CHANNEL)).run_alert_cycle()
-
-
-async def scheduled_digest() -> None:
-    """Digest hằng ngày (M7 Delivery, channel-neutral)."""
-    from app.channels.base import ChannelRegistry
-    from app.services.delivery_engine import DeliveryEngine
-
-    logger.info("[scheduler] Bắt đầu digest hằng ngày")
-    async with async_session_maker() as session:
-        await DeliveryEngine(session, ChannelRegistry.get(DELIVERY_CHANNEL)).run_digest()
+        await DeliveryEngine(session, ChannelRegistry.get(DELIVERY_CHANNEL)).run_brief()
 
 
 def create_scheduler(include_pipeline: bool = True, include_delivery: bool = False) -> AsyncIOScheduler:
@@ -93,20 +84,19 @@ def create_scheduler(include_pipeline: bool = True, include_delivery: bool = Fal
         )
 
     if include_delivery:
+        # Cron theo NGÀY TRONG TUẦN (mặc định mon,thu — cách nhau 3–4 ngày nhưng luôn
+        # rơi ngày làm việc). KHÔNG dùng IntervalTrigger(days=3): jobstore trong bộ nhớ
+        # nên mỗi lần restart mốc kế tiếp tính lại từ đầu ⇒ nhịp trôi dạt. Cũng KHÔNG
+        # dùng day='*/3' (ngày-trong-tháng, nhảy sai ở ranh giới tháng).
         scheduler.add_job(
-            scheduled_alert_cycle,
-            trigger=IntervalTrigger(minutes=settings.delivery_alert_interval_minutes),
-            id="delivery_alert_cycle",
-            max_instances=1,
-            coalesce=True,
-        )
-        # Giờ digest theo giờ VN (D3) — như mọi cron khác trong file này
-        scheduler.add_job(
-            scheduled_digest,
+            scheduled_brief,
             trigger=CronTrigger(
-                hour=settings.delivery_digest_hour, minute=0, timezone="Asia/Ho_Chi_Minh"
+                day_of_week=settings.delivery_digest_days,
+                hour=settings.delivery_digest_hour,
+                minute=0,
+                timezone="Asia/Ho_Chi_Minh",
             ),
-            id="delivery_digest",
+            id="delivery_brief",
             max_instances=1,
             coalesce=True,
             misfire_grace_time=3600,
