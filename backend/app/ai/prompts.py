@@ -294,11 +294,17 @@ NỘI DUNG BÀI VIẾT:
 """
 
 
+# Gate đọc ít hơn deep-analysis (6000) vì chỉ cần phán signal/noise. Đặt tên hằng số để
+# benchmark ở `tests/eval/` khẳng định được fixture cắt đúng bằng cửa sổ gate thật —
+# đổi số này mà quên fixture thì benchmark đo trên đầu vào sai lệch một cách im lặng.
+GATE_CONTENT_LIMIT = 2000
+
+
 def build_gate_prompt(title: str, content: str) -> str:
     """Build the lightweight gate prompt for pre-screening."""
     return GATE_PROMPT.format(
         title=title,
-        content=content[:2000],
+        content=content[:GATE_CONTENT_LIMIT],
     )
 
 

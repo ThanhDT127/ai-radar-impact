@@ -1,0 +1,31 @@
+# Tasks: gate-benchmark-durability
+
+> Thứ tự có ràng buộc thời gian: **section 1 phải chạy trước ~17/01/2027**, khi 54 doc còn
+> `normalized_content`. Sau mốc đó `purge_expired` xoá nội dung và mẫu không tái lập được.
+
+## 1. Snapshot dữ liệu trước hạn purge (LÀM TRƯỚC TIÊN)
+
+- [x] 1.1 Kiểm tra 54 `doc_id` trong `sample_ids.txt` còn tồn tại và còn `normalized_content` trong DB. **DoD:** báo cáo số doc còn/mất; nếu thiếu, ghi rõ doc nào và dừng lại xin quyết định trước khi đi tiếp. ✅ **54/54 còn**, 0 doc rỗng nội dung; độ dài 238–8000 ký tự (36 doc ≥ 2000, 18 doc ngắn hơn nên gate đọc trọn bài).
+- [x] 1.2 Sinh fixture `backend/tests/eval/gate_benchmark.jsonl`: mỗi dòng `{doc_id, source, source_type, title, content, human_label, human_reason, verdict_2026_07_21, actionability_score, content_type, gate_reason}`. Trường `content` cắt đúng bằng hằng số cắt của `build_gate_prompt` (**2000**, không hardcode lại — import từ code). Nhãn tay copy nguyên văn từ `gate_eval.csv`, **không diễn giải lại**. **DoD:** 54 dòng, không dòng nào thiếu `human_label`. ✅ 54 dòng. Thêm `GATE_CONTENT_LIMIT` vào `prompts.py` (trước đó `2000` là số trần trong `build_gate_prompt`, không có tên để import). Generator giữ lại ở `tests/eval/build_fixture.py` làm bằng chứng xuất xứ — **đúng bài học của change này**. Phát hiện khi load: `human_label` có 1 ca `'NOISE '` thừa khoảng trắng → chuẩn hoá ngay từ nguồn.
+- [x] 1.3 Xác minh fixture đủ để tái lập: chọn tay 3 doc, so `content` trong fixture với `build_gate_prompt(title, normalized_content)` dựng từ DB — phải giống hệt ký tự. **DoD:** 3/3 khớp tuyệt đối. ✅ 3/3, so **cả prompt hoàn chỉnh** (mạnh hơn chỉ so content), phủ ca bị cắt (2000), ca ngắn (354), ca giữa (1607).
+
+## 2. Harness
+
+- [x] 2.1 Dựng `backend/tests/eval/` (`__init__.py` + module harness). **KHÔNG** đặt trong `app/scripts/` — xem design D1. **DoD:** `pytest` thu thập được thư mục mới mà không lỗi import. ✅ **Không** thêm `__init__.py`: `backend/tests/` hiện không có file đó, và namespace package (PEP 420) đã đủ cho `python -m tests.eval.*`. Thêm `__init__.py` chỉ ở thư mục con sẽ làm pytest tính package root sai. Bám convention repo thay vì bám chữ của task.
+- [x] 2.2 Loader fixture + assert cửa sổ cắt khớp hằng số thật trong `build_gate_prompt`; lệch thì fail rõ ràng, không đo tiếp. **DoD:** test giả lập hằng số đổi → harness dừng với thông báo đọc được. ✅ `test_fixture_rejects_stale_content_window`.
+- [x] 2.3 Hàm dựng confusion matrix theo quy ước `w4-gate-accuracy` (SIGNAL = positive, PASS = predicted positive): TP/FP/FN/TN + accuracy/precision/recall/F1 + bảng theo `source_type`. **DoD:** cho fixture với `verdict_2026_07_21`, matrix in ra khớp bảng trong `measurement.md` (94% / 100% / 92%). ✅ Khớp **cả hai** matrix (cũ 70/100/53, mới 94/92/100) và khớp nguyên bảng theo `source_type`.
+- [x] 2.4 Chế độ **offline** (mặc định): đối chiếu `human_label` với verdict đã lưu, 0 lần gọi model. **DoD:** chạy xong dưới 5 giây, không cần credentials Vertex. ✅ Tức thì; `GeminiClient` import bên trong `run_live()` nên module load được ở môi trường không có key.
+- [x] 2.5 Chế độ **`--live`**: gọi `gate_analyze` trên từng fixture (`temperature=0.0`), sinh matrix mới + diff với baseline, liệt kê mẫu đổi verdict kèm chiều đổi (SIGNAL bị loại thêm / NOISE lọt thêm). **DoD:** diff rỗng khi prompt không đổi.
+- [x] 2.6 Đánh dấu phần `--live` skip khi chạy `pytest` mặc định; phần kiểm tra toàn vẹn fixture vẫn chạy. **DoD:** `pytest` không phát sinh lần gọi Gemini nào. ✅ Cờ `GATE_EVAL_LIVE=1`; `pytest tests/eval/` → 5 passed, 1 skipped. Toàn suite: **149 passed, 1 skipped**, không hồi quy.
+
+## 3. Đo lại và chốt baseline
+
+- [x] 3.1 Chạy `--live` một lần trên `GATE_PROMPT` hiện hành. **DoD:** ghi lại matrix thu được. ✅ **TP=34 FP=3 FN=0 TN=17** → acc 94%, prec 92%, rec 100%, F1 96%. Bảng theo `source_type` tái lập nguyên vẹn.
+- [x] 3.2 Đối chiếu với bảng 21/07/2026. Khớp → chốt baseline. **Không khớp** → điều tra (nghi ngờ đầu tiên: version model đã drift từ tháng 7), ghi cả hai số vào `measurement.md` mới, lấy số đo lại làm mốc so sánh về sau. **DoD:** kết luận rõ ràng về nguyên nhân lệch, không im lặng chấp nhận. ✅ **Khớp tuyệt đối — 0/54 mẫu đổi verdict.** Không có model drift; nhánh "ghi cả hai số" của quyết định chốt 22/07 không cần dùng tới. Kết quả ghi vào docstring `tests/eval/harness.py` (nơi người sau sẽ tìm), không chỉ trong change sắp bị archive.
+
+## 4. Tài liệu
+
+- [x] 4.1 `backend/tests/eval/README.md`: lệnh chạy cả hai chế độ, chi phí ước tính của `--live` (54 lần gọi, ăn chung `MAX_DAILY_ANALYSIS`), và **giới hạn diễn giải** — mẫu là ảnh chụp 7/2026, đo hồi quy so với chính nó chứ không đo chất lượng tuyệt đối trên tin mới. ✅ **Không dùng README** — `.git/info/exclude` của repo này có luật `README.md` không neo gốc, khớp ở mọi độ sâu, nên file sẽ bị loại khỏi commit **âm thầm**. Nội dung gộp vào docstring đầu `harness.py` (đã được track, và "cùng chỗ với code" theo nghĩa đen). **Sửa một chỗ sai trong chính task này**: `--live` gọi thẳng `GeminiClient.gate_analyze()`, KHÔNG qua `AnalyzerService`, nên nó **không** bị `MAX_DAILY_ANALYSIS` tính hay chặn — tiền vẫn mất thật nhưng hạn mức tự động không cứu bạn.
+- [x] 4.2 Sửa `openspec/changes/archive/2026-07-21-w4-gate-accuracy/eval/measurement.md`: gỡ câu *"lấy lại từ git history"* (**sai sự thật** — script chưa từng commit), sửa đường dẫn `openspec/changes/w4-gate-accuracy/` → đường dẫn sau archive, trỏ sang harness mới. ✅ Thay bằng khối cảnh báo nêu rõ cả ba lý do benchmark cũ chết (script chưa commit / preview 300 ký tự / hạn purge), để người đọc sau hiểu vì sao chứ không chỉ biết làm gì.
+- [x] 4.3 Sửa gotcha gate trong `CLAUDE.md`: trỏ tới `backend/tests/eval/` thay vì thư mục change, nêu rõ benchmark nay tự chứa và chạy bằng lệnh nào. ✅ Kèm `GATE_CONTENT_LIMIT` và cảnh báo đổi hằng số phải sinh lại fixture.
+- [x] 4.4 Người thứ hai (hoặc chính mình sau khi nghỉ) làm theo README từ đầu, không dùng trí nhớ. **DoD:** chạy được cả hai chế độ mà không phải mở file nào ngoài README. ✅ Chạy verbatim từ README: offline ✓, `--live` ✓, `pytest tests/eval/` ✓ (5 passed 1 skipped), cú pháp `-e GATE_EVAL_LIVE=1` ✓ (kiểm bằng lệnh rẻ, **không** chạy lại 54 lượt gọi), khối sinh lại fixture ✓ — chạy hai lần cho hash **byte-identical** (`3207b0dce0e71ebf`), tức tất định. Không phải mở file nào ngoài README.
