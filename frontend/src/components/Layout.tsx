@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 import styles from '../styles/layout.module.css';
 import ThemeToggle from './ThemeToggle';
 import ScrollToTop from './ScrollToTop';
@@ -7,6 +7,11 @@ import ScrollToTop from './ScrollToTop';
 interface LayoutProps {
   children: ReactNode;
 }
+
+const TABS = [
+  { to: '/', label: 'Insights', end: true },
+  { to: '/subscribers', label: 'Người nhận', end: false },
+];
 
 export default function Layout({ children }: LayoutProps) {
   return (
@@ -20,6 +25,20 @@ export default function Layout({ children }: LayoutProps) {
               <span className={styles.brandSub}>Intelligence Dashboard</span>
             </div>
           </Link>
+          <nav className={styles.nav}>
+            {TABS.map((tab) => (
+              <NavLink
+                key={tab.to}
+                to={tab.to}
+                end={tab.end}
+                className={({ isActive }) =>
+                  isActive ? `${styles.navLink} ${styles.navLinkActive}` : styles.navLink
+                }
+              >
+                {tab.label}
+              </NavLink>
+            ))}
+          </nav>
           <div className={styles.headerActions}>
             <span className={styles.headerMeta}>Dashboard phân tích</span>
             <ThemeToggle />

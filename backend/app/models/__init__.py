@@ -3,5 +3,7 @@
 from app.models.source import Source
 from app.models.raw_document import RawDocument
 from app.models.insight import Insight
+from app.models.subscriber import Subscriber
+from app.models.delivery_log import DeliveryLog
 
-__all__ = ["Source", "RawDocument", "Insight"]
+__all__ = ["Source", "RawDocument", "Insight", "Subscriber", "DeliveryLog"]

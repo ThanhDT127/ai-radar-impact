@@ -11,7 +11,8 @@ from app.database import get_session
 from app.middleware.admin_auth import verify_admin_key
 from app.repositories.source_repo import SourceRepository
 from app.schemas.source import SourceCreate, SourceListItem
-from app.services.analyzer import AnalyzerService, _get_daily_count
+from app.repositories.raw_document_repo import RawDocumentRepository
+from app.services.analyzer import AnalyzerService
 from app.services.ingestion import IngestionService
 
 router = APIRouter(
@@ -34,6 +35,7 @@ async def trigger_ingest(
         "summary": {
             "new": summary.new,
             "skipped": summary.skipped,
+            "skipped_old": summary.skipped_old,
             "errors": summary.errors,
             "insights_created": summary.insights_created,
         },
@@ -45,7 +47,7 @@ async def trigger_analyze(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Trigger AI analysis for all pending raw documents."""
-    daily_used = _get_daily_count()
+    daily_used = await RawDocumentRepository(session).count_analyzed_today()
     if daily_used >= settings.max_daily_analysis:
         raise HTTPException(
             status_code=429,

@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -107,6 +107,20 @@ class InsightRepository:
         if insight is not None:
             insight.momentum = momentum
 
+    async def expire_older_than(self, cutoff: datetime) -> int:
+        """Tombstone-purge: ẩn insight có published_at < cutoff (status='expired').
+
+        Soft-purge (chỉ UPDATE) nên FK không ảnh hưởng; `list_paginated` vốn lọc
+        status='published' nên insight expired tự động biến khỏi dashboard.
+        Trả về số hàng bị ảnh hưởng.
+        """
+        result = await self.session.execute(
+            update(Insight)
+            .where(Insight.published_at < cutoff, Insight.status != "expired")
+            .values(status="expired")
+        )
+        return result.rowcount or 0
+
     async def list_paginated(
         self,
         page: int = 1,
@@ -185,6 +199,24 @@ class InsightRepository:
         items = [self._serialize_insight(item) for item in result.scalars().unique().all()]
         return items, total
 
+    async def list_for_delivery(self, since: datetime) -> list[Insight]:
+        """Insight published/primary tạo từ `since` — dùng cho CẢ alert lẫn digest.
+
+        Không còn phân hoạch theo `Insight.urgency == "critical"`: việc một tin là alert
+        hay digest nay phụ thuộc vai trò của từng người nhận
+        (`recommendations[role].urgency`), nên chỉ tầng service quyết định được.
+
+        Trả ORM entities (không serialize) vì delivery cần fields thô để render template.
+        """
+        query = (
+            select(Insight)
+            .where(Insight.status == "published")
+            .where(Insight.is_primary == True)  # noqa: E712
+            .where(Insight.created_at >= since)
+        )
+        result = await self.session.execute(query.order_by(Insight.created_at.asc()))
+        return list(result.scalars().all())
+
     async def get_by_id(self, insight_id: uuid.UUID) -> dict | None:
         """Return a single insight by UUID with references, or None."""
         result = await self.session.execute(
@@ -231,7 +263,11 @@ class InsightRepository:
                 func.count(Insight.id)
                 .filter(Insight.nature.in_(["Cơ hội", "Opportunity"]))
                 .label("opportunities"),
-            ).where(Insight.status == "published")
+            )
+            # Chỉ đếm đại diện cụm dedup — phải khớp với `list_paginated`, nếu không
+            # KPI sẽ lớn hơn số thẻ người dùng bấm vào xem được.
+            .where(Insight.status == "published")
+            .where(Insight.is_primary == True)  # noqa: E712
         )
         active_sources = await self.session.execute(
             select(func.count(Source.id)).where(Source.status == "active")

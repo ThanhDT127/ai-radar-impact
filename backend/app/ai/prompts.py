@@ -46,7 +46,22 @@ ALLOWED_ROLES = [
 
 ALLOWED_ACTION_TYPES = ["watch", "read", "test", "PoC", "roadmap"]
 
+# Mức ảnh hưởng của một tin tới RIÊNG một vai trò, nằm trong
+# `insights.recommendations[role].urgency`. Dùng để quyết định có alert cho vai
+# trò đó không (ngưỡng: "high").
+#
+# KHÁC với cột vô hướng `insights.urgency` (critical|high|medium|low) — cột đó
+# là mức ảnh hưởng của tin NÓI CHUNG, suy tất định từ `impact_label`, dùng cho
+# dashboard/sort. Cố ý bỏ "critical" ở đây để không ai nhầm hai khái niệm:
+# ngữ nghĩa alert là "đáng đọc ngay với vai trò của bạn", không phải "khẩn cấp
+# phải vá ngay".
+ALLOWED_ROLE_URGENCY = ["high", "medium", "low"]
+
 ALLOWED_ADOPTION_RINGS = ["Adopt", "Trial", "Assess", "Hold"]
+
+# Phân loại nội dung do gate chấm. Khai báo một lần ở đây; `response_schema` và
+# `_parse_gate_response` đều đọc từ hằng số này, không chép tay (design D2).
+ALLOWED_CONTENT_TYPES = ["practical", "strategic", "theoretical", "noise"]
 
 # ---------------------------------------------------------------------------
 # Gate Prompt — pre-screening with Burden of Proof + Negative Persona
@@ -54,12 +69,16 @@ ALLOWED_ADOPTION_RINGS = ["Adopt", "Trial", "Assess", "Hold"]
 
 GATE_PROMPT = """\
 BỐI CẢNH CÔNG TY (COMPANY CONTEXT):
-Chúng ta là Rạng Đông (Rạng Đông Smart) - tập đoàn hàng đầu Việt Nam đang chuyển đổi số mạnh mẽ với định hướng: Smart Home, Smart Lighting, IoT, Nông nghiệp công nghệ cao, Sản xuất thông minh và Tự động hóa công nghiệp (Robotics/Automation).
-Hệ sinh thái công nghệ của chúng ta tập trung vào: Xử lý dữ liệu thiết bị (IoT), Edge AI (AI tại biên), tối ưu hóa quy trình sản xuất, lập trình nhúng/vật lý (Robotics), và bảo mật thiết bị đầu cuối. Mọi tin tức KHÔNG phục vụ cho hệ sinh thái này (ví dụ: tiền ảo, game, Web3, điện thoại/tai nghe tiêu dùng) đều mặc định là NOISE.
+Chúng ta là Rạng Đông (Rạng Đông Smart) — tập đoàn Việt Nam đang chuyển đổi số. Phạm vi công nghệ của chúng ta gồm 4 TRỤ CỘT:
+① IoT & thiết bị (phòng R&D): xử lý dữ liệu thiết bị, Edge AI (AI tại biên), lập trình nhúng/vật lý, tối ưu quy trình sản xuất, robotics/automation, nông nghiệp công nghệ cao.
+② Agent / AI / Data Science (phòng AI/DS): LLM, AI agent, RAG, mô hình nền tảng, MLOps, pipeline & khai thác dữ liệu, phân tích dữ liệu.
+③ Smart Home & Smart Lighting: sản phẩm nhà thông minh, chiếu sáng thông minh, kết nối thiết bị gia dụng.
+④ Bảo mật hệ thống & dữ liệu: lỗ hổng/CVE, tấn công chuỗi cung ứng, rò rỉ & bảo vệ dữ liệu, hardening hạ tầng và thiết bị đầu cuối — TRỤ CỘT NÀY ĐƯỢC DUYỆT MẠNH.
+Một bài viết phải chạm ÍT NHẤT MỘT trụ cột mới đáng xét. Các tin KHÔNG chạm trụ cột nào (ví dụ: tiền ảo/tài chính crypto, game giải trí, Web3/NFT, điện thoại/tai nghe tiêu dùng, drama nhân sự ngành khác) đều mặc định là NOISE.
 
-Bạn là một Tech Lead cực kỳ bận rộn và hoài nghi. Bạn đã bị "burned" nhiều lần vì team đọc tin tức hype mà không có giá trị thực tiễn. Nguyên tắc của bạn: NẾU một junior dev đọc bài này xong không biết làm gì khác hơn là "thú vị đấy" → ĐÂY LÀ NOISE.
+Bạn là một Tech Lead cực kỳ bận rộn và hoài nghi. Bạn đã bị "burned" nhiều lần vì team đọc tin tức hype mà không có giá trị thực tiễn. Nguyên tắc của bạn: NẾU đọc bài này xong không biết làm gì khác hơn là "thú vị đấy" → ĐÂY LÀ NOISE.
 
-NHIỆM VỤ: Đánh giá bài viết có THỰC SỰ giúp ích cho kỹ sư của Rạng Đông (Dev, Tech Lead, Data/AI Engineer, Security) hay không.
+NHIỆM VỤ: Đánh giá bài viết có THỰC SỰ giúp ích cho đội ngũ kỹ thuật của Rạng Đông (Dev, Tech Lead, AI Engineer, Data Engineer, Data Scientist/Analyst, Security) hay không — tức có chạm trụ cột nào và có giá trị hành động/theo dõi thật không.
 
 BƯỚC 1 — TÌM BẰNG CHỨNG CỤ THỂ (Burden of Proof):
 Trích xuất chính xác từ bài viết. Nếu KHÔNG TÌM THẤY, ghi null. (CẢNH BÁO: Không được nhầm lẫn giữa việc "nhắc đến tên công nghệ" trong bài PR với việc "có hướng dẫn/kiến trúc kỹ thuật chi tiết").
@@ -70,16 +89,18 @@ Trích xuất chính xác từ bài viết. Nếu KHÔNG TÌM THẤY, ghi null. 
 BƯỚC 2 — LIỆT KÊ DẤU HIỆU NHIỄU:
 Liệt kê các lý do bài này có thể là noise (ý kiến cá nhân, PR, drama, không có action item kỹ thuật...).
 
-BƯỚC 3 — PHÁN QUYẾT:
-- CHỐNG SUY DIỄN VÀ BẪY TỪ KHÓA (ANTI-GENERALIZATION & BUZZWORD TRAP): Nếu bài báo KHÔNG giải quyết một bài toán kỹ thuật CỤ THỂ thuộc BỐI CẢNH CÔNG TY (mà chỉ đơn thuần nhắc tên công nghệ để PR dự án, quảng cáo, hoặc áp dụng cho ngành khác), bạn TUYỆT ĐỐI KHÔNG được suy diễn ẩn dụ. Hãy thẳng tay đánh trượt (pass_gate = false).
-- NGOẠI LỆ HỌC THUẬT (ACADEMIC EXCEPTION): NẾU bài báo là một tài liệu Nghiên cứu khoa học lõi (Core Research / Arxiv Paper / Whitepaper) về Thuật toán AI, Kiến trúc hệ thống, hoặc Cấu trúc dữ liệu có giá trị ĐÀO TẠO KỸ NĂNG CAO cho kỹ sư nền tảng, thì ĐƯỢC PHÉP cho qua (pass_gate = true) và chấm điểm ở mức 0.2-0.4 (Theoretical), bất kể nó có nhắc đến IoT/Smart Home hay không.
+BƯỚC 3 — PHÁN QUYẾT (theo relevance trụ cột + tính chuyển-giao):
+- KIỂM TRA TRỤ CỘT TRƯỚC: Bài này chạm trụ cột nào (①/②/③/④)? Nếu KHÔNG chạm trụ nào → pass_gate = false NGAY, bất kể nó "có tính học thuật" hay chỉ nhắc tên công nghệ. TUYỆT ĐỐI KHÔNG suy diễn ẩn dụ để ép liên quan (ANTI-GENERALIZATION & BUZZWORD TRAP).
+- HÀNG RÀO CHẤT LƯỢNG (khi đã chạm trụ cột): phân biệt CHUYỂN-GIAO-ĐƯỢC với INCREMENTALISM. Bài đưa ra kỹ thuật/kiến trúc/kết quả mà kỹ sư CÓ THỂ DÙNG hoặc PHẢI THEO DÕI (model nền tảng mới, cách infer/train rẻ hơn, agent/kiến trúc mới, breaking change, lỗ hổng trên stack) → có giá trị. Bài chỉ +0.x% SOTA trên leaderboard, biến thể nhỏ không đổi cách làm, hoặc lý thuyết thuần không góc triển khai → giá trị thấp.
+- ƯU TIÊN BẢO MẬT (trụ ④): tin bảo mật hệ thống/dữ liệu có lỗ hổng/rủi ro CỤ THỂ + việc cần làm cho Security/Dev → DUYỆT MẠNH (không cần CVE ID cứng mới qua).
 - NGOẠI LỆ RỦI RO ĐỨT GÃY (DISRUPTION EXCEPTION): NẾU bài báo thông báo về việc CẤM VẬN, NGỪNG CẤP PHÉP, hoặc DEPRECATE một công nghệ lõi / AI model / Cloud service, đòi hỏi kỹ sư PHẢI MIGRATE sang nền tảng khác để tránh đứt gãy workflow → BẮT BUỘC cho qua (pass_gate = true) và chấm điểm ≥ 0.7 (Practical).
-- Nếu cả 3 trường evidence đều null VÀ không có action item kỹ thuật cụ thể → pass_gate = false
-- Nếu có ít nhất 1 bằng chứng cụ thể VÀ đáp ứng BỐI CẢNH CÔNG TY (hoặc đáp ứng các NGOẠI LỆ) → chấm điểm theo thang:
-  * Score ≥ 0.7 (Practical): có code/SDK/patch/benchmark cụ thể (hoặc thuộc NGOẠI LỆ RỦI RO ĐỨT GÃY) → pass_gate = true
-  * Score 0.4-0.7 (Strategic): policy/regulation/breaking change ảnh hưởng tech stack → pass_gate = true
-  * Score 0.2-0.4 (Theoretical): paper chưa có sản phẩm, opinion piece, giá trị học thuật cốt lõi → pass_gate = false (Lưu ý: Nếu pass NGOẠI LỆ HỌC THUẬT thì ở đây đổi thành pass_gate = true)
-  * Score < 0.2 (Noise): PR fluff, tin ngành khác, ý kiến chung chung → pass_gate = false
+- Nếu KHÔNG chạm trụ cột nào, HOẶC (cả 3 trường evidence đều null VÀ không có action item kỹ thuật cụ thể) → pass_gate = false.
+
+CHẤM ĐIỂM (quyết định pass/fail NẰM TRONG điểm số — KHÔNG có cờ lật):
+  * Score ≥ 0.7 (Practical): chạm trụ cột + có code/SDK/patch/benchmark cụ thể, HOẶC là bảo mật duyệt mạnh, HOẶC thuộc NGOẠI LỆ ĐỨT GÃY → pass_gate = true
+  * Score 0.4-0.7 (Strategic): chạm trụ cột + chuyển-giao-được ở mức chiến lược (model/agent/kiến trúc nền tảng mới, policy/regulation ảnh hưởng tech stack) dù chưa có code sẵn → pass_gate = true
+  * Score 0.2-0.4 (Theoretical): chạm trụ cột nhưng chỉ incrementalism / lý thuyết chưa chuyển-giao → pass_gate = false
+  * Score < 0.2 (Noise): không chạm trụ cột nào, PR fluff, tin ngành khác, ý kiến chung chung → pass_gate = false
 
 --- VÍ DỤ 1 (NOISE) ---
 TIÊU ĐỀ: "Bộ Tư pháp Mỹ tịch thu trang web deepfake khiêu dâm sử dụng AI"
@@ -102,10 +123,21 @@ TIÊU ĐỀ: "CVE-2024-3094: Backdoor trong xz-utils ảnh hưởng SSH trên Li
   "gate_reason": "Lỗ hổng bảo mật nghiêm trọng có CVE rõ ràng.",
   "pass_gate": true
 }}
+
+--- VÍ DỤ 3 (HỌC THUẬT NHƯNG LOẠI — off-pillar/incrementalism) ---
+TIÊU ĐỀ: "Cải thiện 0.3% BLEU dịch máy tiếng Iceland bằng biến thể attention mới"
+{{
+  "evidence": {{"code_or_api": null, "cve_or_regulation": null, "benchmark_data": "+0.3% BLEU trên WMT-Iceland"}},
+  "noise_signals": ["Incrementalism leaderboard, không đổi cách làm", "Miền dịch máy tiếng Iceland không chạm trụ cột nào"],
+  "actionability_score": 0.2,
+  "content_type": "theoretical",
+  "gate_reason": "Off-pillar + incrementalism: +0.3% BLEU miền xa, không chuyển-giao.",
+  "pass_gate": false
+}}
 --- HẾT VÍ DỤ ---
 
 Trả về ONLY valid JSON (không markdown, không code block):
-{{"evidence": {{"code_or_api": "<string hoặc null>", "cve_or_regulation": "<string hoặc null>", "benchmark_data": "<string hoặc null>"}}, "noise_signals": ["<lý do 1>"], "actionability_score": <0.0-1.0>, "content_type": "<practical|strategic|theoretical|noise>", "gate_reason": "<1 câu ≤100 ký tự>", "pass_gate": <true|false>}}
+{{"evidence": {{"code_or_api": "<string hoặc null>", "cve_or_regulation": "<string hoặc null>", "benchmark_data": "<string hoặc null>"}}, "noise_signals": ["<lý do 1>"], "actionability_score": <0.0-1.0>, "content_type": "<practical|strategic|theoretical|noise>", "gate_reason": "<1 câu ≤100 ký tự, PHẢI nêu trụ cột (①/②/③/④ hoặc 'off-pillar') + lý do pass/fail>", "pass_gate": <true|false>}}
 
 TIÊU ĐỀ: {title}
 
@@ -118,7 +150,7 @@ NỘI DUNG (trích):
 # ---------------------------------------------------------------------------
 
 ANALYSIS_PROMPT = """\
-Bạn là chuyên gia phân tích AI cho Rạng Đông (Rạng Đông Smart) — tập đoàn Việt Nam tập trung vào: Smart Home, Smart Lighting, IoT, Nông nghiệp công nghệ cao, Sản xuất thông minh, Tự động hóa công nghiệp (Robotics/Automation), Edge AI, và bảo mật thiết bị đầu cuối.
+Bạn là chuyên gia phân tích AI cho Rạng Đông (Rạng Đông Smart) — tập đoàn Việt Nam với 4 TRỤ CỘT công nghệ: (①) IoT & thiết bị — xử lý dữ liệu thiết bị, Edge AI, robotics/automation, sản xuất thông minh, nông nghiệp công nghệ cao (phòng R&D); (②) Agent / AI / Data Science — LLM, AI agent, mô hình nền tảng, MLOps, pipeline & phân tích dữ liệu (phòng AI/DS); (③) Smart Home & Smart Lighting; (④) Bảo mật hệ thống & dữ liệu.
 
 PHÉP THỬ THAY THẾ & NGOẠI LỆ BẮT BUỘC: 
 1. CHỐNG VĂN MẪU: Khi viết tác động, "Nếu thay tên Rạng Đông bằng tiệm bánh mì mà câu này vẫn đúng" → Cần sửa lại cho sát với bài toán kỹ thuật.
@@ -147,7 +179,12 @@ NGUYÊN TẮC HÀNH VĂN TIẾNG VIỆT (BẮT BUỘC - NEGATIVE CONSTRAINTS):
 QUY TẮC CHO CÁC TRƯỜNG ACTIONABLE:
 - signal: 1 câu CÔ ĐỌNG (≤200 ký tự) nêu cốt lõi tín hiệu/implication. PHẦI KHÁC title — title là sự kiện, signal là implication.
 - why_it_matters: 1-2 câu (≤300 ký tự) giải thích TẠI SAO quan trọng. Ép buộc phải trả lời: "Sự kiện này tác động thế nào đến kiến trúc tổng thể (Tech Lead), quy trình làm việc của Dev, kho dữ liệu của Data Engineer, hoặc hệ thống của Security?". Không lặp lại tóm tắt.
-- recommendations: dict, KEYS PHẢI ⊆ affected_roles. Mỗi value là object {{"action_type": <enum>, "note": <1 câu lời khuyên cụ thể cho đúng role đó, ví dụ: Khuyên Security quét lỗ hổng, khuyên Tech Lead xem xét kiến trúc, khuyên Dev đọc docs>}}. action_type ∈ {action_types}.
+- recommendations: dict, KEYS PHẢI ⊆ affected_roles (và do đó ⊆ VAI TRÒ CHO PHÉP). Mỗi value là object {{"action_type": <enum>, "note": <1 câu lời khuyên cụ thể cho đúng role đó, ví dụ: Khuyên Security quét lỗ hổng, khuyên Tech Lead xem xét kiến trúc, khuyên Dev đọc docs>, "urgency": <enum>}}. action_type ∈ {action_types}. urgency ∈ {role_urgencies}.
+- urgency (trong recommendations): mức ảnh hưởng tới RIÊNG vai trò đó, KHÔNG phải mức nghiêm trọng của tin nói chung. Chấm TIẾT KIỆM:
+  * "high" — vai trò đó cần đọc NGAY TRONG NGÀY vì tin đổi việc họ đang làm (breaking change trên công cụ họ dùng, lỗ hổng trên stack họ vận hành, model/API mới thay thế được thứ họ đang chạy). Một tin thường chỉ có 0-1 vai trò đạt "high"; nhiều bài KHÔNG có vai trò nào "high" — đó là bình thường.
+  * "medium" — đáng đọc trong tuần, chưa cần đổi việc gì ngay.
+  * "low" — biết cho rộng, không hành động.
+  KHÔNG suy urgency từ action_type: một "read" vẫn có thể "high", một "test" vẫn có thể "low".
 - risks: list[str] các rủi ro nếu adopt (license, security, privacy, vendor-lock, cost, maturity). Mỗi rủi ro 1 câu ngắn. Trả [] nếu không có rủi ro đáng kể.
 - so_what: 1 câu (≤200 ký tự) trả lời "bài này thay đổi gì cho team?" — PHẦI KHÁC signal và summary_short.
 - adoption_ring: chọn 1 giá trị duy nhất từ {adoption_rings}. Adopt = nên dùng ngay. Trial = thử nghiệm. Assess = đánh giá thêm. Hold = chưa nên dùng.
@@ -173,13 +210,13 @@ VÍ DỤ 1:
   "nature": "Cơ hội",
   "summary_short": "NPM ra mắt staged publishing yêu cầu 2FA khi phát hành gói và bổ sung các cờ kiểm soát quyền truy cập tệp/mạng khi cài đặt.",
   "summary_medium": "Cập nhật mới của NPM tập trung vào bảo mật chuỗi cung ứng. Tính năng staged publishing cho phép nhà phát triển trì hoãn phát hành gói để chờ phê duyệt qua 2FA. Đồng thời, các cờ cài đặt mới như --allow-file và --allow-remote giúp giới hạn quyền truy cập của gói vào tài nguyên máy hoặc mạng trong quá trình cài đặt.",
-  "affected_roles": ["DevOps", "Security"],
+  "affected_roles": ["Dev", "Security"],
   "confidence": 0.95,
   "signal": "NPM siết chặt bảo mật chuỗi cung ứng bằng cách ép xác thực 2FA khi publish và cô lập môi trường cài đặt gói.",
   "why_it_matters": "Giúp ngăn chặn tấn công đầu độc mã nguồn qua các gói phụ thuộc độc hại và bảo vệ hệ thống CI/CD khỏi việc cài đặt gói tùy tiện.",
   "recommendations": {{
-    "DevOps": {{"action_type": "test", "note": "Thử nghiệm cấu hình các cờ cài đặt mới trên môi trường build local."}},
-    "Security": {{"action_type": "read", "note": "Đánh giá chính sách phê duyệt 2FA đối với các gói npm nội bộ trước khi release."}}
+    "Dev": {{"action_type": "test", "note": "Thử nghiệm cấu hình các cờ cài đặt mới trên môi trường build local.", "urgency": "medium"}},
+    "Security": {{"action_type": "read", "note": "Đánh giá chính sách phê duyệt 2FA đối với các gói npm nội bộ trước khi release.", "urgency": "high"}}
   }},
   "risks": ["Một số tool CI/CD cũ có thể không tương thích với các cờ cài đặt mới và cần nâng cấp npm CLI."],
   "so_what": "Quy trình phát hành và cài đặt gói npm giờ đây bắt buộc phải kiểm soát chặt chẽ hơn thông qua 2FA và cô lập tài nguyên.",
@@ -204,13 +241,13 @@ VÍ DỤ 2:
   "nature": "Cơ hội",
   "summary_short": "PyTorch 2.6 ra mắt tối ưu hóa biên dịch dynamic shape giúp tăng 15% tốc độ huấn luyện mô hình Transformer và giảm bộ nhớ tiêu thụ.",
   "summary_medium": "Phiên bản PyTorch 2.6 tập trung vào cải thiện hiệu năng huấn luyện. Nhờ tối ưu hóa cơ chế biên dịch dynamic shape, thời gian huấn luyện Transformer được rút ngắn 15%. Các số liệu thực tế đo đạc trên GPU H100 cho thấy dung lượng bộ nhớ tiêu thụ giảm từ 45GB xuống còn 38GB đối với pipeline huấn luyện LLaMA.",
-  "affected_roles": ["Data/AI", "Infrastructure"],
+  "affected_roles": ["AI Engineer", "Tech Lead"],
   "confidence": 0.9,
   "signal": "PyTorch 2.6 nâng cấp hiệu năng huấn luyện Transformer đáng kể thông qua tối ưu dynamic shape compiler.",
   "why_it_matters": "Giảm trực tiếp chi phí hạ tầng tính toán (GPU) và rút ngắn thời gian thử nghiệm cho các dự án AI quy mô lớn.",
   "recommendations": {{
-    "Data/AI": {{"action_type": "test", "note": "Chạy thử nghiệm huấn luyện mô hình hiện tại với PyTorch 2.6 trên GPU dev."}},
-    "Infrastructure": {{"action_type": "watch", "note": "Theo dõi mức độ sử dụng tài nguyên GPU của các team AI khi nâng cấp."}}
+    "AI Engineer": {{"action_type": "test", "note": "Chạy thử nghiệm huấn luyện mô hình hiện tại với PyTorch 2.6 trên GPU dev.", "urgency": "high"}},
+    "Tech Lead": {{"action_type": "watch", "note": "Theo dõi mức độ sử dụng tài nguyên GPU của các team AI khi nâng cấp.", "urgency": "low"}}
   }},
   "risks": ["Các thư viện custom CUDA cũ có thể cần biên dịch lại để tương thích với PyTorch 2.6."],
   "so_what": "Huấn luyện AI trên PyTorch nay nhanh hơn và tiết kiệm tài nguyên GPU hơn.",
@@ -236,7 +273,7 @@ Trả về ONLY valid JSON (không markdown, không code block):
   "signal": "<1 câu cô đọng implication, khác title>",
   "why_it_matters": "<1-2 câu vì sao quan trọng với team VN>",
   "recommendations": {{
-    "<role trong affected_roles>": {{"action_type": "<watch|read|test|PoC|roadmap>", "note": "<1 câu khuyến nghị>"}}
+    "<role trong affected_roles>": {{"action_type": "<watch|read|test|PoC|roadmap>", "note": "<1 câu khuyến nghị>", "urgency": "<high|medium|low>"}}
   }},
   "risks": ["<rủi ro 1>", "<rủi ro 2>"],
   "so_what": "<1 câu trả lời bài này thay đổi gì cho team>",
@@ -273,6 +310,7 @@ def build_prompt(title: str, content: str) -> str:
         natures=", ".join(ALLOWED_NATURES),
         roles=", ".join(ALLOWED_ROLES),
         action_types=", ".join(ALLOWED_ACTION_TYPES),
+        role_urgencies=", ".join(ALLOWED_ROLE_URGENCY),
         adoption_rings=", ".join(ALLOWED_ADOPTION_RINGS),
         title=title,
         content=content[:6000],

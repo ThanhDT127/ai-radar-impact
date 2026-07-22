@@ -7,6 +7,9 @@ sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 alembic==1.14.0
 
+# Scheduler (embedded auto-operation)
+apscheduler==3.10.4
+
 # Validation & Config
 pydantic==2.9.2
 pydantic-settings==2.6.1
@@ -28,6 +31,9 @@ scikit-learn==1.5.2
 
 # Playwright — headless browser for SPA scraping
 playwright==1.49.0
+
+# Email delivery (M7) — SMTP async
+aiosmtplib==3.0.2
 
 # Utilities
 python-dotenv==1.0.1

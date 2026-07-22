@@ -34,8 +34,8 @@ services:
       - ./backend:/app
       # Service Account key for Vertex AI auth
       - ${GOOGLE_APPLICATION_CREDENTIALS}:/secrets/sa-key.json:ro
-      # Playwright browser state files
-      - ./secrets/states:/secrets/states:ro
+      # Playwright browser state files — rw để sliding session refresh ghi lại storage_state (W3/T8)
+      - ./secrets/states:/secrets/states
     environment:
       # Override DATABASE_URL so containers always resolve "db" hostname
       DATABASE_URL: postgresql+asyncpg://radar:radar_dev@db:5432/ai_radar

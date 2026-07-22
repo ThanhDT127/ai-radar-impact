@@ -29,9 +29,52 @@ class Settings(BaseSettings):
     min_content_length: int = 200
     max_daily_analysis: int = 500
 
+    # Document lifecycle (W1 quota guard)
+    # Bài published cũ hơn ngưỡng này không vào pipeline phân tích (freshness gate).
+    max_age_months: int = 6
+    # Insight/tài liệu quá hạn này bị tombstone-purge (giữ fingerprint).
+    retention_months: int = 6
+
+    # Scheduler (W1 auto-operation) — mặc định TẮT; chỉ bật ở production (KHÔNG --reload).
+    enable_scheduler: bool = False
+    scheduler_hours: str = "7,13,19"  # giờ VN (Asia/Ho_Chi_Minh) chạy ingest+analysis mỗi ngày
+    purge_hour: int = 3               # giờ VN chạy tombstone-purge hằng ngày
+    # Rate-limit tránh 429/403
+    ingest_source_delay_seconds: float = 1.0   # delay cố định giữa các nguồn
+    ingest_jitter_seconds: float = 2.0         # jitter ngẫu nhiên cộng thêm
+    ingest_article_delay_seconds: float = 2.0  # delay giữa các bài TRONG một phiên (Playwright/MXH)
+    fetch_max_retries: int = 3                  # số lần thử lại khi fetch lỗi
+    fetch_backoff_base_seconds: float = 2.0     # cơ số exponential backoff
+
+    # Anti-bot crawl (W3) — CloakBrowser CDP endpoint.
+    # Rỗng = bỏ qua CloakBrowser, dùng Chromium local trực tiếp (dùng cho PoC A/B).
+    cloak_cdp_url: str = "http://cloak:9222"
+
     # Content gate (two-pass pipeline)
     enable_gate: bool = True
     gate_threshold: float = 0.4
+
+    # Delivery (M7) — bản tin định kỳ qua email. Mặc định TẮT; bật sau khi
+    # `run_delivery --dry-run` cho kết quả đúng.
+    delivery_enabled: bool = False
+    delivery_channel: str = "email"
+    delivery_digest_hour: int = 8                # giờ VN (Asia/Ho_Chi_Minh) gửi bản tin
+    delivery_digest_days: str = "mon,thu"        # ngày trong tuần gửi bản tin
+    delivery_digest_lookback_hours: int = 108    # 4.5 ngày — rộng hơn khoảng cách 2 kỳ + đệm
+    delivery_max_items_per_role: int = 2         # trần tin mỗi vai trò
+    delivery_max_items_per_email: int = 3        # trần tin mỗi email (áp lên tổng)
+    delivery_min_gap_hours: int = 48             # chốt chặn: không gửi lại trong ngần này giờ
+    dashboard_base_url: str = "http://localhost:5173"  # gốc link "đọc chi tiết" trong email
+    public_api_base_url: str = "http://localhost:8000"  # gốc link hủy nhận (backend)
+
+    # SMTP (Gmail App Password) — credential đọc từ env, không nằm trong repo
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    email_from: str = ""
+    email_from_name: str = "AI Radar"
+    email_reply_to: str = ""
 
     # Admin API
     admin_api_key: str = "changeme"
@@ -43,6 +86,11 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         """Return CORS origins as a list."""
         return [o.strip() for o in self.cors_origins.split(",")]
+
+    @property
+    def scheduler_hours_list(self) -> list[int]:
+        """Parse scheduler_hours ('7,13,19') thành list giờ int."""
+        return [int(h.strip()) for h in self.scheduler_hours.split(",") if h.strip()]
 
 
 settings = Settings()

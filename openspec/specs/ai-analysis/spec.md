@@ -113,9 +113,25 @@ Sau khi insight được tạo, backend MUST tính 3 trường rule-based dựa 
 - **THEN** `topics` chứa Vietnamese-specific topic → `medium`
 - **THEN** còn lại → `low`
 
+### Requirement: `recommendations` mang mức ảnh hưởng theo từng vai trò
+
+Mỗi entry trong `recommendations` MUST có thêm khoá `urgency` thuộc tập đóng
+`high | medium | low` (`ALLOWED_ROLE_URGENCY`), thể hiện mức ảnh hưởng của tin **tới riêng vai trò
+đó** — KHÔNG phải mức ảnh hưởng của tin nói chung (đã có ở `insights.urgency`). Prompt MUST hướng dẫn
+Gemini chấm tiết kiệm: `high` chỉ dành cho tin mà người giữ vai trò đó cần đọc ngay trong ngày.
+
+#### Scenario: Cùng một tin, mức khác nhau theo vai trò
+- **WHEN** Gemini phân tích một lỗ hổng bảo mật trong thư viện hệ thống với `affected_roles = [Security, Dev]`
+- **THEN** `recommendations["Security"].urgency` = `high` còn `recommendations["Dev"].urgency` có thể là `medium` hoặc `low`
+
+#### Scenario: Tin không phải bảo mật vẫn có thể `high`
+- **WHEN** Gemini phân tích một bản phát hành model lớn với `affected_roles` chứa `AI Engineer`
+- **THEN** `recommendations["AI Engineer"].urgency` ĐƯỢC PHÉP là `high`, không phụ thuộc `event_type` hay `insights.urgency`
+
 ### Requirement: Validate `recommendations` post-parse
 
-Sau khi parse Gemini output, backend MUST validate `recommendations` để loại bỏ keys hallucinate.
+Sau khi parse Gemini output, backend MUST validate `recommendations` để loại bỏ keys hallucinate và
+giá trị ngoài tập đóng, bao gồm cả khoá `urgency`.
 
 #### Scenario: Drop role không trong affected_roles
 - **WHEN** Gemini trả `recommendations` có key không thuộc `affected_roles`
@@ -127,23 +143,33 @@ Sau khi parse Gemini output, backend MUST validate `recommendations` để loạ
 - **THEN** backend remove cả entry đó
 - **THEN** log warning
 
-### Requirement: ALLOWED_ROLES mở rộng thêm 5 vai trò technical
+#### Scenario: `urgency` không hợp lệ hoặc thiếu
+- **WHEN** `recommendations[role]` có `urgency` không thuộc `high|medium|low`, hoặc không có khoá `urgency`
+- **THEN** backend đặt `urgency = "medium"` cho entry đó và giữ nguyên phần còn lại của entry
+- **THEN** log warning nêu rõ role và giá trị bị thay
 
-`ALLOWED_ROLES` trong `app/ai/prompts.py` MUST chứa thêm 5 vai trò: `DevOps`, `Infrastructure`, `Security`, `BA/QA`, `Designer/UX` (tổng 13 roles).
+### Requirement: ALLOWED_ROLES là bộ 9 chức danh
 
-#### Scenario: Prompt expose 5 role mới
+`ALLOWED_ROLES` trong `app/ai/prompts.py` MUST là đúng 9 giá trị chức danh: `Data Analyst`,
+`Data Scientist`, `AI Engineer`, `Data Engineer`, `Security`, `Dev`, `Tech Lead`,
+`Người dùng phổ thông`, `Toàn công ty`.
+
+Bộ này MUST tách bạch với `Source.target_roles` (13 giá trị theo chức năng phòng ban — xem spec
+`source-region-tagging`). `affected_roles` và keys của `recommendations` chỉ nhận giá trị từ
+`ALLOWED_ROLES`.
+
+#### Scenario: Prompt expose đúng 9 vai trò
 - **WHEN** `build_prompt` được gọi
-- **THEN** prompt chứa danh sách 13 vai trò trong `VAI TRÒ CHO PHÉP`
-- **THEN** Gemini có thể trả `affected_roles` chứa giá trị mới (ví dụ `["DevOps", "Security"]`)
+- **THEN** prompt chứa đúng 9 vai trò trong `VAI TRÒ CHO PHÉP`
+- **THEN** Gemini trả `affected_roles` là tập con của 9 giá trị này
 
-#### Scenario: Recommendations hợp lệ với role mới
-- **WHEN** Gemini trả `recommendations = {"DevOps": {"action_type": "test", "note": "..."}}`
-- **THEN** `_validate_recommendations` giữ nguyên entry vì `DevOps` ∈ `affected_roles`
-- **THEN** insight lưu recommendation cho DevOps
+#### Scenario: Từ chối vai trò thuộc taxonomy target_roles
+- **WHEN** Gemini trả `affected_roles` chứa `DevOps` hoặc `Engineering` (giá trị của `target_roles`, không thuộc `ALLOWED_ROLES`)
+- **THEN** backend drop giá trị đó và log warning
 
-#### Scenario: Backwards compatible với insight cũ
-- **WHEN** insight cũ có `affected_roles = ["Engineering"]` (8 role taxonomy cũ)
-- **THEN** không bị invalidate; vẫn render bình thường
+#### Scenario: Frontend label đồng bộ
+- **WHEN** thêm/đổi tên giá trị trong `ALLOWED_ROLES`
+- **THEN** `ROLE_DISPLAY_LABEL` + `ROLE_CLASS` (`RoleBadge.tsx`) và `TOOLTIP.role` (`TooltipContent.ts`) phải cập nhật cùng lúc, nếu không badge render không có nhãn/màu
 
 ### Requirement: Tìm kiếm Insights theo từ khóa từ Database (search-insights-backend)
 
@@ -176,4 +202,139 @@ Hệ thống phân tích AI (Module M4 - AI Analysis) MUST sử dụng prompt h�
 - **WHEN** mô hình Gemini trả về kết quả phân tích dưới dạng JSON string
 - **THEN** kết quả trả về MUST tuân thủ chính xác 100% cấu trúc schema định sẵn (bao gồm các trường: title, summary_short, summary_medium, signal, why_it_matters, so_what, urgency, momentum, intelligence_tier, adoption_ring, affected_roles, recommendations...)
 - **AND** hệ thống SHALL phân tích và lưu trữ thành công vào Database mà không gặp bất kỳ lỗi parse JSON hay ValidationError nào.
+
+### Requirement: Daily analysis cap persist qua Database
+
+Hệ thống SHALL giới hạn số tài liệu phân tích mỗi ngày (`max_daily_analysis`, mặc định 500) bằng bộ đếm **persist trong DB**, đúng xuyên nhiều tiến trình và sống sót qua restart. Bộ đếm SHALL tính **mọi** tài liệu đã gọi Gemini (đạt trạng thái terminal `analyzed`, `low_signal`, hoặc `failed`), không chỉ tài liệu tạo được insight.
+
+#### Scenario: Cap không reset giữa các lần chạy
+
+- **WHEN** một tiến trình `run_analysis`/scheduler mới khởi động trong cùng ngày
+- **THEN** số đã dùng được đọc từ DB (`COUNT(*) WHERE analyzed_at::date = today`), KHÔNG reset về 0
+- **AND** `daily_remaining = max_daily_analysis - daily_used` phản ánh đúng tổng đã xử lý trong ngày
+
+#### Scenario: Đếm cả doc bị gate loại và failed
+
+- **WHEN** một tài liệu bị gate loại (`low_signal`) hoặc `failed` (vẫn tốn ≥1 gate call)
+- **THEN** `analyzed_at` được set và tài liệu đó được tính vào cap trong ngày
+
+#### Scenario: Dừng khi chạm cap
+
+- **WHEN** `daily_used >= max_daily_analysis`
+- **THEN** bước analysis dừng, log cảnh báo, KHÔNG gọi Gemini thêm cho tới ngày hôm sau
+
+#### Scenario: Reset theo ngày
+
+- **WHEN** sang ngày mới (theo UTC)
+- **THEN** `daily_used` tính lại từ 0 do đếm theo `analyzed_at::date = today`
+
+### Requirement: Đầu ra gate ràng buộc bằng schema
+
+Lần gọi Gemini cho **gate pre-screening** MUST khai báo `response_schema` cho API, không chỉ
+`response_mime_type` (vốn chỉ gợi ý định dạng, không ép cấu trúc). Tập đóng `content_type` MUST được
+biểu diễn thành enum trong schema, và schema MUST dựng từ chính hằng số `ALLOWED_CONTENT_TYPES` trong
+`app/ai/prompts.py` — KHÔNG chép tay giá trị, để schema không trôi khỏi tập đóng.
+
+Lần gọi **deep analysis** MUST KHÔNG dùng `response_schema`. Đã thử và đo (20/07/2026): ràng buộc
+schema khiến model sinh trường văn bản tự do (`why_it_matters`) lặp vô nghĩa tới ~6500 ký tự cho tới
+khi chạm `max_output_tokens` và bị cắt giữa chuỗi, làm 100% document qua gate lỗi parse.
+`max_length` trong schema KHÔNG cứu được vì Vertex không thực thi ràng buộc đó. Tập đóng ở nhánh này
+do lớp validate post-parse bảo đảm.
+
+#### Scenario: Gate không trả được `content_type` ngoài tập đóng
+- **WHEN** Gemini gate định gán `content_type = "tutorial"` (không thuộc `ALLOWED_CONTENT_TYPES`)
+- **THEN** API từ chối giá trị đó do ràng buộc enum
+
+#### Scenario: Thêm giá trị vào tập đóng
+- **WHEN** một giá trị mới được thêm vào `ALLOWED_CONTENT_TYPES` trong `prompts.py`
+- **THEN** schema gửi cho Gemini tự động chứa giá trị đó, không cần sửa thêm chỗ nào khác
+
+#### Scenario: Deep analysis giữ đầu ra không ràng buộc schema
+- **WHEN** `analyze` gọi Gemini
+- **THEN** config KHÔNG chứa `response_schema`; tập đóng được bảo đảm bởi `_validate_recommendations` / `_validate_affected_roles` / `_validate_adoption_ring`
+
+### Requirement: Fail-open phải để lại dấu vết
+
+Khi gate lỗi và document được cho đi thẳng vào deep analysis (fail-open), hệ thống MUST ghi lại rằng
+document đó **chưa được gate chấm** (`raw_documents.gate_skipped`). Thống kê tỉ lệ qua gate MUST loại
+các document này ra, vì chúng không phải bằng chứng nội dung đạt chuẩn.
+
+#### Scenario: Gate lỗi parse
+- **WHEN** `gate_analyze` trả về lỗi parse JSON cho một document
+- **THEN** document vẫn được deep analysis (giữ nguyên fail-open) **và** `gate_skipped = true`
+
+#### Scenario: Thống kê không tính document bỏ qua gate
+- **WHEN** tính tỉ lệ qua gate của một nguồn
+- **THEN** các document có `gate_skipped = true` không được tính vào tử số lẫn mẫu số
+
+### Requirement: Log đủ dài để chẩn đoán lỗi parse
+
+Khi parse JSON thất bại, hệ thống MUST log phần raw response đủ dài để nhìn thấy vị trí gây lỗi, kèm
+tổng độ dài response. Log dài chỉ áp dụng ở nhánh lỗi, không áp cho đường chạy bình thường.
+
+#### Scenario: Lỗi ở vị trí xa đầu chuỗi
+- **WHEN** JSON hỏng ở ký tự thứ 517 của response
+- **THEN** log chứa đủ nội dung để thấy ký tự đó, không bị cắt trước vị trí lỗi
+
+### Requirement: Gate đánh giá theo phạm vi công ty 4 trụ cột
+
+Gate pre-screening MUST phán pass/fail theo phạm vi công ty gồm **4 trụ cột**: (①) IoT, (②) Agent / AI /
+Data Science, (③) Smart Home, (④) Bảo mật hệ thống/dữ liệu. Một document chỉ được xét pass khi chạm **ít
+nhất một trụ cột**; document không chạm trụ nào MUST bị loại (`pass_gate = false`), bất kể nó có tính học
+thuật hay nhắc tên công nghệ.
+
+Nội dung Agent / LLM / AI / Data Science / ML tooling tổng quát MUST KHÔNG bị coi là NOISE mặc định (nó
+thuộc trụ ②). Danh sách NOISE mặc định (tiền ảo, game, Web3, điện thoại/tai nghe tiêu dùng) được giữ.
+
+Tin bảo mật hệ thống/dữ liệu (trụ ④) MUST được **duyệt mạnh**: hạ burden of proof, ưu tiên pass; không
+bắt buộc phải có CVE ID cứng mới qua.
+
+#### Scenario: Nội dung AI/Agent tổng quát không còn là noise mặc định
+- **WHEN** gate nhận một bài về framework xây dựng LLM agent, không nhắc IoT/Smart Home
+- **THEN** gate xét nó theo trụ ② (Agent/AI/DS), KHÔNG loại nó chỉ vì "không phục vụ IoT"
+
+#### Scenario: Document không chạm trụ cột nào bị loại
+- **WHEN** gate nhận một bài không liên quan bất kỳ trụ cột nào (vd: tin tài chính tiền ảo, drama ngành game)
+- **THEN** `pass_gate = false`
+
+#### Scenario: Tin bảo mật được duyệt mạnh
+- **WHEN** gate nhận một cảnh báo bảo mật có action rõ cho Security/Dev nhưng không kèm CVE ID cứng
+- **THEN** gate ưu tiên `pass_gate = true` theo cơ chế duyệt mạnh của trụ ④
+
+### Requirement: Paper học thuật xét theo relevance, không theo thể loại
+
+Gate MUST KHÔNG cho một document qua chỉ vì nó là paper nghiên cứu / arXiv / whitepaper (xét theo **thể
+loại**). Paper học thuật MUST được xét theo **relevance** — có chạm trụ cột công ty hay không — và theo
+**tính chuyển-giao**: paper đưa ra kỹ thuật/kiến trúc/kết quả một kỹ sư có thể dùng hoặc phải theo dõi thì
+pass; paper chỉ là incrementalism trên leaderboard (SOTA +0.x%, biến thể nhỏ) hoặc lý thuyết thuần miền
+xa thì fail.
+
+Quyết định pass/fail của nhóm học thuật MUST nằm trong **điểm số** theo thang thường, KHÔNG dùng cờ
+override lật kết quả — để không còn tình trạng cùng một dải điểm mang hai nghĩa pass và fail.
+
+#### Scenario: Paper arXiv liên quan + chuyển-giao-được → pass
+- **WHEN** gate nhận một paper arXiv về quantization giảm nửa VRAM cho inference trên edge
+- **THEN** paper earn điểm ≥ ngưỡng pass theo thang thường (chạm trụ ② + chuyển-giao-được) và `pass_gate = true`
+
+#### Scenario: Paper arXiv off-pillar / thuần lý thuyết → fail
+- **WHEN** gate nhận một paper arXiv về chặn hội tụ của một optimizer dưới giả định non-convex, không góc triển khai và không chạm trụ cột nào
+- **THEN** `pass_gate = false`, KHÔNG được cứu bởi bất kỳ ngoại lệ "vì là arXiv" nào
+
+#### Scenario: Không có cờ override ở dải Theoretical
+- **WHEN** một document được chấm trong dải điểm 0.2–0.4
+- **THEN** kết quả pass/fail suy trực tiếp từ điểm số, không có mệnh đề "nếu là học thuật thì lật thành pass"
+
+### Requirement: `gate_reason` phải khai trụ cột và lý do phán quyết
+
+Khi gate phán một document, `gate_reason` MUST nêu được **trụ cột nào** đã áp dụng (hoặc "off-pillar")
+và **lý do** pass/fail, trong giới hạn độ dài sẵn có (≤100 ký tự). Mục tiêu là để việc chấm tay/kiểm toán
+đối chiếu được phán quyết của gate với nhãn của người, mà không cần lưu thêm dữ liệu xuống DB.
+
+#### Scenario: Reason cho ca pass nêu trụ cột
+- **WHEN** gate cho một bài qua vì nó là model nhỏ chạy được trên edge
+- **THEN** `gate_reason` nêu trụ cột liên quan và lý do chuyển-giao (vd: "Trụ ②: model nhỏ chạy edge, chuyển-giao được")
+
+#### Scenario: Reason cho ca loại nêu off-pillar
+- **WHEN** gate loại một bài vì không chạm trụ cột nào
+- **THEN** `gate_reason` nêu rõ off-pillar và lý do (vd: "Off-pillar: lý thuyết tối ưu thuần, không chuyển-giao")
 

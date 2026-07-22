@@ -1,12 +1,17 @@
 """Analyzer service — runs Gemini analysis on pending raw documents and creates insights."""
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.gemini_client import GeminiClient
-from app.ai.prompts import ALLOWED_ACTION_TYPES, ALLOWED_ADOPTION_RINGS
+from app.ai.prompts import (
+    ALLOWED_ACTION_TYPES,
+    ALLOWED_ADOPTION_RINGS,
+    ALLOWED_ROLE_URGENCY,
+    ALLOWED_ROLES,
+)
 from app.config import settings
 from app.models.raw_document import RawDocument
 from app.models.source import Source
@@ -15,21 +20,8 @@ from app.repositories.raw_document_repo import RawDocumentRepository
 
 logger = logging.getLogger(__name__)
 
-# In-memory daily analysis counter — resets at midnight
-_daily_counter: dict[str, int] = {"date": "", "count": 0}
-
-
-def _get_daily_count() -> int:
-    today = str(date.today())
-    if _daily_counter["date"] != today:
-        _daily_counter["date"] = today
-        _daily_counter["count"] = 0
-    return _daily_counter["count"]  # type: ignore[return-value]
-
-
-def _increment_daily_count() -> None:
-    _get_daily_count()  # ensure reset if new day
-    _daily_counter["count"] = _daily_counter["count"] + 1  # type: ignore[assignment]
+# Daily analysis cap được đếm persist trong DB qua RawDocument.analyzed_at
+# (xem RawDocumentRepository.count_analyzed_today) — không còn counter RAM.
 
 # Rule-based trust score mapping from source trust_tier
 TRUST_SCORE_MAP: dict[str, float] = {
@@ -78,10 +70,34 @@ MIN_CONFIDENCE = 0.3  # Below this, do not publish
 _VN_SPECIFIC_TOPICS = {"Legal & Regulation", "Team & Process"}
 
 
+def _validate_affected_roles(roles: list[str] | None) -> list[str]:
+    """Drop roles ∉ ALLOWED_ROLES (bộ 9 chức danh).
+
+    Không có lớp này thì `_validate_recommendations` chỉ kiểm role ∈ affected_roles
+    — một vòng tròn mà giá trị ngoài tập đóng lọt qua được miễn Gemini tự nhất quán.
+    Hay gặp nhất là các giá trị thuộc taxonomy `Source.target_roles` (DevOps,
+    Data/AI, Infrastructure…), vốn KHÁC bộ này.
+    """
+    if not roles:
+        return []
+    cleaned = []
+    for role in roles:
+        if role in ALLOWED_ROLES:
+            cleaned.append(role)
+        else:
+            logger.warning(
+                "Dropping affected_role '%s' (not in ALLOWED_ROLES)", role
+            )
+    return cleaned
+
+
 def _validate_recommendations(
     recs: dict | None, affected_roles: list[str]
 ) -> dict | None:
     """Drop recommendations whose role ∉ affected_roles or action_type invalid.
+
+    `urgency` thiếu/sai được hạ về "medium" (không alert) thay vì drop cả entry —
+    khuyến nghị vẫn có giá trị hiển thị dù không đủ tín hiệu để bắn alert.
 
     Returns None if no valid entries remain (instead of empty dict for clarity).
     """
@@ -109,7 +125,19 @@ def _validate_recommendations(
             continue
         if not isinstance(note, str) or not note.strip():
             continue
-        cleaned[role] = {"action_type": action_type, "note": note.strip()}
+        urgency = value.get("urgency")
+        if urgency not in ALLOWED_ROLE_URGENCY:
+            logger.warning(
+                "Recommendation for role '%s' has invalid urgency=%r, defaulting to 'medium'",
+                role,
+                urgency,
+            )
+            urgency = "medium"
+        cleaned[role] = {
+            "action_type": action_type,
+            "note": note.strip(),
+            "urgency": urgency,
+        }
     return cleaned or None
 
 
@@ -265,6 +293,9 @@ class AnalyzerService:
                     raw_doc.id, gate_result.error,
                 )
                 gate_score = 0.5  # fail-open
+                # Đánh dấu để thống kê tỉ lệ qua gate loại doc này ra — nó chưa từng
+                # được gate chấm, dù kết cục vẫn thành `analyzed`.
+                await self.raw_doc_repo.mark_gate_skipped(raw_doc.id)
             elif not gate_result.pass_gate:
                 logger.info(
                     "Gate filtered doc %s (score=%.2f, reason=%s)",
@@ -295,8 +326,9 @@ class AnalyzerService:
         impact_label = IMPACT_LABEL_MAP.get(result.event_type or "", "Thấp")
 
         # v2 actionable fields
+        affected_roles = _validate_affected_roles(result.affected_roles)
         recommendations = _validate_recommendations(
-            result.recommendations, result.affected_roles
+            result.recommendations, affected_roles
         )
         urgency = _compute_urgency(impact_label, raw_doc.published_at)
         vietnam_relevance = _compute_vietnam_relevance(source, result.topics)
@@ -331,7 +363,7 @@ class AnalyzerService:
             source_url=raw_doc.source_url,
             confidence=result.confidence,
             ai_raw_response=result.raw_response,
-            affected_roles=result.affected_roles,
+            affected_roles=affected_roles,
             published_at=raw_doc.published_at,
             signal=result.signal,
             why_it_matters=result.why_it_matters,
@@ -354,10 +386,10 @@ class AnalyzerService:
 
         Returns counts: { created, skipped, errors }.
         """
-        daily_used = _get_daily_count()
+        daily_used = await self.raw_doc_repo.count_analyzed_today()
         daily_remaining = settings.max_daily_analysis - daily_used
         if daily_remaining <= 0:
-            logger.warning("Daily analysis cap reached (%d). Skipping.", settings.max_daily_analysis)
+            logger.warning("Daily analysis cap reached (%d used / %d). Skipping.", daily_used, settings.max_daily_analysis)
             return {"created": 0, "skipped": 0, "errors": 0}
 
         effective_limit = min(limit, daily_remaining)
@@ -380,9 +412,10 @@ class AnalyzerService:
                 created = await self.analyze_document(raw_doc, source)
                 if created:
                     counts["created"] += 1
-                    _increment_daily_count()
                 else:
                     counts["skipped"] += 1
+                # Cap được đếm qua analyzed_at (set trong update_status ở mọi nhánh
+                # terminal: analyzed/low_signal/failed) — không tăng counter thủ công.
             except Exception as e:
                 logger.error("Unexpected error analyzing doc %s: %s", raw_doc.id, e)
                 counts["errors"] += 1

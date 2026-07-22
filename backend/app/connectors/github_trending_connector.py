@@ -13,7 +13,35 @@ from app.models.source import Source
 logger = logging.getLogger(__name__)
 
 TRENDING_BASE = "https://github.com/trending"
+RAW_BASE = "https://raw.githubusercontent.com"
 USER_AGENT = "AI-Radar-Impact-Bot/1.0 (+contact: rangdong)"
+
+# README enrichment — đọc README repo để analyzer có ngữ cảnh thật, không chỉ tên repo.
+README_MAX_CHARS = 4000
+# Thử lần lượt; HEAD tự trỏ nhánh mặc định (main/master) nên không cần đoán branch.
+README_FILENAMES = ("README.md", "README.markdown", "README.rst", "readme.md")
+
+
+def _fetch_readme(owner: str, repo: str, timeout: float = 5.0) -> str | None:
+    """Fetch README text của repo qua raw.githubusercontent.com (không rate-limit).
+
+    Thử lần lượt các tên file phổ biến, dừng ở lần đầu HTTP 200 có nội dung.
+    Trả về text README hoặc None nếu không có/không fetch được. Không raise.
+    """
+    try:
+        with httpx.Client(timeout=timeout, headers={"User-Agent": USER_AGENT}) as client:
+            for filename in README_FILENAMES:
+                url = f"{RAW_BASE}/{owner}/{repo}/HEAD/{filename}"
+                try:
+                    resp = client.get(url, follow_redirects=True)
+                except Exception as e:
+                    logger.debug("README fetch error %s: %s", url, e)
+                    continue
+                if resp.status_code == 200 and resp.text and resp.text.strip():
+                    return resp.text
+    except Exception as e:  # client construction / lỗi bất ngờ — fail-safe
+        logger.debug("README fetch failed for %s/%s: %s", owner, repo, e)
+    return None
 
 
 def _parse_stars(text: str) -> int:
@@ -50,6 +78,8 @@ class GitHubTrendingConnector(BaseConnector):
         language: str = config.get("language", "") or ""
         since: str = config.get("since", "daily")
         max_items: int = int(config.get("max_items", 25))
+        fetch_readme: bool = config.get("fetch_readme", True)
+        readme_max_chars: int = int(config.get("readme_max_chars", README_MAX_CHARS))
 
         url = f"{TRENDING_BASE}/{language}".rstrip("/")
         params = {"since": since}
@@ -79,7 +109,13 @@ class GitHubTrendingConnector(BaseConnector):
 
         entries: list[ConnectorEntry] = []
         for position, article in enumerate(articles[:max_items], start=1):
-            entry = self._parse_repo(article, since=since, position=position)
+            entry = self._parse_repo(
+                article,
+                since=since,
+                position=position,
+                fetch_readme=fetch_readme,
+                readme_max_chars=readme_max_chars,
+            )
             if entry is not None:
                 entries.append(entry)
 
@@ -89,7 +125,14 @@ class GitHubTrendingConnector(BaseConnector):
         )
         return entries
 
-    def _parse_repo(self, article, since: str, position: int) -> ConnectorEntry | None:
+    def _parse_repo(
+        self,
+        article,
+        since: str,
+        position: int,
+        fetch_readme: bool = True,
+        readme_max_chars: int = README_MAX_CHARS,
+    ) -> ConnectorEntry | None:
         try:
             link = article.select_one("h2.h3 a") or article.select_one("h2 a")
             if not link:
@@ -144,6 +187,16 @@ class GitHubTrendingConnector(BaseConnector):
                 f"Đây là tín hiệu sớm về một công cụ/thư viện đang được cộng đồng dev chú ý.",
             ]
             content = "\n\n".join(p for p in content_parts if p)
+
+            # Làm giàu bằng README — đặt SAU khối metadata để nếu prompt cắt 6000 ký tự
+            # thì phần mất là đuôi README, không phải tín hiệu cốt lõi. Fail-safe hoàn toàn.
+            if fetch_readme:
+                try:
+                    readme = _fetch_readme(owner, repo)
+                    if readme:
+                        content = f"{content}\n\nREADME:\n{readme[:readme_max_chars]}"
+                except Exception as e:  # phòng hờ — không bao giờ làm hỏng entry
+                    logger.debug("README enrichment skipped for %s: %s", full_name, e)
 
             return ConnectorEntry(
                 source_url=f"https://github.com{href}",
