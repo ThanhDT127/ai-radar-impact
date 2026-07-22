@@ -22,6 +22,25 @@ MODEL_ID = settings.gemini_model_id
 # bình thường (design D5).
 RAW_LOG_CHARS = 2000
 
+# Trần output cho chat. 2048 KHÔNG đủ: Gemini 2.5 tính thinking tokens vào cùng ngân
+# sách này, và câu hỏi kiểu "liệt kê tin bảo mật tuần này" sinh ~1150 token nhìn thấy
+# được cộng thinking là chạm trần rồi bị cắt giữa từ (đo 22/07/2026).
+CHAT_MAX_OUTPUT_TOKENS = 4096
+
+
+def _is_truncated(response) -> bool:
+    """Response có bị cắt vì chạm `max_output_tokens` không?
+
+    ⚠️ `types.FinishReason` là enum CHUỖI: `.value` trả `'MAX_TOKENS'`, KHÔNG phải `2`.
+    So sánh `== 2` (cách viết cũ ở `analyze()`) không bao giờ đúng, nên cảnh báo cắt
+    chưa từng bắn — kể cả trong đợt điều tra runaway generation ngày 20/07/2026.
+    """
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return False
+    reason = candidates[0].finish_reason
+    return getattr(reason, "value", reason) == "MAX_TOKENS"
+
 
 @dataclass
 class GateResult:
@@ -172,11 +191,8 @@ class GeminiClient:
                     ),
                 )
 
-                candidates = response.candidates or []
-                if candidates:
-                    finish_reason = candidates[0].finish_reason
-                    if hasattr(finish_reason, "value") and finish_reason.value == 2:
-                        logger.warning("Gemini response truncated (MAX_TOKENS) for '%s'", title[:50])
+                if _is_truncated(response):
+                    logger.warning("Gemini response truncated (MAX_TOKENS) for '%s'", title[:50])
 
                 raw_text = response.text or ""
                 return self._parse_response(raw_text)
@@ -191,6 +207,63 @@ class GeminiClient:
                 return AnalysisResult(error=err_str)
 
         return AnalysisResult(error="Gemini 429 RESOURCE_EXHAUSTED after 3 retries")
+
+    def chat(self, system_prompt: str, user_prompt: str) -> tuple[str, int]:
+        """Một lượt hỏi đáp cho chat Q&A. Trả `(text, model_calls_used)`.
+
+        KHÁC `analyze()`/`gate_analyze()` ở hai điểm cố ý:
+
+        1. **Không** `response_mime_type`/`response_schema`. Đo 20/07/2026: bật schema cho
+           lần gọi có output dài làm model sinh lan man tới chạm `max_output_tokens` rồi bị
+           cắt giữa chuỗi → 16/16 doc lỗi `Unterminated string`; `max_length` trong schema
+           Vertex KHÔNG được thực thi. Câu trả lời chat đúng hình dạng đó. Trả text thuần
+           thì không có JSON để vỡ — citation đi đường riêng qua marker `[n]` (design D4).
+        2. Trả kèm số lượt gọi ĐÃ TỐN TIỀN để service tính budget. Retry 429 không có
+           response nên không tính; lượt trả về rồi vỡ ở bước sau vẫn tính.
+
+        Hàm này SYNC như phần còn lại của client — caller phải bọc `asyncio.to_thread`
+        vì chat nằm trên request path (design D6).
+        """
+        _retry_delays = [3, 10]
+        calls = 0
+
+        for attempt, delay in enumerate([0] + _retry_delays):
+            if delay:
+                logger.info("Retrying chat after %ds (attempt %d/2)", delay, attempt)
+                time.sleep(delay)
+            try:
+                response = self._client.models.generate_content(
+                    model=MODEL_ID,
+                    contents=user_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        temperature=0.2,
+                        max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
+                    ),
+                )
+                calls += 1
+                text = (response.text or "").strip()
+
+                # Gemini 2.5 tiêu thinking tokens TRONG CÙNG ngân sách output. Đo
+                # 22/07/2026 trên index 179 tin: prompt 19.008 tok, output nhìn thấy
+                # 1.153 tok — câu hỏi kiểu liệt kê chạm trần 2048 và bị cắt giữa từ.
+                # Cắt thì phải nói ra, không trả về nửa câu như thể đã xong.
+                if _is_truncated(response):
+                    logger.warning("Chat response truncated (MAX_TOKENS)")
+                    text += "\n\n_(Câu trả lời bị cắt vì quá dài — bạn thử hỏi hẹp hơn nhé.)_"
+
+                return text, calls
+
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    if attempt < len(_retry_delays):
+                        logger.warning("Chat 429 rate-limit, will retry")
+                        continue
+                logger.error("Chat Vertex AI error: %s", e)
+                raise
+
+        raise RuntimeError("Chat 429 RESOURCE_EXHAUSTED after retries")
 
     def _parse_response(self, raw_text: str) -> AnalysisResult:
         """Parse Gemini JSON response into AnalysisResult."""
@@ -267,3 +340,22 @@ class GeminiClient:
             adoption_ring=adoption_ring,
             practical_indicators=practical_indicators,
         )
+
+
+_chat_client: GeminiClient | None = None
+
+
+def get_chat_client() -> GeminiClient:
+    """Singleton `GeminiClient` cho request path (design D6).
+
+    `AnalyzerService.__init__` tạo client mới mỗi lần khởi tạo service — vô hại với
+    script chạy một lần. Nhưng route dùng `Depends(...)` chạy MỖI REQUEST; bắt chước
+    pattern đó sẽ dựng `genai.Client` mới cho từng câu hỏi = connection pool mới +
+    re-auth Vertex mỗi lần.
+
+    Khởi tạo lười: import module này không được đòi credentials (test/CI không có key).
+    """
+    global _chat_client
+    if _chat_client is None:
+        _chat_client = GeminiClient()
+    return _chat_client

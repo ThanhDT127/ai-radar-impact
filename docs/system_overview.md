@@ -397,11 +397,34 @@ hai tiêu đề khác nhau ở hai nơi. Dòng digest cắt ở 110 ký tự cho
 Lưu ý tên chủ đề (`📌 DevTools & Frameworks`, `AI/ML Ứng dụng`…) vẫn hiển thị nguyên giá trị taxonomy
 v3, giống hệt dashboard. Muốn Việt hoá thì phải làm bảng nhãn dùng chung cho cả hai nơi.
 
+### Chat Q&A (M8 — thêm 22/07/2026)
+
+Widget 💬 ở góc phải dưới mọi trang dashboard. Hai chế độ trên cùng một endpoint:
+
+- **Đang mở một tin** (`/insights/:id`) → widget tự gắn context chip, câu hỏi chạy trên **tin đó +
+  toàn bộ bài gốc**. Bấm ✕ trên chip để về chế độ toàn cục.
+- **Không mở tin nào** → hỏi toàn bộ kho tin. Server tự lọc, xếp hạng rồi nhét cả kho dạng danh
+  sách nén vào một lần gọi Gemini (không có "tìm kiếm" riêng — model đọc thẳng danh sách).
+
+Câu trả lời luôn kèm marker `[n]` bấm được, dẫn tới đúng tin nguồn. Không có dữ liệu thì bot nói
+"không tìm thấy trong hệ thống" thay vì đoán bừa.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"Tuần này có lỗ hổng nào cần vá gấp không?"}'
+```
+
+Giới hạn: `MAX_DAILY_CHAT_CALLS` (mặc định 200 lượt gọi model/ngày, tính theo giờ UTC, **tách riêng**
+khỏi hạn mức phân tích). Hết lượt thì API trả 429 và widget báo bằng tiếng Việt. Mỗi câu hỏi tốn
+khoảng $0,006-0,016 và mất 5-22 giây tuỳ độ khó.
+
 ### Xem kết quả
 
 - UI: `http://localhost:5173`
 - Health: `http://localhost:8000/api/v1/health`
 - API list: `http://localhost:8000/api/v1/insights`
+- Chat: `POST http://localhost:8000/api/v1/chat`
 - Admin API: `http://localhost:8000/api/v1/admin/` (Bearer token required)
 
 

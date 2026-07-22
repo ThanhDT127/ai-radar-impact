@@ -14,7 +14,7 @@ Frontend SHALL hiển thị nút mở chat ở góc phải dưới trên mọi t
 - **THEN** người dùng vẫn cuộn và thao tác được với danh sách/chi tiết insight phía sau
 
 ### Requirement: Context chip theo insight đang mở
-Khi người dùng đang xem chi tiết một insight (split-view hoặc `/insights/:id`), widget SHALL tự gắn context chip hiển thị title insight đó và gửi `insight_id` kèm câu hỏi (chế độ B). Người dùng SHALL bỏ được chip (✕) để chuyển sang hỏi toàn cục.
+Khi người dùng đang ở trang chi tiết một insight (`/insights/:id`), widget SHALL tự gắn context chip hiển thị title insight đó và gửi `insight_id` kèm câu hỏi (chế độ B). Người dùng SHALL bỏ được chip (✕) để chuyển sang hỏi toàn cục. Khi rời trang chi tiết, widget SHALL trở về chế độ toàn cục.
 
 #### Scenario: Tự gắn context khi xem detail
 - **WHEN** người dùng mở chi tiết insight rồi mở widget và đặt câu hỏi
@@ -27,6 +27,10 @@ Khi người dùng đang xem chi tiết một insight (split-view hoặc `/insig
 #### Scenario: Chuyển insight đang xem
 - **WHEN** người dùng chuyển sang xem insight khác trong khi widget mở
 - **THEN** context chip cập nhật theo insight mới
+
+#### Scenario: Quay về danh sách
+- **WHEN** người dùng rời trang chi tiết về danh sách trong khi widget mở
+- **THEN** context chip biến mất và câu hỏi tiếp theo chạy chế độ toàn cục
 
 ### Requirement: Render citation thành link
 Câu trả lời của bot SHALL hiển thị citations dưới dạng link; bấm citation SHALL điều hướng đến chi tiết insight tương ứng trong dashboard.

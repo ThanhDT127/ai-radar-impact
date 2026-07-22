@@ -302,6 +302,65 @@ def build_gate_prompt(title: str, content: str) -> str:
     )
 
 
+CHAT_SYSTEM_PROMPT = """\
+Bạn là trợ lý hỏi đáp của AI Impact Radar — hệ thống theo dõi tin công nghệ/AI cho một
+công ty Việt Nam (Rạng Đông), phạm vi quan tâm gồm 4 trụ cột: IoT/R&D, Agent/AI/Data
+Science, Smart Home, và bảo mật hệ thống/dữ liệu.
+
+LUẬT BẮT BUỘC — vi phạm là hỏng:
+
+1. CHỈ trả lời dựa trên phần "DỮ LIỆU" bên dưới. Tuyệt đối không dùng kiến thức riêng
+   của bạn về thế giới, không suy đoán, không bổ sung chi tiết mà dữ liệu không nói.
+2. Nếu dữ liệu không đủ để trả lời, hãy nói thẳng: "Không tìm thấy thông tin này trong
+   hệ thống." Nói không biết là câu trả lời ĐÚNG, không phải thất bại.
+3. Mỗi khẳng định lấy từ dữ liệu PHẢI kèm marker nguồn dạng [n] — đúng con số đứng đầu
+   mục đó trong phần DỮ LIỆU. Ví dụ: "OpenAI đổi chính sách API [3]." Được dùng nhiều
+   marker cho một câu nếu thông tin đến từ nhiều mục: [1][4].
+4. KHÔNG bịa số hiệu. Chỉ dùng những con số thực sự xuất hiện trong phần DỮ LIỆU.
+5. Trả lời bằng TIẾNG VIỆT. Giữ nguyên thuật ngữ kỹ thuật tiếng Anh (API, prompt,
+   fine-tuning, embedding...) — đừng dịch chúng.
+
+ĐỘ DÀI — quan trọng:
+- TỐI ĐA 5 tin cho một câu trả lời, kể cả khi có hàng chục tin khớp. Chọn tin quan
+  trọng nhất; dữ liệu đã được xếp sẵn theo độ ưu tiên nên tin ở đầu danh sách đáng
+  chọn hơn.
+- Nếu còn nhiều tin khớp ngoài 5 tin đã nêu, kết bằng một dòng: "Còn N tin khác — hỏi
+  hẹp hơn để xem tiếp." Đừng liệt kê hết.
+- Mỗi tin gói trong MỘT gạch đầu dòng, tối đa 2 câu.
+
+VĂN PHONG:
+- Ngắn gọn, đi thẳng vào việc. 2-5 câu cho câu hỏi thường.
+- Viết cho người làm kỹ thuật: cụ thể, không sáo rỗng, không mở bài dài dòng.
+- Không lặp lại nguyên văn câu hỏi trước khi trả lời.
+"""
+
+
+def build_chat_insight_prompt(insight_block: str, history_block: str, question: str) -> str:
+    """Prompt chế độ per-insight — đúng 1 nguồn, luôn đánh số [1]."""
+    parts = ["DỮ LIỆU:", insight_block]
+    if history_block:
+        parts += ["", "HỘI THOẠI TRƯỚC ĐÓ:", history_block]
+    parts += ["", f"CÂU HỎI: {question}"]
+    return "\n".join(parts)
+
+
+def build_chat_global_prompt(index_block: str, history_block: str, question: str) -> str:
+    """Prompt chế độ toàn cục — index nén đã được server lọc và xếp hạng sẵn.
+
+    Index KHÔNG chứa UUID (design D4): model chỉ thấy số thứ tự [n], server giữ bảng
+    ánh xạ n → insight_id. Model không có gì để bịa định danh.
+    """
+    if index_block:
+        data = index_block
+    else:
+        data = "(không có tin nào trong hệ thống khớp phạm vi tìm kiếm)"
+    parts = ["DỮ LIỆU — các tin hiện có trong hệ thống:", data]
+    if history_block:
+        parts += ["", "HỘI THOẠI TRƯỚC ĐÓ:", history_block]
+    parts += ["", f"CÂU HỎI: {question}"]
+    return "\n".join(parts)
+
+
 def build_prompt(title: str, content: str) -> str:
     """Build the deep analysis prompt with title and content substituted."""
     return ANALYSIS_PROMPT.format(

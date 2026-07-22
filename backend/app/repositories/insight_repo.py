@@ -217,6 +217,55 @@ class InsightRepository:
         result = await self.session.execute(query.order_by(Insight.created_at.asc()))
         return list(result.scalars().all())
 
+    async def list_for_chat(
+        self,
+        published_since: datetime | None = None,
+        topics: list[str] | None = None,
+        roles: list[str] | None = None,
+        keyword: str | None = None,
+    ) -> list[Insight]:
+        """Ứng viên dựng index cho chat chế độ toàn cục (chatbot-qa D3/D7).
+
+        Method RIÊNG, không nhồi tham số vào `list_paginated` — hàm đó phục vụ UI, thêm
+        param là thêm bề mặt hồi quy cho dashboard.
+
+        Trả ORM entities (không serialize) vì tầng trên còn phải xếp hạng bằng
+        `delivery_engine.score_for_role()`, hàm đó đọc `recommendations` JSONB thô.
+
+        `status="published" AND is_primary` là BẮT BUỘC: bỏ `is_primary` thì index chứa
+        cả bản trùng của cụm dedup, chat sẽ trích dẫn tin mà dashboard không hiển thị.
+        """
+        query = (
+            select(Insight)
+            .join(RawDocument, Insight.raw_document_id == RawDocument.id)
+            .where(Insight.status == "published")
+            .where(Insight.is_primary == True)  # noqa: E712
+            .options(selectinload(Insight.raw_document).selectinload(RawDocument.source))
+        )
+
+        if published_since is not None:
+            query = query.where(Insight.published_at >= published_since)
+        if topics:
+            query = query.where(or_(*(Insight.topics.any(t) for t in topics)))
+        if roles:
+            query = query.where(or_(*(Insight.affected_roles.any(r) for r in roles)))
+        if keyword:
+            clause = f"%{keyword}%"
+            query = query.where(
+                or_(
+                    Insight.title.ilike(clause),
+                    Insight.summary_short.ilike(clause),
+                    Insight.summary_medium.ilike(clause),
+                    Insight.signal.ilike(clause),
+                    Insight.so_what.ilike(clause),
+                )
+            )
+
+        result = await self.session.execute(
+            query.order_by(Insight.published_at.desc().nulls_last())
+        )
+        return list(result.scalars().unique().all())
+
     async def get_by_id(self, insight_id: uuid.UUID) -> dict | None:
         """Return a single insight by UUID with references, or None."""
         result = await self.session.execute(

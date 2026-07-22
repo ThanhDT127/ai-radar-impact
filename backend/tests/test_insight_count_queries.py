@@ -91,3 +91,38 @@ async def test_source_counts_keep_sources_without_primary_insights():
         "query không được có WHERE — thêm điều kiện vào WHERE sẽ loại bỏ "
         "các nguồn chưa có insight primary khỏi kết quả"
     )
+
+
+class _ScalarResult(_FakeResult):
+    """`list_for_chat` dùng `.scalars().unique().all()` thay vì one/scalar_one."""
+
+    def scalars(self):
+        return self
+
+    def unique(self):
+        return self
+
+    def all(self):
+        return []
+
+
+class _ScalarRecordingSession(_RecordingSession):
+    async def execute(self, statement, *a, **kw):
+        self.statements.append(statement)
+        return _ScalarResult()
+
+
+@pytest.mark.asyncio
+async def test_list_for_chat_filters_primary_and_published():
+    """Index của chatbot phải khớp tập tin dashboard hiển thị.
+
+    Thiếu `is_primary` thì chat trích dẫn bản trùng của cụm dedup — người dùng bấm
+    citation sẽ tới một tin không có trong danh sách.
+    """
+    session = _ScalarRecordingSession()
+    await InsightRepository(session).list_for_chat()
+
+    sql = _sql(session.statements[0])
+    where_part = sql.split("WHERE", 1)[1]
+    assert "is_primary" in where_part, "list_for_chat đang lấy cả insight non-primary"
+    assert "status" in where_part, "list_for_chat phải lọc status = published"

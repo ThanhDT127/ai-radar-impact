@@ -3,6 +3,7 @@ import { Link, NavLink } from 'react-router-dom';
 import styles from '../styles/layout.module.css';
 import ThemeToggle from './ThemeToggle';
 import ScrollToTop from './ScrollToTop';
+import ChatWidget from './ChatWidget';
 
 interface LayoutProps {
   children: ReactNode;
@@ -47,6 +48,7 @@ export default function Layout({ children }: LayoutProps) {
       </header>
       <main className="container">{children}</main>
       <ScrollToTop />
+      <ChatWidget />
     </div>
   );
 }

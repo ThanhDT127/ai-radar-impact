@@ -27,6 +27,11 @@ class Settings(BaseSettings):
 
     # Cost controls
     min_content_length: int = 200
+    # ⚠️ ĐƠN VỊ ĐO KHÁC NHAU giữa hai budget dưới đây:
+    #   max_daily_analysis  đếm TÀI LIỆU — 1 tài liệu = gate call + analyze call = 2 lượt
+    #                       gọi model, nên 500 "đơn vị" thực chất tới ~1000 lượt gọi.
+    #   max_daily_chat_calls đếm LƯỢT GỌI model.
+    # Đừng so trực tiếp hai con số này với nhau.
     max_daily_analysis: int = 500
 
     # Document lifecycle (W1 quota guard)
@@ -75,6 +80,21 @@ class Settings(BaseSettings):
     email_from: str = ""
     email_from_name: str = "AI Radar"
     email_reply_to: str = ""
+
+    # Chat Q&A (M8) — consumer Gemini thứ hai, budget TÁCH BIỆT khỏi analysis.
+    # Đơn vị: LƯỢT GỌI model (xem ghi chú ở max_daily_analysis).
+    # Dashboard không có auth nên quota là hàng rào duy nhất → để khiêm tốn.
+    max_daily_chat_calls: int = 200
+    # Cửa sổ thời gian dựng index cho chế độ toàn cục. 0 = không giới hạn (cả corpus).
+    # Van xả PHỤ: hạ dần 0 → 90 → 30 nếu cần lọc theo độ mới.
+    chat_window_days: int = 0
+    # Trần số tin đưa vào index sau khi xếp hạng — van xả CHÍNH.
+    # Câu trả lời chỉ trích tối đa 5 tin, nên gửi cả kho để chọn ra 5 là lãng phí.
+    # Đo 22/07/2026 cùng một câu hỏi: 179 tin → 19.126 input + 3.930 thinking, 23,0s,
+    # $0,0160; 60 tin → 6.670 input + 2.534 thinking, 15,0s, $0,0090 (−44% chi phí,
+    # −35% thời gian). Cắt theo THỨ HẠNG nên chi phí phẳng khi corpus phình, khác
+    # `chat_window_days` cắt theo thời gian. 0 = không giới hạn.
+    chat_index_top_k: int = 60
 
     # Admin API
     admin_api_key: str = "changeme"
