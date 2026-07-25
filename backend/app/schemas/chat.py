@@ -41,4 +41,4 @@ class Citation(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation] = []
-    mode: str  # "insight" | "global"
+    mode: str  # "insight" | "global" | "meta"

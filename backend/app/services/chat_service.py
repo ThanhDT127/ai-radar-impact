@@ -37,6 +37,8 @@ from app.services.chat_grounding import (
     enforce_grounding,
     resolve_citations,
 )
+from app.services.chat_intent import INTENT_PRESETS, classify_intent
+from app.services.chat_service_terms import STOPWORDS
 from app.services.delivery_engine import score_for_role
 
 logger = logging.getLogger(__name__)
@@ -71,18 +73,8 @@ def _roles_in_question(question: str) -> list[str]:
     return [role for role in ALLOWED_ROLES if role.lower() in lowered]
 
 
-# Từ xuất hiện trong hầu hết câu hỏi nên không phân biệt được tin nào liên quan.
-_STOPWORDS = {
-    "này", "nào", "gì", "có", "không", "cho", "của", "các", "những", "một", "và",
-    "là", "với", "về", "trong", "đến", "tới", "được", "bị", "thì", "mà", "hay",
-    "hoặc", "tôi", "mình", "team", "công", "ty", "hệ", "thống", "tin", "tức",
-    "tuần", "nay", "hôm", "vừa", "rồi", "đang", "sẽ", "cần", "nên", "phải",
-    "đáng", "chú", "ý", "quan", "tâm", "nhất", "gấp", "mới", "đọc", "xem",
-    "liên", "quan", "nói", "gì", "ra", "sao", "thế", "làm", "khi", "nếu",
-    # 2 ký tự — cần liệt kê vì ngưỡng độ dài đã hạ xuống 2
-    "ở", "đi", "ta", "họ", "nó", "ai", "ừ", "à", "ạ", "đó", "kia", "ấy", "vì",
-    "do", "nên", "tuy", "dù", "chỉ", "cả", "còn", "đã", "sẽ", "vẫn", "cũng",
-}
+# Nguồn sự thật ở `chat_service_terms` (dùng chung với `chat_intent`, tránh import vòng).
+_STOPWORDS = STOPWORDS
 
 
 def _question_terms(question: str) -> list[str]:
@@ -135,6 +127,22 @@ class ChatService:
         self, question: str, history: list, insight_id: uuid.UUID | None
     ) -> dict:
         """Điểm vào duy nhất. Ghi `chat_logs` trong `finally` để budget không rò rỉ."""
+        # Định tuyến ý định TRƯỚC cửa quota (design D3): câu chào/meta/cảm ơn 0 lượt gọi
+        # model phải trả lời được kể cả khi budget đã cạn, và không tiêu budget. Áp dụng
+        # bất kể có `insight_id` hay không — chào trong lúc đang mở một bài vẫn là chào.
+        intent = classify_intent(question)
+        if intent is not None:
+            started = time.monotonic()
+            # Ghi log `model_calls=0` để đo tần suất fast‑path; bản ghi 0 không đội bộ đếm
+            # `SUM(model_calls)` nên không ảnh hưởng budget đã dùng.
+            await self.chat_log_repo.create(
+                mode="meta",
+                model_calls=0,
+                citations_count=0,
+                latency_ms=int((time.monotonic() - started) * 1000),
+            )
+            return {"answer": INTENT_PRESETS[intent], "citations": [], "mode": "meta"}
+
         used = await self.chat_log_repo.sum_model_calls_today()
         if used >= settings.max_daily_chat_calls:
             logger.warning(
