@@ -14,6 +14,7 @@ citation ở đây là *cấu trúc*, không phải hậu kiểm lọc id lạ.
 import re
 import uuid
 
+from app.ai.prompts import OUT_OF_SCOPE_SENTINEL
 from app.models.insight import Insight
 
 # Marker dạng [1], [12] — không khớp [abc] hay [1.5].
@@ -39,16 +40,22 @@ def _fmt_date(insight: Insight) -> str:
     return when.strftime("%d/%m/%Y") if when else "không rõ ngày"
 
 
-def build_index_block(insights: list[Insight]) -> tuple[str, dict[int, Insight]]:
+def build_index_block(
+    insights: list[Insight], start: int = 1
+) -> tuple[str, dict[int, Insight]]:
     """Dựng index nén đã đánh số + bảng ánh xạ `n → Insight`.
 
     Một dòng ≈ 108 token (đo trên corpus 22/07/2026: title 60 + signal 144 ký tự).
     KHÔNG đưa UUID vào chuỗi trả về — đó là toàn bộ điểm của D4.
+
+    `start` cho phép chế độ mở rộng (`chat-scope-routing`) dành [1] cho bài đang xem rồi
+    đánh số tin toàn cục từ [2]. Một dãy số liên tục qua cả hai khối context ⇒ vẫn đúng
+    MỘT bảng ánh xạ, không phải hai không gian số chồng nhau.
     """
     lines: list[str] = []
     mapping: dict[int, Insight] = {}
 
-    for n, insight in enumerate(insights, start=1):
+    for n, insight in enumerate(insights, start=start):
         mapping[n] = insight
         roles = ", ".join(insight.affected_roles or []) or "—"
         topics = ", ".join(insight.topics or []) or "—"
@@ -130,6 +137,22 @@ def resolve_citations(
         for n in seen
     ]
     return cleaned, citations
+
+
+def is_out_of_scope_answer(raw_answer: str) -> bool:
+    """Lượt gọi chế độ B có phát sentinel ngoài‑phạm‑vi không? (design D3)
+
+    Đọc trên văn bản **thô**, TRƯỚC `resolve_citations`/`enforce_grounding` — sentinel
+    không có marker `[n]` nào nên nếu để grounding chạy trước thì nó bị thay bằng
+    `INSUFFICIENT_GROUNDS_MESSAGE` và tín hiệu biến mất.
+
+    Nhận diện CHẶT theo đúng bias dè dặt: chỉ khi sentinel là **toàn bộ** câu trả lời.
+    Model vừa trả lời vừa kèm sentinel nghĩa là nó trả lời được → không mở rộng, vì mở
+    nhầm tốn gấp đôi lượt gọi và độ trễ. Chỉ nới đúng phần rác định dạng model hay thêm
+    (dấu nháy ngược, khoảng trắng).
+    """
+    stripped = raw_answer.strip().strip("`").strip()
+    return stripped == OUT_OF_SCOPE_SENTINEL
 
 
 def is_not_found_answer(answer: str) -> bool:

@@ -13,6 +13,7 @@ import logging
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -23,6 +24,7 @@ from app.ai.gemini_client import GeminiClient, get_chat_client
 from app.ai.prompts import (
     ALLOWED_ROLES,
     CHAT_SYSTEM_PROMPT,
+    build_chat_expanded_prompt,
     build_chat_global_prompt,
     build_chat_insight_prompt,
 )
@@ -35,6 +37,7 @@ from app.services.chat_grounding import (
     build_index_block,
     build_insight_block,
     enforce_grounding,
+    is_out_of_scope_answer,
     resolve_citations,
 )
 from app.services.chat_intent import AMBIGUOUS, INTENT_PRESETS, route_intent
@@ -43,9 +46,36 @@ from app.services.delivery_engine import score_for_role
 
 logger = logging.getLogger(__name__)
 
-# Trần cứng lượt gọi model cho MỘT câu hỏi (design D3). v1 chỉ dùng 1; giữ trần để
-# tầng fetch-chi-tiết sau này không lặng lẽ trôi thành tool loop.
+# Trần cứng số BƯỚC TRẢ LỜI cho MỘT câu hỏi (design D3). Chế độ B hoặc A là 1 bước;
+# mở rộng scope (`chat-scope-routing`) là bước thứ 2. Trần tồn tại để pipeline không
+# lặng lẽ trôi thành tool loop.
+#
+# ⚠️ BƯỚC ≠ LƯỢT GỌI TÍNH TIỀN (sửa 25/07/2026). `GeminiClient.chat()` có thể tiêu 2 lượt
+# cho MỘT bước khi câu trả lời bị cắt và phải hỏi lại (`chat-answer-completeness`). Trước
+# khi tách hai khái niệm này, đo được hai lỗi thật:
+#   (A) mở rộng + lượt 2 bị cắt → 3 lượt, vượt trần mà spec scope-routing tuyên bố;
+#   (B) lượt B bị cắt → hỏi lại → bản hỏi lại phát sentinel → mở rộng bị trần chặn →
+#       RuntimeError → HTTP 500 cho người dùng.
+# Nên: trần áp lên `_steps_used` (bước), còn `_calls_used` (tiền) chỉ dùng để ghi log và
+# tính budget. Trần bước 2 × trần 2 lượt/bước ⇒ tối đa 4 lượt tính tiền cho một câu hỏi,
+# vẫn có biên, vẫn không thành vòng lặp.
 MAX_MODEL_CALLS_PER_QUESTION = 2
+
+
+@dataclass
+class _InsightAttempt:
+    """Kết quả một lượt gọi chế độ B — có thể là câu trả lời, hoặc yêu cầu mở rộng.
+
+    `out_of_scope=True` nghĩa là model đã phát sentinel: `answer`/`citations` rỗng và
+    caller phải chạy lượt mở rộng. Giữ luôn `insight` + `insight_block` để lượt hai
+    không phải nạp lại bài từ DB (design D4 — context mở rộng mang cả bài đang xem).
+    """
+
+    answer: str
+    citations: list[dict]
+    out_of_scope: bool = False
+    insight: Insight | None = None
+    insight_block: str = ""
 
 
 class QuotaExceededError(Exception):
@@ -122,6 +152,10 @@ class ChatService:
         # (sau khi model đã trả lời) làm số đếm biến mất và budget rò rỉ.
         # An toàn vì service là per-request — AsyncSession vốn không dùng chung được.
         self._calls_used = 0
+        # Số BƯỚC trả lời đã chạy (mode B / mode A / mở rộng). Tách khỏi `_calls_used` vì
+        # một bước có thể tốn 2 lượt khi câu trả lời bị cắt và phải hỏi lại — xem ghi chú
+        # ở `MAX_MODEL_CALLS_PER_QUESTION`.
+        self._steps_used = 0
 
     async def _route_intent(self, question: str) -> str | None:
         """Bộ lọc ý định HAI TẦNG (25/07/2026). Trả nhóm preset, hoặc `None` = đi pipeline.
@@ -177,12 +211,21 @@ class ChatService:
         mode = "insight" if insight_id else "global"
         started = time.monotonic()
         self._calls_used = 0
+        self._steps_used = 0
         citations: list[dict] = []
         try:
             if insight_id:
-                answer, citations = await self._answer_insight(
-                    question, history, insight_id
-                )
+                attempt = await self._answer_insight(question, history, insight_id)
+                if attempt.out_of_scope:
+                    # Auto-fallback (design D2/D4): model đã tự nói "câu này không nằm
+                    # trong bài", nên lượt 2 trả lời lại với context rộng hơn. Đây KHÔNG
+                    # phải một lượt phân loại — tín hiệu là byproduct của lượt trả lời B.
+                    mode = "expanded"
+                    answer, citations = await self._answer_global(
+                        question, history, focus=attempt
+                    )
+                else:
+                    answer, citations = attempt.answer, attempt.citations
             else:
                 answer, citations = await self._answer_global(question, history)
             return {"answer": answer, "citations": citations, "mode": mode}
@@ -199,7 +242,7 @@ class ChatService:
 
     async def _answer_insight(
         self, question: str, history: list, insight_id: uuid.UUID
-    ) -> tuple[str, list[dict]]:
+    ) -> _InsightAttempt:
         result = await self.session.execute(
             select(Insight)
             .where(Insight.id == insight_id)
@@ -213,20 +256,31 @@ class ChatService:
         # Rỗng = đã bị tombstone-purge → build_insight_block tự thêm ghi chú.
         raw_doc = insight.raw_document
         content = (raw_doc.normalized_content or "").strip() if raw_doc else ""
+        insight_block = build_insight_block(insight, content or None)
 
         prompt = build_chat_insight_prompt(
-            insight_block=build_insight_block(insight, content or None),
+            insight_block=insight_block,
             history_block=_history_block(history),
             question=question,
         )
         raw_answer = await self._call_model(prompt)
 
+        # Dò sentinel TRƯỚC grounding: sentinel không mang marker [n] nào, nên để
+        # `enforce_grounding` chạy trước thì nó bị thay bằng INSUFFICIENT_GROUNDS_MESSAGE
+        # và tín hiệu ngoài‑phạm‑vi mất sạch (design D3).
+        if is_out_of_scope_answer(raw_answer):
+            logger.info("Câu hỏi ngoài phạm vi bài %s — mở rộng toàn hệ thống", insight_id)
+            return _InsightAttempt(
+                answer="", citations=[], out_of_scope=True,
+                insight=insight, insight_block=insight_block,
+            )
+
         answer, citations = resolve_citations(raw_answer, {1: insight})
         answer, citations = enforce_grounding(answer, citations)
-        return answer, citations
+        return _InsightAttempt(answer=answer, citations=citations)
 
     async def _answer_global(
-        self, question: str, history: list
+        self, question: str, history: list, focus: _InsightAttempt | None = None
     ) -> tuple[str, list[dict]]:
         since = None
         if settings.chat_window_days > 0:
@@ -236,6 +290,11 @@ class ChatService:
 
         matched = await self.insight_repo.list_for_chat(published_since=since)
         asked_roles = _roles_in_question(question)
+        # Chế độ mở rộng: bài đang xem đi kèm dạng block đầy đủ ở [1], nên phải loại nó
+        # khỏi index toàn cục — không thì cùng một tin xuất hiện hai lần với hai số khác
+        # nhau và citation trỏ trùng.
+        if focus is not None:
+            matched = [i for i in matched if i.id != focus.insight.id]
         matched = self._rank(matched, question)
 
         # ⚠️ Tính "vai trò không có tin" trên TOÀN BỘ tập khớp, TRƯỚC khi cắt top-K.
@@ -257,7 +316,13 @@ class ChatService:
             else matched
         )
 
-        index_block, mapping = build_index_block(candidates)
+        # Mở rộng: [1] dành cho bài đang xem, tin toàn cục đánh số từ [2] — một dãy số
+        # liên tục qua cả hai khối context ⇒ vẫn đúng MỘT bảng ánh xạ.
+        index_block, mapping = build_index_block(
+            candidates, start=2 if focus is not None else 1
+        )
+        if focus is not None:
+            mapping[1] = focus.insight
 
         # Model chỉ nhìn thấy phần đã cắt, nên nếu để nó tự đếm "Còn N tin khác" thì con
         # số sẽ thiếu đúng bằng phần bị cắt. Đưa tổng thật vào.
@@ -278,11 +343,20 @@ class ChatService:
                 f"{', '.join(empty_roles)}. Hãy nói rõ điều đó."
             )
 
-        prompt = build_chat_global_prompt(
-            index_block=index_block,
-            history_block=_history_block(history),
-            question=question,
-        )
+        history_block = _history_block(history)
+        if focus is not None:
+            prompt = build_chat_expanded_prompt(
+                insight_block=focus.insight_block,
+                index_block=index_block,
+                history_block=history_block,
+                question=question,
+            )
+        else:
+            prompt = build_chat_global_prompt(
+                index_block=index_block,
+                history_block=history_block,
+                question=question,
+            )
         raw_answer = await self._call_model(prompt)
 
         answer, citations = resolve_citations(raw_answer, mapping)
@@ -330,10 +404,13 @@ class ChatService:
         Cộng vào `self._calls_used` NGAY khi model trả về, trước khi caller làm bất cứ
         việc gì khác: đó là thời điểm tiền đã tiêu, và mọi lỗi sau đó vẫn phải tính.
         """
-        if self._calls_used >= MAX_MODEL_CALLS_PER_QUESTION:
+        if self._steps_used >= MAX_MODEL_CALLS_PER_QUESTION:
             raise RuntimeError(
-                f"Chạm trần {MAX_MODEL_CALLS_PER_QUESTION} lượt gọi model cho một câu hỏi"
+                f"Chạm trần {MAX_MODEL_CALLS_PER_QUESTION} bước trả lời cho một câu hỏi"
             )
+        self._steps_used += 1
         text, calls = await asyncio.to_thread(self.gemini.chat, CHAT_SYSTEM_PROMPT, prompt)
+        # `calls` có thể là 2 nếu lượt đầu bị cắt và client đã hỏi lại — vẫn tốn tiền thật
+        # nên vẫn phải cộng vào budget, chỉ là KHÔNG tính như một bước mới.
         self._calls_used += calls
         return text

@@ -20,7 +20,9 @@ export interface ChatRequest {
 export interface ChatResponse {
   answer: string;
   citations: Citation[];
-  mode: 'insight' | 'global';
+  // "expanded" = server tự mở rộng từ scope bài sang toàn hệ thống khi câu hỏi vượt
+  // phạm vi bài đang xem (change `chat-scope-routing`).
+  mode: 'insight' | 'global' | 'meta' | 'expanded';
 }
 
 // Backend cũng cắt còn 10 lượt gần nhất; giữ số ở đây để không gửi thừa qua mạng.

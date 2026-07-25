@@ -10,8 +10,9 @@ toàn cục đã xếp hạng (tái dùng đúng retrieval do server điều khi
 thứ hai** để trả lời.
 
 Câu trả lời mở rộng SHALL nêu rõ rằng đã tìm trên toàn hệ thống (không chỉ bài đang xem), citation SHALL lấy
-từ bảng ánh xạ `[n]` của index toàn cục, và `mode` SHALL là `"expanded"`. Tổng số lượt gọi model cho một câu
-hỏi SHALL KHÔNG vượt quá 2. Service SHALL KHÔNG dùng `response_schema` để phát/đọc sentinel. Sentinel SHALL
+từ bảng ánh xạ `[n]` của index toàn cục, và `mode` SHALL là `"expanded"`. Tổng số **bước trả lời** cho một câu hỏi
+SHALL KHÔNG vượt quá 2. Một bước MAY tiêu nhiều hơn một lượt gọi tính tiền khi câu trả lời bị
+cắt và phải hỏi lại; trần áp lên số bước, còn bộ đếm budget SHALL ghi số lượt thực đã tốn tiền. Service SHALL KHÔNG dùng `response_schema` để phát/đọc sentinel. Sentinel SHALL
 được phát **dè dặt**: câu hỏi còn trả lời được dù chỉ một phần từ nội dung bài SHALL KHÔNG kích hoạt mở rộng.
 
 Service SHALL KHÔNG dùng một lượt gọi model riêng chỉ để phân loại phạm vi; tín hiệu ngoài‑phạm‑vi SHALL là
@@ -30,9 +31,13 @@ kết quả của chính lượt gọi trả lời per‑insight.
 - **WHEN** câu hỏi vượt phạm vi bài và index toàn cục cũng không có tin nào khớp
 - **THEN** service trả lời trung thực rằng không tìm thấy trong toàn hệ thống, `citations` rỗng, không bịa từ bài đang xem
 
-#### Scenario: Trần hai lượt gọi
+#### Scenario: Trần hai bước trả lời
 - **WHEN** một câu hỏi kích hoạt mở rộng
-- **THEN** service dùng đúng 2 lượt gọi (per‑insight + toàn cục) và SHALL KHÔNG thực hiện lượt thứ ba; `chat_logs` ghi `model_calls=2`
+- **THEN** service dùng đúng 2 bước (per‑insight + toàn cục) và SHALL KHÔNG thực hiện bước thứ ba; khi không bước nào bị cắt, `chat_logs` ghi `model_calls=2`
+
+#### Scenario: Một bước phải hỏi lại vì câu trả lời bị cắt
+- **WHEN** một câu hỏi kích hoạt mở rộng và một trong hai bước bị cắt nên phải hỏi lại
+- **THEN** service vẫn hoàn tất đủ hai bước (KHÔNG lỗi vì chạm trần) và `chat_logs` ghi đúng số lượt đã tốn tiền, lớn hơn 2
 
 #### Scenario: Sentinel phát dè dặt
 - **WHEN** câu hỏi trả lời được một phần từ nội dung bài

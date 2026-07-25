@@ -11,6 +11,10 @@ interface Message {
   content: string;
   citations?: Citation[];
   isError?: boolean;
+  // Server tự mở rộng sang toàn hệ thống khi câu hỏi vượt phạm vi bài đang xem. Phải gắn
+  // nhãn, vì người dùng đang ở scope "Bài đang xem" mà câu trả lời lại đến từ tin khác —
+  // không nói ra thì trông như bot bịa từ bài đang mở.
+  expanded?: boolean;
 }
 
 // Toàn cục (rời detail hoặc bỏ chip) là MỘT scope thật với luồng riêng, không phải "không có
@@ -131,6 +135,7 @@ export default function ChatWidget() {
             role: 'assistant',
             content: data.answer,
             citations: data.citations,
+            expanded: data.mode === 'expanded',
           }),
         onError: (error) => {
           const status = axios.isAxiosError(error) ? error.response?.status : undefined;
@@ -182,18 +187,25 @@ export default function ChatWidget() {
         </button>
       </div>
 
-      {activeInsightId && (
-        <div className={styles.chip}>
-          <span className={styles.chipText}>
-            Đang hỏi về: {contextTitle ?? 'tin đang mở'}
+      {/* Badge phạm vi — hiện khi đang ở trang chi tiết, kể cả sau khi đã chuyển sang
+          toàn hệ thống. Chip cũ chỉ có một chiều (bài → toàn cục) nên muốn quay lại bài
+          phải điều hướng; badge này chuyển HAI CHIỀU tại chỗ (design D7). */}
+      {routeInsightId && (
+        <div className={styles.scopeBar}>
+          <span className={styles.scopeText} title={contextTitle ?? undefined}>
+            Phạm vi: <strong>{activeInsightId ? 'Bài đang xem' : 'Toàn hệ thống'}</strong>
           </span>
           <button
             type="button"
-            className={styles.chipClose}
-            onClick={() => setContextDropped(true)}
-            aria-label="Bỏ ngữ cảnh, hỏi toàn bộ hệ thống"
+            className={styles.scopeToggle}
+            onClick={() => setContextDropped((dropped) => !dropped)}
+            aria-label={
+              activeInsightId
+                ? 'Chuyển sang hỏi toàn hệ thống'
+                : 'Chuyển sang hỏi trong bài đang xem'
+            }
           >
-            ✕
+            {activeInsightId ? 'Hỏi toàn hệ thống' : 'Hỏi trong bài này'}
           </button>
         </div>
       )}
@@ -214,6 +226,9 @@ export default function ChatWidget() {
             </div>
           ) : (
             <div key={idx} className={message.isError ? styles.bubbleError : styles.bubbleBot}>
+              {message.expanded && (
+                <span className={styles.expandedTag}>🔎 Tìm trên toàn hệ thống</span>
+              )}
               {renderAnswer(message.content, message.citations ?? [])}
               {message.citations && message.citations.length > 0 && (
                 <div className={styles.citations}>

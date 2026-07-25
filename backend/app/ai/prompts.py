@@ -341,12 +341,40 @@ VĂN PHONG:
 """
 
 
+# Sentinel out-of-scope của chế độ per-insight (change `chat-scope-routing`, design D3).
+# ĐỊNH NGHĨA MỘT CHỖ, dùng chung: prompt bảo model in nó, service dò nó. Văn bản thuần —
+# KHÔNG `response_schema` (bài học `gemini-structured-output`: output dài + schema =
+# runaway → JSON vỡ). Chọn dạng `[[...]]` để không đụng marker citation `[n]` và không
+# trùng văn phong tự nhiên tiếng Việt.
+OUT_OF_SCOPE_SENTINEL = "[[NGOÀI_PHẠM_VI_BÀI]]"
+
+# Luật phạm vi CHỈ dành cho chế độ B. Cố ý đặt ở prompt người dùng chứ KHÔNG nhét vào
+# `CHAT_SYSTEM_PROMPT`: system prompt dùng chung với chế độ toàn cục, thêm luật sentinel
+# vào đó sẽ khiến chế độ toàn cục cũng bắn sentinel — mà ở đó không có gì để mở rộng nữa.
+_SCOPE_RULE = f"""\
+LUẬT PHẠM VI (chỉ cho câu hỏi này, ghi đè luật số 2 ở trên):
+- Nếu câu hỏi KHÔNG THỂ trả lời từ DỮ LIỆU của bài trên, hãy in đúng một dòng:
+  {OUT_OF_SCOPE_SENTINEL}
+  và KHÔNG in gì khác — không giải thích, không xin lỗi, không marker nguồn. Hệ thống
+  sẽ tự tìm tiếp trên toàn kho tin, nên đừng nói "không tìm thấy" ở chế độ này.
+- NGƯỢC LẠI, nếu bài trên trả lời được DÙ CHỈ MỘT PHẦN thì trả lời bình thường và
+  TUYỆT ĐỐI KHÔNG in dòng đó. Trả lời được một phần vẫn là trả lời được.
+- Khi phân vân, hãy TRẢ LỜI thay vì in dòng đó."""
+
+
 def build_chat_insight_prompt(insight_block: str, history_block: str, question: str) -> str:
-    """Prompt chế độ per-insight — đúng 1 nguồn, luôn đánh số [1]."""
+    """Prompt chế độ per-insight — đúng 1 nguồn, luôn đánh số [1].
+
+    Kèm luật sentinel out-of-scope (design D3). Luật phát **dè dặt** một cách có chủ ý:
+    sentinel giả (bài trả lời được nhưng model vẫn kêu ngoài phạm vi) tốn thêm một lượt
+    gọi và gấp đôi độ trễ, còn thiếu sentinel thì người dùng vẫn còn badge chuyển phạm vi
+    làm lưới an toàn. Bias này NGƯỢC với `chat-intent-router` — ở đó gạt nhầm mới là hỏng
+    nặng, ở đây mở nhầm mới là hỏng nặng.
+    """
     parts = ["DỮ LIỆU:", insight_block]
     if history_block:
         parts += ["", "HỘI THOẠI TRƯỚC ĐÓ:", history_block]
-    parts += ["", f"CÂU HỎI: {question}"]
+    parts += ["", _SCOPE_RULE, "", f"CÂU HỎI: {question}"]
     return "\n".join(parts)
 
 
@@ -364,6 +392,41 @@ def build_chat_global_prompt(index_block: str, history_block: str, question: str
     if history_block:
         parts += ["", "HỘI THOẠI TRƯỚC ĐÓ:", history_block]
     parts += ["", f"CÂU HỎI: {question}"]
+    return "\n".join(parts)
+
+
+def build_chat_expanded_prompt(
+    insight_block: str, index_block: str, history_block: str, question: str
+) -> str:
+    """Prompt lượt gọi thứ hai sau khi chế độ B bắn sentinel (design D4).
+
+    Context mang **cả hai**: bài đang xem (đánh số [1]) lẫn index toàn cục (đánh số từ
+    [2]) — để trả lời so sánh chéo được, không chỉ bỏ bài cũ đi. Server đánh số liên tục
+    qua cả hai khối nên hợp đồng marker `[n]` giữ nguyên, không có bảng ánh xạ thứ hai.
+
+    KHÔNG có luật sentinel ở đây: lượt này là chặng cuối, trần 2 lượt đã chạm. Bí ở đây
+    thì đường đúng là nói không tìm thấy (fail-closed sẵn có), không phải mở rộng tiếp.
+    """
+    data = index_block or "(không có tin nào khác trong hệ thống khớp câu hỏi này)"
+    parts = [
+        "BÀI NGƯỜI DÙNG ĐANG XEM:",
+        insight_block,
+        "",
+        "CÁC TIN KHÁC TRONG TOÀN HỆ THỐNG:",
+        data,
+    ]
+    if history_block:
+        parts += ["", "HỘI THOẠI TRƯỚC ĐÓ:", history_block]
+    parts += [
+        "",
+        "BỐI CẢNH: câu hỏi này vượt ra ngoài bài người dùng đang xem, nên hệ thống đã tìm\n"
+        "trên toàn kho tin. Hãy MỞ ĐẦU bằng một câu ngắn nói rõ điều đó (ví dụ: \"Bài bạn\n"
+        "đang xem không nhắc tới điều này; tìm trên toàn hệ thống thì thấy:\"), rồi trả lời\n"
+        "dựa trên các tin ở trên. Nếu toàn hệ thống cũng không có, nói thẳng là không tìm\n"
+        "thấy trong hệ thống — đừng nặn câu trả lời từ bài đang xem.",
+        "",
+        f"CÂU HỎI: {question}",
+    ]
     return "\n".join(parts)
 
 

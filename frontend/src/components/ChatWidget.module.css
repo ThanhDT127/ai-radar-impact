@@ -73,10 +73,13 @@
   color: var(--color-text-primary);
 }
 
-.chip {
+/* Badge phạm vi — thay context chip một chiều cũ. Luôn hiện khi ở trang chi tiết để
+   người dùng thấy mình đang hỏi ở đâu VÀ chuyển được cả hai chiều tại chỗ. */
+.scopeBar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 8px;
   margin: 10px 14px 0;
   padding: 6px 10px;
   border-radius: var(--radius-full);
@@ -85,20 +88,36 @@
   font-size: var(--text-xs);
 }
 
-.chipText {
+.scopeText {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chipClose {
-  border: none;
+.scopeToggle {
+  flex-shrink: 0;
+  border: 1px solid currentColor;
   background: transparent;
   color: inherit;
   cursor: pointer;
-  padding: 0 2px;
-  font-size: 13px;
-  line-height: 1;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.scopeToggle:hover {
+  background: var(--color-accent-strong);
+  color: var(--color-surface);
+}
+
+/* Nhãn cho câu trả lời server tự mở rộng: người dùng đang ở scope bài mà câu trả lời
+   đến từ tin khác — không nói ra thì trông như bot bịa từ bài đang mở. */
+.expandedTag {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
 }
 
 .messages {

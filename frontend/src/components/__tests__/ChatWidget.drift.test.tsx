@@ -113,7 +113,9 @@ describe('ChatWidget — cô lập history theo scope (chống drift)', () => {
   });
 
   // Task 3.2 — "Xung đột Mức 2" của Scope Paradox.
-  it('bỏ chip (✕): insight_id vắng VÀ history không chứa lượt về bài', async () => {
+  // (`chat-scope-routing` thay chip một chiều bằng badge phạm vi hai chiều; bất biến
+  // "history theo scope" không đổi, chỉ đổi control để bấm.)
+  it('chuyển scope sang toàn hệ thống: insight_id vắng VÀ history không chứa lượt về bài', async () => {
     const user = userEvent.setup();
     renderWidget();
     await openWidget(user);
@@ -121,9 +123,8 @@ describe('ChatWidget — cô lập history theo scope (chống drift)', () => {
     await user.click(screen.getByRole('button', { name: 'go-A' }));
     await ask(user, 'câu hỏi A', 1);
 
-    // Bỏ context chip → chuyển sang hỏi toàn cục.
     await user.click(
-      screen.getByRole('button', { name: 'Bỏ ngữ cảnh, hỏi toàn bộ hệ thống' }),
+      screen.getByRole('button', { name: 'Chuyển sang hỏi toàn hệ thống' }),
     );
     await ask(user, 'tuần này có gì', 2);
 

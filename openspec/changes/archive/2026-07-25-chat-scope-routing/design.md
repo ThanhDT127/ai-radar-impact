@@ -80,6 +80,23 @@ này" — chính là đây. Câu mở rộng = call B + call global = **đúng 2
 `chat_logs` `model_calls=2`. Budget ngày kiểm ở đầu request (như cũ); một câu mở rộng tiêu 2 đơn vị — chấp
 nhận, không thêm cửa kiểm giữa chừng.
 
+### D5b — Trần áp lên BƯỚC, không phải lượt tính tiền (bổ sung 25/07/2026, sau khi đo)
+
+D5 viết khi `MAX_MODEL_CALLS_PER_QUESTION` còn có đúng một nghĩa. `chat-answer-completeness`
+(land cùng ngày) làm `GeminiClient.chat()` có thể tiêu **2 lượt cho một bước** khi câu trả lời
+bị cắt và phải hỏi lại. Hai nghĩa chồng lên một bộ đếm sinh ra hai lỗi đo được:
+
+- **(A)** mở rộng + lượt 2 bị cắt → 3 lượt, vượt đúng cái trần spec tuyên bố;
+- **(B)** lượt B bị cắt → hỏi lại → bản hỏi lại phát sentinel → mở rộng bị trần chặn →
+  `RuntimeError` thoát ra thành **HTTP 500** cho người dùng.
+
+Nên tách: `_steps_used` (bước trả lời — mode B / mode A / mở rộng) chịu trần; `_calls_used`
+(lượt tính tiền) chỉ để ghi log và trừ budget. Trần bước 2 × trần 2 lượt/bước ⇒ tối đa **4
+lượt tính tiền** cho một câu hỏi — vẫn có biên, vẫn không thể thành vòng lặp.
+
+Bài học chung: trần chống-tool-loop phải đếm **bước lập luận**, còn budget phải đếm **tiền**.
+Đây là biến thể của cái bẫy "đơn vị budget khác nhau" đã ghi trong `CLAUDE.md`.
+
 ### D6 — v1 mở rộng bằng keyword‑rank; recall đầy đủ chờ ⑥
 
 Chưa có vector, phần mở rộng xếp hạng bằng keyword như mode A → câu diễn đạt lệch từ khoá (sa thải vs

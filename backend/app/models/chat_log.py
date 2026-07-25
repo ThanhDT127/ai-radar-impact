@@ -24,7 +24,8 @@ class ChatLog(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    mode: Mapped[str] = mapped_column(String(10), nullable=False)  # insight | global
+    # insight | global | meta | expanded (VARCHAR(10) — "expanded" là giá trị dài nhất, 8)
+    mode: Mapped[str] = mapped_column(String(10), nullable=False)
     model_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     citations_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
