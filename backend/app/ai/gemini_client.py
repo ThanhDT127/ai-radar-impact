@@ -28,6 +28,35 @@ RAW_LOG_CHARS = 2000
 CHAT_MAX_OUTPUT_TOKENS = 4096
 
 
+# --- Bộ phân loại ý định tầng 2 (model nhẹ) ------------------------------------------
+# Nhãn MỘT KÝ TỰ để output đúng 1 token — độ trễ ở đây là TTFT, mọi token thêm đều đắt.
+INTENT_LABELS: dict[str, str | None] = {
+    "S": "salutation",
+    "T": "thanks",
+    "C": "capability",
+    "Q": None,  # câu tra cứu thật
+}
+
+# Phần "QUY TẮC" không phải trang trí: đo 25/07/2026, flash-lite gạt nhầm
+# "cảm ơn vì tin về mã nguồn mở" → T và "mô hình này có khả năng gì" → C khi thiếu chúng.
+# Luật tất định đã chặn phần lớn ca đó trước khi tới đây, nhưng prompt vẫn phải tự đứng
+# vững vì tập "lưỡng lự" sẽ đổi khi ta mở rộng luật.
+INTENT_CLASSIFIER_PROMPT = """Bạn phân loại câu người dùng gửi cho AI Radar — trợ lý tra cứu tin công nghệ/bảo mật.
+Trả về DUY NHẤT một chữ cái in hoa, không giải thích, không dấu câu:
+
+S = câu CHỈ là lời chào, không hỏi gì thêm
+T = câu CHỈ là lời cảm ơn, không hỏi gì thêm
+C = hỏi về năng lực hoặc danh tính của CHÍNH trợ lý này
+Q = mọi câu còn lại — cần tra cứu tin tức
+
+QUY TẮC:
+- Chỉ chọn C khi chủ ngữ là chính trợ lý (bạn / bot / trợ lý). Câu hỏi về một sản phẩm,
+  công cụ, mô hình hay nhân vật nói trong bài luôn là Q — kể cả khi dùng đúng những chữ
+  như "hoạt động thế nào", "hỗ trợ gì", "là ai", "dùng để làm gì".
+- Chào hoặc cảm ơn mà KÈM một câu hỏi thật thì là Q, không phải S/T.
+- Phân vân thì trả Q."""
+
+
 def _is_truncated(response) -> bool:
     """Response có bị cắt vì chạm `max_output_tokens` không?
 
@@ -207,6 +236,43 @@ class GeminiClient:
                 return AnalysisResult(error=err_str)
 
         return AnalysisResult(error="Gemini 429 RESOURCE_EXHAUSTED after 3 retries")
+
+    def classify_intent(self, question: str) -> str | None:
+        """Tầng 2 của bộ lọc ý định: model NHẸ phán ca luật lưỡng lự (~3,5% câu hỏi).
+
+        Trả nhóm ý định (`salutation`/`thanks`/`capability`) hoặc `None` = câu tra cứu.
+
+        Ba lựa chọn ép độ trễ xuống sàn, vì hàm này nằm chắn trước câu trả lời:
+        - model lite (`intent_classifier_model_id`) — 2.5‑flash không dùng được ở đây,
+          thinking ăn hết ngân sách output và trả text rỗng (đo 25/07/2026);
+        - nhãn MỘT KÝ TỰ → đúng 1 token output, phần tốn thời gian duy nhất còn lại là
+          TTFT (đo: sàn 1.433 ms với prompt rỗng, nên prompt dài thêm gần như miễn phí);
+        - `max_output_tokens=4`, `temperature=0` → tất định, không lan man.
+
+        **Fail‑safe về phía pipeline**: mọi lỗi/nhãn lạ đều trả `None`. Câu chào lọt lưới
+        chỉ tốn thêm một lượt gọi; gạt nhầm câu hỏi thật thành preset mới là hỏng thật.
+        KHÔNG retry — retry ở đây là cộng thẳng vài giây vào thời gian chờ của người dùng
+        để cứu một phân loại mà fallback đã xử lý đúng rồi.
+        """
+        try:
+            response = self._client.models.generate_content(
+                model=settings.intent_classifier_model_id,
+                contents=question,
+                config=types.GenerateContentConfig(
+                    system_instruction=INTENT_CLASSIFIER_PROMPT,
+                    temperature=0.0,
+                    max_output_tokens=4,
+                ),
+            )
+        except Exception as e:
+            logger.warning("Intent classifier lỗi, rơi về pipeline: %s", e)
+            return None
+
+        label = (response.text or "").strip().upper()[:1]
+        intent = INTENT_LABELS.get(label)
+        if label not in INTENT_LABELS:
+            logger.warning("Intent classifier trả nhãn lạ %r → rơi về pipeline", label)
+        return intent
 
     def chat(self, system_prompt: str, user_prompt: str) -> tuple[str, int]:
         """Một lượt hỏi đáp cho chat Q&A. Trả `(text, model_calls_used)`.

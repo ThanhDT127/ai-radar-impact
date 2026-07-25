@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     google_cloud_location: str = "us-central1"
     google_genai_use_vertexai: str = "True"
     gemini_model_id: str = "gemini-2.5-flash"
+    # Model nhẹ CHỈ để phân loại ý định chat khi luật lưỡng lự (~3,5% câu). Phải là model
+    # KHÔNG bật thinking mặc định: đo 25/07/2026, `gemini-2.5-flash` với
+    # `max_output_tokens=8` trả text RỖNG vì thinking ăn sạch ngân sách, còn
+    # `gemini-2.5-flash-lite` trả đúng nhãn. Đây cũng là model lite duy nhất khả dụng
+    # trong us-central1 của project này (2.0-flash-lite → 404).
+    intent_classifier_model_id: str = "gemini-2.5-flash-lite"
+    # Đặt "" để tắt tầng 2 → chỉ dùng luật tất định (lưỡng lự thì đi pipeline).
+    intent_classifier_enabled: bool = True
 
     # Server
     backend_port: int = 8000

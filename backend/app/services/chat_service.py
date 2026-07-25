@@ -37,7 +37,7 @@ from app.services.chat_grounding import (
     enforce_grounding,
     resolve_citations,
 )
-from app.services.chat_intent import INTENT_PRESETS, classify_intent
+from app.services.chat_intent import AMBIGUOUS, INTENT_PRESETS, route_intent
 from app.services.chat_service_terms import STOPWORDS
 from app.services.delivery_engine import score_for_role
 
@@ -123,6 +123,30 @@ class ChatService:
         # An toàn vì service là per-request — AsyncSession vốn không dùng chung được.
         self._calls_used = 0
 
+    async def _route_intent(self, question: str) -> str | None:
+        """Bộ lọc ý định HAI TẦNG (25/07/2026). Trả nhóm preset, hoặc `None` = đi pipeline.
+
+        Tầng 1 là luật tất định (6µs, 0 đồng) và nó quyết ~96,5% câu. Tầng 2 —
+        `gemini-2.5-flash-lite` — chỉ chạy khi tầng 1 tự nhận lưỡng lự, vì sàn round‑trip
+        của nó là ~1,45s: giao hết cho model là cộng ngần ấy vào mọi câu tra cứu thật,
+        đổi lại precision còn TỤT (91,5% so với 97,6% của luật, đo trên 84 ca nhãn tay).
+
+        Lượt gọi tầng 2 KHÔNG tính vào `model_calls`: bộ đếm đó canh budget của lượt trả
+        lời đắt tiền (`MAX_DAILY_CHAT_CALLS` = lượt gọi `gemini-2.5-flash` với prompt
+        ~19k token). Một lần phân loại là ~259 token vào + 1 token ra trên model rẻ hơn
+        một bậc — ≈ $0,026 cho 1000 câu. Trộn hai đơn vị đó vào một bộ đếm sẽ làm budget
+        đắt bị bào mòn bởi các lượt gọi rẻ (đúng cái bẫy "đơn vị budget khác nhau").
+        """
+        intent = route_intent(question)
+        if intent != AMBIGUOUS:
+            return intent
+
+        if not settings.intent_classifier_enabled:
+            return None  # tắt tầng 2 → giữ bias fall‑through
+
+        logger.info("Ý định lưỡng lự, hỏi model nhẹ: %r", question[:60])
+        return await asyncio.to_thread(self.gemini.classify_intent, question)
+
     async def answer(
         self, question: str, history: list, insight_id: uuid.UUID | None
     ) -> dict:
@@ -130,7 +154,7 @@ class ChatService:
         # Định tuyến ý định TRƯỚC cửa quota (design D3): câu chào/meta/cảm ơn 0 lượt gọi
         # model phải trả lời được kể cả khi budget đã cạn, và không tiêu budget. Áp dụng
         # bất kể có `insight_id` hay không — chào trong lúc đang mở một bài vẫn là chào.
-        intent = classify_intent(question)
+        intent = await self._route_intent(question)
         if intent is not None:
             started = time.monotonic()
             # Ghi log `model_calls=0` để đo tần suất fast‑path; bản ghi 0 không đội bộ đếm

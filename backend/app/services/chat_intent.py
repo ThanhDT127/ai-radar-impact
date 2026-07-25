@@ -32,18 +32,55 @@ _THANKS_TOKENS = {
 _FILLER_TOKENS = {
     "bạn", "bot", "trợ", "lý", "ơi", "nhé", "nha", "nhá", "nhỉ",
     "vậy", "đấy", "nè", "hen", "ha",
+    # Thêm 25/07/2026 theo đo 70 ca: "thank you" và "cảm ơn nhiều" trượt fast‑path chỉ vì
+    # hai token này. An toàn vì chúng không tự quyết định nhóm — câu rút về rỗng mà không
+    # có token chào/cảm‑ơn nào vẫn rơi xuống `return None`.
+    "you", "nhiều",
 }
+
+# Token TỰ QUY CHIẾU về bot. Đây là thứ phân biệt "hỏi về năng lực của bot" với "hỏi về sản
+# phẩm nói trong bài" — và chính là tín hiệu bị mất khi "bạn"/"bot" nằm trong filler rồi bị
+# xoá. Giữ HẸP: "trợ lý" phải khớp theo CỤM, vì token "trợ" đơn lẻ còn nằm trong "hỗ trợ"
+# (nếu coi "trợ" là tự quy chiếu thì "hỗ trợ gì" hỏi về một công cụ sẽ bị gạt nhầm).
+_SELF_TOKENS = {"bạn", "bot", "chatbot", "mày", "cậu"}
+_SELF_PHRASES = ("trợ lý",)
+
+# Đại từ hồi chỉ: trỏ ngược về BÀI ĐANG XEM / thứ vừa nhắc. Có nó mà KHÔNG có tự quy chiếu
+# thì câu đang hỏi về sản phẩm trong bài, không phải về trợ lý — "nó là ai", "công cụ này
+# hỗ trợ gì". Luật này gỡ đúng ca mà cả matching cũ LẪN gemini-2.5-flash-lite đều sai (đo
+# 25/07/2026: flash-lite trả `capability` cho "nó là ai" dù prompt nêu thẳng ca đó là Q).
+_ANAPHORA_TOKENS = {"nó", "này", "kia", "đó", "ấy", "cái", "bài", "tin", "chúng"}
+
+# Luật lưỡng lự → nhường cho model nhẹ phán. Không phải một nhóm ý định.
+AMBIGUOUS = "__ambiguous__"
 
 # Câu hỏi năng lực thường chỉ gồm xưng hô + stopword ("bạn làm được gì", "bạn là ai"), nên
 # phải nhận bằng CỤM chứ không token đơn. Khớp trên chuỗi token đã nối bằng space → vẫn tôn
 # trọng ranh giới từ. Giữ cụm ĐẶC TRƯNG, tránh cụm quá rộng như "là gì"/"làm gì" (chúng xuất
 # hiện trong câu hỏi thật "OpenSSL là gì"); cổng "phần còn lại rỗng" đã chặn phần lớn ca đó.
+#
+# Bỏ "dùng để làm gì" (25/07/2026): nó là hậu tố của "để làm gì" nên không bao giờ khớp thêm
+# được câu nào — cụm ngắn hơn luôn khớp trước.
 _CAPABILITY_PHRASES = (
     "làm được gì", "làm được những gì", "giúp được gì", "giúp được những gì",
     "giúp gì", "là ai", "chức năng", "khả năng", "công dụng", "hỗ trợ gì",
-    "hỗ trợ được gì", "dùng để làm gì", "để làm gì", "biết làm gì",
+    "hỗ trợ được gì", "để làm gì", "biết làm gì",
     "hoạt động thế nào", "hoạt động như thế nào", "giới thiệu",
 )
+
+
+def _tokens(question: str) -> list[str]:
+    return re.findall(r"[0-9a-zA-ZÀ-ỹ]+", question.lower())
+
+
+# Token mang nội dung của chính các cụm năng lực ("giúp", "chức", "năng", "hoạt", "động"…).
+# SUY RA TỪ `_CAPABILITY_PHRASES`, không viết tay: đo 25/07/2026 cho thấy 14/17 cụm là code
+# chết vì cổng "phần còn lại rỗng" chạy TRƯỚC và những token này không nằm trong
+# STOPWORDS/filler nên không cụm nào chạm tới. Suy ra tự động ⇒ thêm cụm mới sau này không
+# thể tái sinh lỗi đó.
+_CAPABILITY_CONTENT_TOKENS = {
+    t for phrase in _CAPABILITY_PHRASES for t in _tokens(phrase)
+} - STOPWORDS - _SALUTATION_TOKENS - _THANKS_TOKENS - _FILLER_TOKENS
 
 _INTENT_TOKENS = _SALUTATION_TOKENS | _THANKS_TOKENS | _FILLER_TOKENS
 
@@ -66,33 +103,71 @@ INTENT_PRESETS: dict[str, str] = {
 }
 
 
-def _tokens(question: str) -> list[str]:
-    return re.findall(r"[0-9a-zA-ZÀ-ỹ]+", question.lower())
+def _is_self_referential(tokens: list[str], joined: str) -> bool:
+    """Câu có nói về CHÍNH bot không ("bạn…", "bot này…", "trợ lý…")?"""
+    return bool(set(tokens) & _SELF_TOKENS) or any(p in joined for p in _SELF_PHRASES)
 
 
-def classify_intent(question: str) -> str | None:
-    """Trả về nhóm ý định fast‑path, hoặc `None` (câu thật → đi pipeline).
+def route_intent(question: str) -> str | None:
+    """Định tuyến BA TRẠNG THÁI — tầng 1 của bộ lọc lai (25/07/2026).
 
-    Cách làm (design D2): bỏ token chào/meta/filler + `STOPWORDS` khỏi câu; nếu phần còn
-    lại **rỗng** thì đây chỉ là câu chào/meta → chọn nhóm theo dấu hiệu có mặt; còn nội
-    dung thực chất → `None`.
+    Trả về:
+    - `"salutation"` / `"thanks"` / `"capability"` — luật CHẮC CHẮN, dùng preset ngay (6µs);
+    - `None` — luật CHẮC CHẮN đây là câu tra cứu, đi pipeline (6µs);
+    - `AMBIGUOUS` — luật lưỡng lự, nhường `GeminiClient.classify_intent()` phán.
+
+    Vì sao lai chứ không giao hết cho model: đo 25/07/2026 trên 84 ca nhãn tay, sàn
+    round‑trip của `gemini-2.5-flash-lite` là **1.433–1.685 ms** kể cả với prompt rỗng và
+    1 token output — đó là mạng + TTFT, không cắt được. Giao hết cho model nghĩa là cộng
+    ~1,45s vào MỌI câu, kể cả câu tra cứu thật (15,9s → 17,4s). Tệ hơn nữa, precision của
+    model trên chính tập đó chỉ **91,5%** so với **97,6%** của luật: nó gạt nhầm
+    "cảm ơn vì tin về mã nguồn mở" thành `thanks`. Luật thắng ở ca rõ ràng, model thắng ở
+    ca mập mờ — nên mỗi bên làm phần mình giỏi. Ca mập mờ đo được là **3/84 ≈ 3,5%**,
+    tức ~96,5% câu hỏi không tốn thêm mili‑giây nào.
     """
     tokens = _tokens(question)
     if not tokens:
         return None
 
+    present = set(tokens)
+    joined = " ".join(tokens)
     remaining = [t for t in tokens if t not in _INTENT_TOKENS and t not in STOPWORDS]
+    has_capability_phrase = any(phrase in joined for phrase in _CAPABILITY_PHRASES)
+    self_ref = _is_self_referential(tokens, joined)
+    anaphora = bool(present & _ANAPHORA_TOKENS)
+
     if remaining:
-        return None  # còn nội dung thực chất → không fast‑path
+        if not has_capability_phrase:
+            return None  # còn nội dung thực chất, không có dấu hiệu meta nào → câu thật
+        leftover = [t for t in remaining if t not in _CAPABILITY_CONTENT_TOKENS]
+        if anaphora and not self_ref:
+            return None  # "công cụ này hỗ trợ gì" — hỏi về thứ trong bài
+        if leftover and not self_ref:
+            return None  # "API mới của OpenAI dùng để làm gì" — còn danh từ riêng, không nói về bot
+        if not leftover and self_ref:
+            return "capability"  # "bạn hoạt động thế nào"
+        return AMBIGUOUS  # tự quy chiếu nhưng còn token lạ: "bot này dùng để làm gì"
 
     # Phần còn lại rỗng → chỉ là chào/meta. Ưu tiên: capability (cụm) > thanks > salutation.
-    joined = " ".join(tokens)
-    if any(phrase in joined for phrase in _CAPABILITY_PHRASES):
-        return "capability"
+    if has_capability_phrase:
+        if anaphora and not self_ref:
+            return None  # "nó là ai" — hỏi về nhân vật/tổ chức trong bài
+        if self_ref:
+            return "capability"
+        return AMBIGUOUS  # "giới thiệu đi", "để làm gì" — thiếu chủ ngữ, luật không đoán bừa
 
-    present = set(tokens)
     if present & _THANKS_TOKENS:
         return "thanks"
     if present & _SALUTATION_TOKENS:
         return "salutation"
     return None
+
+
+def classify_intent(question: str) -> str | None:
+    """Phần TẤT ĐỊNH thuần của bộ định tuyến: `AMBIGUOUS` quy về `None` (đi pipeline).
+
+    Dùng khi không có/không muốn dùng model nhẹ — ví dụ test, hoặc khi tầng 2 lỗi. Giữ
+    đúng bias fall‑through của design D2: lưỡng lự thì đi pipeline, không đoán bừa.
+    """
+    intent = route_intent(question)
+    return None if intent == AMBIGUOUS else intent
