@@ -25,8 +25,24 @@ RAW_LOG_CHARS = 2000
 # Trần output cho chat. 2048 KHÔNG đủ: Gemini 2.5 tính thinking tokens vào cùng ngân
 # sách này, và câu hỏi kiểu "liệt kê tin bảo mật tuần này" sinh ~1150 token nhìn thấy
 # được cộng thinking là chạm trần rồi bị cắt giữa từ (đo 22/07/2026).
-CHAT_MAX_OUTPUT_TOKENS = 4096
+#
+# Nâng 4096 → 8192 (25/07/2026): chỉ bị tính tiền theo token THỰC SINH, nên trần cao hơn
+# không đắt hơn cho câu ngắn — nó chỉ ngừng cắt oan câu dài. Đây là tuyến phòng thủ 1;
+# tuyến 2 là hỏi lại kèm ràng buộc độ dài (xem `_CONCISE_RETRY_DIRECTIVE`).
+CHAT_MAX_OUTPUT_TOKENS = 8192
 
+# Chỉ dẫn dán thêm khi lượt đầu bị cắt. KHÔNG cắt bớt phạm vi câu trả lời — yêu cầu model
+# gộp ý để vẫn đủ ý mà vừa ngân sách. Trả về nửa câu kèm lời xin lỗi (cách làm cũ) là không
+# chấp nhận được: người dùng nhận một câu trả lời sai lệch vì thiếu vế sau.
+_CONCISE_RETRY_DIRECTIVE = (
+    "\n\n### RÀNG BUỘC ĐỘ DÀI (bắt buộc)\n"
+    "Câu trả lời lần trước đã bị cắt giữa chừng vì quá dài. Lần này hãy trả lời "
+    "NGẮN GỌN NHƯNG TRỌN VẸN, phủ ĐỦ Ý đã hỏi:\n"
+    "- Tối đa 5 gạch đầu dòng, mỗi gạch 1–2 câu.\n"
+    "- Gộp các tin tương tự vào một gạch thay vì liệt kê từng tin.\n"
+    "- Bỏ phần dẫn nhập và phần kết luận dài dòng.\n"
+    "- BẮT BUỘC kết thúc hoàn chỉnh, tuyệt đối không bỏ dở câu."
+)
 
 # --- Bộ phân loại ý định tầng 2 (model nhẹ) ------------------------------------------
 # Nhãn MỘT KÝ TỰ để output đúng 1 token — độ trễ ở đây là TTFT, mọi token thêm đều đắt.
@@ -55,6 +71,23 @@ QUY TẮC:
   như "hoạt động thế nào", "hỗ trợ gì", "là ai", "dùng để làm gì".
 - Chào hoặc cảm ơn mà KÈM một câu hỏi thật thì là Q, không phải S/T.
 - Phân vân thì trả Q."""
+
+# Ranh giới câu tiếng Việt cho lưới an toàn cuối cùng.
+_SENTENCE_END = ".!?…"
+
+
+def _trim_to_last_sentence(text: str) -> str:
+    """Cắt về câu hoàn chỉnh cuối cùng — lưới an toàn khi hỏi lại vẫn bị cắt.
+
+    Thà mất ý cuối còn hơn hiển thị một câu đứt giữa từ. Nếu không tìm thấy ranh giới
+    câu nào (đoạn văn một câu rất dài) thì trả nguyên văn — cắt bừa còn tệ hơn.
+    """
+    stripped = text.rstrip()
+    cut = max(stripped.rfind(c) for c in _SENTENCE_END)
+    if cut <= 0:
+        return text
+    # Giữ cả dòng cuối nếu nó là một gạch đầu dòng đã hoàn chỉnh.
+    return stripped[: cut + 1]
 
 
 def _is_truncated(response) -> bool:
@@ -237,6 +270,51 @@ class GeminiClient:
 
         return AnalysisResult(error="Gemini 429 RESOURCE_EXHAUSTED after 3 retries")
 
+    def chat(self, system_prompt: str, user_prompt: str) -> tuple[str, int]:
+        """Một lượt hỏi đáp cho chat Q&A. Trả `(text, model_calls_used)`.
+
+        KHÁC `analyze()`/`gate_analyze()` ở hai điểm cố ý:
+
+        1. **Không** `response_mime_type`/`response_schema`. Đo 20/07/2026: bật schema cho
+           lần gọi có output dài làm model sinh lan man tới chạm `max_output_tokens` rồi bị
+           cắt giữa chuỗi → 16/16 doc lỗi `Unterminated string`; `max_length` trong schema
+           Vertex KHÔNG được thực thi. Câu trả lời chat đúng hình dạng đó. Trả text thuần
+           thì không có JSON để vỡ — citation đi đường riêng qua marker `[n]` (design D4).
+        2. Trả kèm số lượt gọi ĐÃ TỐN TIỀN để service tính budget. Retry 429 không có
+           response nên không tính; lượt trả về rồi vỡ ở bước sau vẫn tính.
+
+        Hàm này SYNC như phần còn lại của client — caller phải bọc `asyncio.to_thread`
+        vì chat nằm trên request path (design D6).
+
+        **Không bao giờ trả về câu trả lời dở dang** (đổi 25/07/2026). Gemini 2.5 tiêu
+        thinking tokens trong CÙNG ngân sách output nên câu hỏi kiểu liệt kê vẫn có thể
+        chạm trần. Cách cũ — dán "_(Câu trả lời bị cắt…)_" vào cuối đoạn đứt — là hỏng:
+        người dùng đọc một câu trả lời THIẾU VẾ SAU, mà phần thiếu thường là phần quan
+        trọng nhất (khuyến nghị, rủi ro). Nay: cắt → HỎI LẠI kèm ràng buộc gộp ý cho
+        ngắn gọn nhưng đủ ý. Lượt hỏi lại được tính vào `calls` trả về nên budget vẫn khớp.
+        """
+        text, truncated, calls = self._chat_once(system_prompt, user_prompt)
+        if not truncated:
+            return text, calls
+
+        logger.warning("Chat response truncated (MAX_TOKENS) — hỏi lại với ràng buộc độ dài")
+        retry_text, retry_truncated, retry_calls = self._chat_once(
+            system_prompt + _CONCISE_RETRY_DIRECTIVE, user_prompt
+        )
+        calls += retry_calls
+
+        # Lượt hỏi lại rỗng (hiếm — thinking ăn hết ngân sách) thì bản đầu vẫn hơn không.
+        if not retry_text:
+            return _trim_to_last_sentence(text), calls
+
+        if retry_truncated:
+            # Vẫn cắt sau khi đã ép ngắn: cắt về câu hoàn chỉnh cuối. Không dán lời xin
+            # lỗi — câu trả lời phải đọc như một câu trả lời, không phải một lỗi.
+            logger.warning("Chat vẫn bị cắt sau khi hỏi lại — cắt về ranh giới câu")
+            return _trim_to_last_sentence(retry_text), calls
+
+        return retry_text, calls
+
     def classify_intent(self, question: str) -> str | None:
         """Tầng 2 của bộ lọc ý định: model NHẸ phán ca luật lưỡng lự (~3,5% câu hỏi).
 
@@ -274,22 +352,8 @@ class GeminiClient:
             logger.warning("Intent classifier trả nhãn lạ %r → rơi về pipeline", label)
         return intent
 
-    def chat(self, system_prompt: str, user_prompt: str) -> tuple[str, int]:
-        """Một lượt hỏi đáp cho chat Q&A. Trả `(text, model_calls_used)`.
-
-        KHÁC `analyze()`/`gate_analyze()` ở hai điểm cố ý:
-
-        1. **Không** `response_mime_type`/`response_schema`. Đo 20/07/2026: bật schema cho
-           lần gọi có output dài làm model sinh lan man tới chạm `max_output_tokens` rồi bị
-           cắt giữa chuỗi → 16/16 doc lỗi `Unterminated string`; `max_length` trong schema
-           Vertex KHÔNG được thực thi. Câu trả lời chat đúng hình dạng đó. Trả text thuần
-           thì không có JSON để vỡ — citation đi đường riêng qua marker `[n]` (design D4).
-        2. Trả kèm số lượt gọi ĐÃ TỐN TIỀN để service tính budget. Retry 429 không có
-           response nên không tính; lượt trả về rồi vỡ ở bước sau vẫn tính.
-
-        Hàm này SYNC như phần còn lại của client — caller phải bọc `asyncio.to_thread`
-        vì chat nằm trên request path (design D6).
-        """
+    def _chat_once(self, system_prompt: str, user_prompt: str) -> tuple[str, bool, int]:
+        """Một lượt gọi chat + retry 429. Trả `(text, bị_cắt, số_lượt_tính_tiền)`."""
         _retry_delays = [3, 10]
         calls = 0
 
@@ -308,17 +372,7 @@ class GeminiClient:
                     ),
                 )
                 calls += 1
-                text = (response.text or "").strip()
-
-                # Gemini 2.5 tiêu thinking tokens TRONG CÙNG ngân sách output. Đo
-                # 22/07/2026 trên index 179 tin: prompt 19.008 tok, output nhìn thấy
-                # 1.153 tok — câu hỏi kiểu liệt kê chạm trần 2048 và bị cắt giữa từ.
-                # Cắt thì phải nói ra, không trả về nửa câu như thể đã xong.
-                if _is_truncated(response):
-                    logger.warning("Chat response truncated (MAX_TOKENS)")
-                    text += "\n\n_(Câu trả lời bị cắt vì quá dài — bạn thử hỏi hẹp hơn nhé.)_"
-
-                return text, calls
+                return (response.text or "").strip(), _is_truncated(response), calls
 
             except Exception as e:
                 err_str = str(e)
@@ -328,6 +382,8 @@ class GeminiClient:
                         continue
                 logger.error("Chat Vertex AI error: %s", e)
                 raise
+
+        return "", False, calls
 
         raise RuntimeError("Chat 429 RESOURCE_EXHAUSTED after retries")
 
