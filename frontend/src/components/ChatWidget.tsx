@@ -13,6 +13,11 @@ interface Message {
   isError?: boolean;
 }
 
+// Toàn cục (rời detail hoặc bỏ chip) là MỘT scope thật với luồng riêng, không phải "không có
+// ngữ cảnh" gom chung với mọi lần hỏi toàn cục khác. Xem design D2.
+const GLOBAL_SCOPE = '__global__';
+const EMPTY_THREAD: Message[] = [];
+
 const QUOTA_MESSAGE =
   'Đã hết lượt hỏi trong ngày hôm nay. Bạn quay lại vào ngày mai nhé, hoặc xem trực tiếp trên dashboard.';
 const NETWORK_MESSAGE = 'Không gửi được câu hỏi. Kiểm tra kết nối rồi thử lại nhé.';
@@ -40,7 +45,10 @@ function renderAnswer(content: string, citations: Citation[]) {
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Mỗi scope (một insight_id cụ thể, hoặc toàn cục) có luồng hội thoại RIÊNG. Không dùng một
+  // mảng gộp cho cả phiên: gộp xuyên scope là context poisoning (Nguy hiểm #3) — history của bài
+  // cũ bám theo khi người dùng đã đổi bài. Xem design D1/D2.
+  const [threads, setThreads] = useState<Record<string, Message[]>>({});
   const [input, setInput] = useState('');
   const [contextDropped, setContextDropped] = useState(false);
   const [contextTitle, setContextTitle] = useState<string | null>(null);
@@ -52,6 +60,11 @@ export default function ChatWidget() {
   const detailMatch = useMatch('/insights/:id');
   const routeInsightId = detailMatch?.params.id ?? null;
   const activeInsightId = contextDropped ? null : routeInsightId;
+
+  // Scope hội thoại hiện tại + luồng của nó. Đổi scope (đổi bài, bỏ chip, rời detail) đổi luôn
+  // luồng hiển thị và luồng lấy history khi gửi. `messages` = luồng của scope hiện tại.
+  const scopeKey = activeInsightId ?? GLOBAL_SCOPE;
+  const messages = threads[scopeKey] ?? EMPTY_THREAD;
 
   // Chuyển sang insight khác thì context chip phải theo, kể cả khi người dùng đã bỏ
   // chip của insight trước đó.
@@ -86,45 +99,59 @@ export default function ChatWidget() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, open]);
 
-  const mutation = useMutation({
-    mutationFn: postChat,
-    onSuccess: (data) => {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: data.answer, citations: data.citations },
-      ]);
-    },
-    onError: (error) => {
-      const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: status === 429 ? QUOTA_MESSAGE : NETWORK_MESSAGE,
-          isError: true,
-        },
-      ]);
-    },
-  });
+  // Ghi message vào luồng của scope chỉ định. Dùng `key` cố định thay vì scope hiện tại: câu
+  // trả lời có thể về sau khi người dùng đã đổi bài, và phải rơi vào luồng đã hỏi, không phải
+  // luồng đang xem.
+  function appendToScope(key: string, message: Message) {
+    setThreads((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), message] }));
+  }
+
+  const mutation = useMutation({ mutationFn: postChat });
 
   function send(question: string) {
     const trimmed = question.trim();
     if (!trimmed || mutation.isPending) return;
 
-    // History gửi đi là hội thoại TRƯỚC câu hỏi này, bỏ các bong bóng lỗi.
-    const history: ChatTurn[] = messages
+    const targetScope = scopeKey;
+    const insightId = activeInsightId;
+
+    // History gửi đi CHỈ gồm lượt của scope hiện tại (bỏ các bong bóng lỗi) — không bao giờ kéo
+    // theo lượt của scope khác.
+    const history: ChatTurn[] = (threads[targetScope] ?? [])
       .filter((m) => !m.isError)
       .map((m) => ({ role: m.role, content: m.content }));
 
-    setMessages((prev) => [...prev, { role: 'user', content: trimmed }]);
+    appendToScope(targetScope, { role: 'user', content: trimmed });
     setInput('');
-    mutation.mutate({ question: trimmed, history, insight_id: activeInsightId });
+    mutation.mutate(
+      { question: trimmed, history, insight_id: insightId },
+      {
+        onSuccess: (data) =>
+          appendToScope(targetScope, {
+            role: 'assistant',
+            content: data.answer,
+            citations: data.citations,
+          }),
+        onError: (error) => {
+          const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+          appendToScope(targetScope, {
+            role: 'assistant',
+            content: status === 429 ? QUOTA_MESSAGE : NETWORK_MESSAGE,
+            isError: true,
+          });
+        },
+      },
+    );
   }
 
   function retryLast() {
-    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    const scopeMessages = threads[scopeKey] ?? [];
+    const lastUser = [...scopeMessages].reverse().find((m) => m.role === 'user');
     if (!lastUser) return;
-    setMessages((prev) => prev.filter((m) => !m.isError));
+    setThreads((prev) => ({
+      ...prev,
+      [scopeKey]: (prev[scopeKey] ?? []).filter((m) => !m.isError),
+    }));
     send(lastUser.content);
   }
 
