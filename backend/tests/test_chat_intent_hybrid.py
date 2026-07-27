@@ -154,7 +154,7 @@ class _SpyGemini:
         self.classify_calls.append(question)
         return self.intent
 
-    def chat(self, system_prompt, user_prompt):
+    def chat(self, system_prompt, user_prompt, state=None):
         self.chat_calls += 1
         return "Trả lời [1].", 1
 

@@ -25,7 +25,12 @@ class ChatLogRepository:
         self.session = session
 
     async def create(
-        self, mode: str, model_calls: int, citations_count: int, latency_ms: int
+        self,
+        mode: str,
+        model_calls: int,
+        citations_count: int,
+        latency_ms: int,
+        thinking_tokens: int | None = None,
     ) -> None:
         """Ghi một bản ghi log. Gọi trong khối `finally` của service.
 
@@ -38,6 +43,7 @@ class ChatLogRepository:
                 model_calls=model_calls,
                 citations_count=citations_count,
                 latency_ms=latency_ms,
+                thinking_tokens=thinking_tokens,
             )
         )
         await self.session.commit()

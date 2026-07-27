@@ -304,6 +304,10 @@ class ChatService:
         # một bước có thể tốn 2 lượt khi câu trả lời bị cắt và phải hỏi lại — xem ghi chú
         # ở `MAX_MODEL_CALLS_PER_QUESTION`.
         self._steps_used = 0
+        # Token SUY LUẬN cộng dồn của lượt hiện tại. `None` = chưa đo được lần nào (nhà cung
+        # cấp không báo cáo) — KHÁC `0` = đã ghìm về 0 và model tuân thủ. Cộng dồn qua mọi
+        # bước, kể cả lượt mở rộng và lượt hỏi lại chống-cắt, vì tất cả đều tốn tiền thật.
+        self._thinking_tokens: int | None = None
         # Kênh phát sự kiện của lượt hiện tại. `None` = blocking (không phát gì). Đây là
         # KHÁC BIỆT DUY NHẤT giữa hai lối ra — grounding, xếp hạng, fail‑closed, budget đều
         # dùng chung một đoạn code (design D1).
@@ -382,6 +386,7 @@ class ChatService:
         started = time.monotonic()
         self._calls_used = 0
         self._steps_used = 0
+        self._thinking_tokens = None
         citations: list[dict] = []
         try:
             if insight_id:
@@ -412,6 +417,7 @@ class ChatService:
                     model_calls=self._calls_used,
                     citations_count=len(citations),
                     latency_ms=int((time.monotonic() - started) * 1000),
+                    thinking_tokens=self._thinking_tokens,
                 )
 
     async def _answer_insight(
@@ -467,11 +473,17 @@ class ChatService:
                 days=settings.chat_window_days
             )
 
-        matched = await self.insight_repo.list_for_chat(published_since=since)
         asked_roles = _roles_in_question(question)
+        # Hai việc độc lập hoàn toàn: embed câu hỏi (~1,4s, chờ mạng Vertex) và nạp ứng viên
+        # (~0,2s, chờ Postgres). Chạy nối tiếp là cộng thẳng hai khoảng chờ vào độ trễ; ở ngân
+        # sách 5s thì 0,2s tiết kiệm được là 4% (design D4).
+        #
         # Chế độ mở rộng của `chat-scope-routing` đi qua đúng hàm này, nên nó hưởng luôn
-        # recall ngữ nghĩa mà không cần một đường truy hồi riêng (task 4.4).
-        query_vector = await self._embed_question(question)
+        # recall ngữ nghĩa mà không cần một đường truy hồi riêng.
+        matched, query_vector = await asyncio.gather(
+            self.insight_repo.list_for_chat(published_since=since),
+            self._embed_question(question),
+        )
         # Chế độ mở rộng: bài đang xem đi kèm dạng block đầy đủ ở [1], nên phải loại nó
         # khỏi index toàn cục — không thì cùng một tin xuất hiện hai lần với hai số khác
         # nhau và citation trỏ trùng.
@@ -710,6 +722,15 @@ class ChatService:
         """
         if not settings.chat_embedding_enabled:
             return None
+        # Câu rỗng từ khoá sẽ bị `_rank` bỏ tầng vector (xem cổng ở đó). Gọi embed rồi vứt kết
+        # quả là tiêu ~1,4s chờ mạng cho một thứ chắc chắn không dùng tới — bỏ HẲN lượt gọi.
+        #
+        # ⚠️ Cổng này CỐ Ý có ở cả hai nơi. Ở đây nó tiết kiệm thời gian; ở `_rank` nó là phần
+        # của phép xếp hạng và phải giữ, vì RS harness gọi thẳng `_rank` với vector đông lạnh
+        # sẵn cho MỌI kịch bản — bỏ cổng bên đó là để nhiễu quay lại đúng ca `rank-generic`.
+        if not _question_terms(question):
+            logger.debug("Câu rỗng từ khoá — bỏ lượt embed, xếp hạng theo độ quan trọng")
+            return None
         try:
             return await asyncio.to_thread(
                 self.gemini.embed_one, question, EMBED_TASK_QUERY
@@ -740,11 +761,23 @@ class ChatService:
         if self._emit is not None:
             return await self._stream_model(prompt, hold_sentinel=hold_sentinel)
 
-        text, calls = await asyncio.to_thread(self.gemini.chat, CHAT_SYSTEM_PROMPT, prompt)
+        # `state` là sổ ghi dùng chung với lối streaming — nhờ nó số token suy luận đọc được
+        # ở CẢ hai lối ra, không phải chỉ ở lối stream.
+        state = ChatStreamState()
+        text, calls = await asyncio.to_thread(
+            self.gemini.chat, CHAT_SYSTEM_PROMPT, prompt, state
+        )
         # `calls` có thể là 2 nếu lượt đầu bị cắt và client đã hỏi lại — vẫn tốn tiền thật
         # nên vẫn phải cộng vào budget, chỉ là KHÔNG tính như một bước mới.
         self._calls_used += calls
+        self._add_thinking(state.thinking_tokens)
         return text
+
+    def _add_thinking(self, tokens: int | None) -> None:
+        """Cộng dồn token suy luận qua các bước. Giữ `None` nếu chưa từng đo được số nào."""
+        if tokens is None:
+            return
+        self._thinking_tokens = (self._thinking_tokens or 0) + tokens
 
     async def _stream_model(self, prompt: str, hold_sentinel: bool = False) -> str:
         """Một bước trả lời dạng streaming: phát `token` dọc đường, trả toàn văn ở cuối.
@@ -777,6 +810,7 @@ class ChatService:
         finally:
             iterator.close()
             self._calls_used += state.calls
+            self._add_thinking(state.thinking_tokens)
         return state.text
 
     async def answer_stream(

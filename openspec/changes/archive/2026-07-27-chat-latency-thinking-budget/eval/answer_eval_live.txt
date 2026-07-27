@@ -1,0 +1,232 @@
+Sinh câu trả lời qua pipeline chat thật (64 kịch bản)...
+  [ 1/64] ins-nettacker-what           insight   1 lượt   3.5s
+  [ 2/64] ins-nettacker-risk           insight   1 lượt   3.3s
+  [ 3/64] ins-kasa-flaw                insight   1 lượt   4.9s
+  [ 4/64] ins-kasa-lesson              insight   1 lượt   3.4s
+  [ 5/64] ins-euaiact-scope            insight   1 lượt   3.2s
+  [ 6/64] ins-euaiact-prep             insight   1 lượt   4.6s
+  [ 7/64] ins-winsrv-date              insight   1 lượt   3.4s
+  [ 8/64] ins-winsrv-risk              insight   1 lượt   4.1s
+  [ 9/64] ins-cypress-version          insight   1 lượt   3.0s
+  [10/64] ins-cypress-impact           insight   1 lượt   3.8s
+  [11/64] ins-npm-vector               insight   1 lượt   4.3s
+  [12/64] ins-npm-dev-action           insight   1 lượt   3.0s
+  [13/64] ins-rag-latency              insight   1 lượt   3.7s
+  [14/64] ins-gemma-edge               insight   1 lượt   4.5s
+  [15/64] ins-entra-timeline           insight   1 lượt   4.2s
+  [16/64] exp-nettacker-to-zeroday     expanded  2 lượt   7.7s
+  [17/64] exp-nettacker-to-euaiact     expanded  2 lượt   5.9s
+  [18/64] exp-kasa-to-postquantum      expanded  2 lượt   6.9s
+  [19/64] exp-kasa-to-lambda           expanded  2 lượt   6.4s
+  [20/64] exp-euaiact-to-npm           expanded  2 lượt   7.0s
+  [21/64] exp-winsrv-to-k8s            expanded  2 lượt   6.9s
+  [22/64] exp-cypress-to-copilot       expanded  2 lượt   6.9s
+  [23/64] exp-npm-to-layoff            expanded  2 lượt   6.4s
+  [24/64] exp-rag-to-botnet            expanded  2 lượt   7.0s
+  [25/64] exp-gemma-to-eol             expanded  2 lượt   6.9s
+  [26/64] exp-entra-to-gemma           expanded  2 lượt   7.2s
+  [27/64] exp-lerobot-to-secureboot    expanded  2 lượt   7.0s
+  [28/64] exp-nettacker-to-vnpost      expanded  2 lượt   7.0s
+  [29/64] glo-critical-security        global    1 lượt   4.6s
+  [30/64] glo-fortinet                 global    1 lượt   3.6s
+  [31/64] glo-patch-tuesday            global    1 lượt   5.7s
+  [32/64] glo-secure-boot              global    1 lượt   4.5s
+  [33/64] glo-supply-chain             global    1 lượt   5.8s
+  [34/64] glo-sbom                     global    1 lượt   4.7s
+  [35/64] glo-postquantum              global    1 lượt   8.8s
+  [36/64] glo-euaiact                  global    1 lượt   5.2s
+  [37/64] glo-cra                      global    1 lượt   5.5s
+  [38/64] glo-open-model-analysis      global    1 lượt   5.5s
+  [39/64] glo-deepseek                 global    1 lượt   4.0s
+  [40/64] glo-gemini-agent             global    1 lượt   5.4s
+  [41/64] glo-bedrock                  global    1 lượt   5.1s
+  [42/64] glo-lambda-coldstart         global    1 lượt   4.8s
+  [43/64] glo-k8s-cve                  global    1 lượt   5.5s
+  [44/64] glo-secret-scanning          global    1 lượt   5.1s
+  [45/64] glo-copilot-metrics          global    1 lượt   3.4s
+  [46/64] glo-robotics                 global    1 lượt   4.2s
+  [47/64] glo-iot-security             global    1 lượt   5.5s
+  [48/64] glo-vn-sql                   global    1 lượt   5.5s
+  [49/64] glo-typescript               global    1 lượt   5.3s
+  [50/64] glo-role-security            global    1 lượt   5.9s
+  [51/64] glo-role-data-engineer       global    1 lượt   6.2s
+  [52/64] glo-role-empty               global    1 lượt   4.5s
+  [53/64] glo-absent-bitcoin           global    1 lượt   4.7s
+  [54/64] glo-absent-layoff            global    1 lượt   4.4s
+  [55/64] glo-absent-vn-decree         global    1 lượt   4.6s
+  [56/64] rank-open-source-models      global    1 lượt   6.2s
+  [57/64] rank-ascii-ml                global    1 lượt   5.6s
+  [58/64] rank-ascii-ai-blind          global    1 lượt   4.6s
+  [59/64] rank-device-trap             global    1 lượt   5.4s
+  [60/64] rank-devops-trap             global    1 lượt   5.1s
+  [61/64] rank-generic                 global    1 lượt   3.1s
+  [62/64] glo-summary-week             global    1 lượt   9.5s
+  [63/64] rank-eol-khai-tu             global    1 lượt   6.1s
+  [64/64] rank-vram-semantic           global    1 lượt   5.6s
+
+Chấm bằng LLM-judge...
+  [ 1/64] ins-nettacker-what           faith=1.00 ansrel=1.00
+  [ 2/64] ins-nettacker-risk           faith=1.00 ansrel=1.00
+  [ 3/64] ins-kasa-flaw                faith=1.00 ansrel=1.00
+  [ 4/64] ins-kasa-lesson              faith=1.00 ansrel=1.00
+  [ 5/64] ins-euaiact-scope            faith=1.00 ansrel=1.00
+  [ 6/64] ins-euaiact-prep             faith=1.00 ansrel=1.00
+  [ 7/64] ins-winsrv-date              faith=1.00 ansrel=1.00
+  [ 8/64] ins-winsrv-risk              faith=1.00 ansrel=1.00
+  [ 9/64] ins-cypress-version          faith=1.00 ansrel=1.00
+  [10/64] ins-cypress-impact           faith=1.00 ansrel=1.00
+  [11/64] ins-npm-vector               faith=1.00 ansrel=1.00
+  [12/64] ins-npm-dev-action           faith=1.00 ansrel=1.00
+  [13/64] ins-rag-latency              faith=1.00 ansrel=1.00
+  [14/64] ins-gemma-edge               faith=1.00 ansrel=1.00
+  [15/64] ins-entra-timeline           faith=1.00 ansrel=1.00
+  [16/64] exp-nettacker-to-zeroday     faith=1.00 ansrel=1.00
+  [17/64] exp-nettacker-to-euaiact     faith=1.00 ansrel=0.50
+  [18/64] exp-kasa-to-postquantum      faith=1.00 ansrel=0.50
+  [19/64] exp-kasa-to-lambda           faith=1.00 ansrel=1.00
+  [20/64] exp-euaiact-to-npm           faith=0.50 ansrel=1.00
+  [21/64] exp-winsrv-to-k8s            faith=1.00 ansrel=0.50
+  [22/64] exp-cypress-to-copilot       faith=1.00 ansrel=1.00
+  [23/64] exp-npm-to-layoff            faith=1.00 ansrel=  —  
+  [24/64] exp-rag-to-botnet            faith=1.00 ansrel=1.00
+  [25/64] exp-gemma-to-eol             faith=1.00 ansrel=1.00
+  [26/64] exp-entra-to-gemma           faith=1.00 ansrel=0.50
+  [27/64] exp-lerobot-to-secureboot    faith=1.00 ansrel=1.00
+  [28/64] exp-nettacker-to-vnpost      faith=1.00 ansrel=1.00
+  [29/64] glo-critical-security        faith=1.00 ansrel=1.00
+  [30/64] glo-fortinet                 faith=1.00 ansrel=1.00
+  [31/64] glo-patch-tuesday            faith=1.00 ansrel=1.00
+  [32/64] glo-secure-boot              faith=1.00 ansrel=1.00
+  [33/64] glo-supply-chain             faith=1.00 ansrel=1.00
+  [34/64] glo-sbom                     faith=1.00 ansrel=0.50
+  [35/64] glo-postquantum              faith=1.00 ansrel=0.00
+  [36/64] glo-euaiact                  faith=1.00 ansrel=1.00
+  [37/64] glo-cra                      faith=1.00 ansrel=1.00
+  [38/64] glo-open-model-analysis      faith=1.00 ansrel=1.00
+  [39/64] glo-deepseek                 faith=1.00 ansrel=1.00
+  [40/64] glo-gemini-agent             faith=1.00 ansrel=1.00
+  [41/64] glo-bedrock                  faith=1.00 ansrel=1.00
+  [42/64] glo-lambda-coldstart         faith=1.00 ansrel=1.00
+  [43/64] glo-k8s-cve                  faith=1.00 ansrel=0.50
+  [44/64] glo-secret-scanning          faith=1.00 ansrel=1.00
+  [45/64] glo-copilot-metrics          faith=1.00 ansrel=1.00
+  [46/64] glo-robotics                 faith=1.00 ansrel=1.00
+  [47/64] glo-iot-security             faith=1.00 ansrel=1.00
+  [48/64] glo-vn-sql                   faith=0.83 ansrel=1.00
+  [49/64] glo-typescript               faith=1.00 ansrel=1.00
+  [50/64] glo-role-security            faith=1.00 ansrel=0.50
+  [51/64] glo-role-data-engineer       faith=1.00 ansrel=1.00
+  [52/64] glo-role-empty               faith=1.00 ansrel=  —  
+  [53/64] glo-absent-bitcoin           faith=1.00 ansrel=  —  
+  [54/64] glo-absent-layoff            faith=1.00 ansrel=  —  
+  [55/64] glo-absent-vn-decree         faith=1.00 ansrel=  —  
+  [56/64] rank-open-source-models      faith=1.00 ansrel=1.00
+  [57/64] rank-ascii-ml                faith=1.00 ansrel=1.00
+  [58/64] rank-ascii-ai-blind          faith=1.00 ansrel=1.00
+  [59/64] rank-device-trap             faith=1.00 ansrel=0.50
+  [60/64] rank-devops-trap             faith=1.00 ansrel=0.50
+  [61/64] rank-generic                 faith=1.00 ansrel=1.00
+  [62/64] glo-summary-week             faith=1.00 ansrel=1.00
+  [63/64] rank-eol-khai-tu             faith=1.00 ansrel=1.00
+  [64/64] rank-vram-semantic           faith=1.00 ansrel=1.00
+
+Đã lưu snapshot vào /app/tests/eval/chat_answer_snapshot.json
+
+kịch bản                    mode                  Faith      AnsRel      CitPrec   must
+---------------------------------------------------------------------------------------
+exp-npm-to-layoff           expanded               1.00   =     —           1.00      —  từ chối đúng ✅
+exp-entra-to-gemma          expanded               1.00   =    0.50 ▼0.50    1.00    1/1
+exp-kasa-to-lambda          expanded               1.00   =    1.00   =     1.00    1/1
+exp-kasa-to-postquantum     expanded               1.00   =    0.50 ▼0.50    1.00    1/1
+exp-gemma-to-eol            expanded               1.00   =    1.00   =     1.00    1/2
+exp-cypress-to-copilot      expanded               1.00   =    1.00   =     1.00    1/1
+exp-nettacker-to-euaiact    expanded               1.00   =    0.50   =     1.00    1/1
+exp-lerobot-to-secureboot   expanded               1.00   =    1.00   =     1.00    1/1
+exp-nettacker-to-zeroday    expanded               1.00   =    1.00   =     1.00    2/2
+exp-rag-to-botnet           expanded               1.00   =    1.00   =     1.00    1/1
+exp-winsrv-to-k8s           expanded               1.00   =    0.50 ▲0.50    1.00    1/1
+exp-euaiact-to-npm          expanded               0.50   =    1.00   =     1.00    1/1
+exp-nettacker-to-vnpost     expanded               1.00   =    1.00 ▲0.50    1.00    2/2
+glo-absent-bitcoin          global                 1.00   =     —           1.00      —  từ chối đúng ✅
+glo-absent-layoff           global                 1.00   =     —           1.00      —  từ chối đúng ✅
+glo-absent-vn-decree        global                 1.00   =     —           1.00      —  từ chối đúng ✅
+glo-gemini-agent            global                 1.00   =    1.00   =     1.00    1/1
+rank-ascii-ai-blind         global                 1.00   =    1.00   =     1.00    0/1
+rank-ascii-ml               global                 1.00   =    1.00   =     1.00    0/1
+glo-bedrock                 global                 1.00   =    1.00   =     1.00    2/2
+glo-k8s-cve                 global                 1.00   =    0.50 ▼0.50    1.00    1/1
+glo-lambda-coldstart        global                 1.00   =    1.00   =     1.00    1/1
+glo-postquantum             global                 1.00   =    0.00 ▼1.00    1.00    0/1
+glo-copilot-metrics         global                 1.00   =    1.00   =     1.00    1/1
+glo-secret-scanning         global                 1.00   =    1.00   =     1.00    1/1
+glo-typescript              global                 1.00   =    1.00   =     1.00    1/1
+rank-generic                global                 1.00   =    1.00   =     1.00    1/1
+glo-iot-security            global                 1.00   =    1.00   =     1.00    2/2
+glo-robotics                global                 1.00   =    1.00   =     1.00    2/2
+glo-deepseek                global                 1.00   =    1.00   =     1.00    2/2
+glo-open-model-analysis     global                 1.00   =    1.00   =     1.00    2/2
+rank-open-source-models     global                 1.00   =    1.00   =     1.00    1/3
+glo-summary-week            global                 1.00   =    1.00   =     1.00      —
+glo-cra                     global                 1.00   =    1.00   =     1.00    1/1
+glo-euaiact                 global                 1.00   =    1.00 ▲0.50    1.00    1/1
+glo-role-data-engineer      global                 1.00   =    1.00   =     1.00      —
+glo-role-security           global                 1.00   =    0.50 ▼0.50    1.00    1/1
+glo-role-empty              global                 1.00   =     —           1.00      —  từ chối đúng ✅
+rank-device-trap            global                 1.00   =    0.50   =     1.00    2/2
+rank-devops-trap            global                 1.00   =    0.50   =     1.00    1/1
+glo-critical-security       global                 1.00   =    1.00   =     1.00    1/2
+glo-fortinet                global                 1.00   =    1.00   =     1.00    1/1
+glo-patch-tuesday           global                 1.00   =    1.00   =     1.00    2/2
+glo-secure-boot             global                 1.00   =    1.00   =     1.00    1/1
+rank-eol-khai-tu            global                 1.00 ▲0.25   1.00   =     1.00    1/2
+rank-vram-semantic          global                 1.00   =    1.00   =     1.00    3/4
+glo-sbom                    global                 1.00   =    0.50   =     1.00    1/1
+glo-supply-chain            global                 1.00   =    1.00   =     1.00    1/1
+glo-vn-sql                  global                 0.83 ▼0.17   1.00   =     1.00    2/2
+ins-gemma-edge              insight                1.00   =    1.00   =     1.00    1/1
+ins-cypress-impact          insight                1.00   =    1.00   =     1.00    1/1
+ins-cypress-version         insight                1.00   =    1.00   =     1.00    1/1
+ins-winsrv-date             insight                1.00   =    1.00   =     1.00    1/1
+ins-winsrv-risk             insight                1.00   =    1.00   =     1.00    1/1
+ins-entra-timeline          insight                1.00   =    1.00   =     1.00    1/1
+ins-kasa-flaw               insight                1.00   =    1.00   =     1.00    1/1
+ins-kasa-lesson             insight                1.00   =    1.00   =     1.00    1/1
+ins-rag-latency             insight                1.00   =    1.00   =     1.00    1/1
+ins-euaiact-prep            insight                1.00   =    1.00   =     1.00    1/1
+ins-euaiact-scope           insight                1.00   =    1.00   =     1.00    1/1
+ins-npm-dev-action          insight                1.00   =    1.00   =     1.00    1/1
+ins-npm-vector              insight                1.00   =    1.00   =     1.00    1/1
+ins-nettacker-risk          insight                1.00   =    1.00   =     1.00    1/1
+ins-nettacker-what          insight                1.00   =    1.00   =     1.00    1/1
+
+Theo nhóm câu hỏi:
+  absent           n=4   faith=1.00 ansrel=  —   citprec=1.00
+  ai_model         n=2   faith=1.00 ansrel=0.75 citprec=1.00
+  ai_platform      n=1   faith=1.00 ansrel=1.00 citprec=1.00
+  ascii_short      n=2   faith=1.00 ansrel=1.00 citprec=1.00
+  cloud            n=4   faith=1.00 ansrel=0.88 citprec=1.00
+  crypto           n=2   faith=1.00 ansrel=0.25 citprec=1.00
+  deprecation      n=5   faith=1.00 ansrel=1.00 citprec=1.00
+  devex            n=3   faith=1.00 ansrel=1.00 citprec=1.00
+  devtools         n=1   faith=1.00 ansrel=1.00 citprec=1.00
+  generic          n=1   faith=1.00 ansrel=1.00 citprec=1.00
+  identity         n=1   faith=1.00 ansrel=1.00 citprec=1.00
+  iot              n=2   faith=1.00 ansrel=1.00 citprec=1.00
+  iot_security     n=2   faith=1.00 ansrel=1.00 citprec=1.00
+  open_model       n=3   faith=1.00 ansrel=1.00 citprec=1.00
+  overview         n=1   faith=1.00 ansrel=1.00 citprec=1.00
+  rag              n=1   faith=1.00 ansrel=1.00 citprec=1.00
+  regulation       n=5   faith=1.00 ansrel=0.90 citprec=1.00
+  role             n=2   faith=1.00 ansrel=0.75 citprec=1.00
+  role_empty       n=1   faith=1.00 ansrel=  —   citprec=1.00
+  role_trap        n=2   faith=1.00 ansrel=0.50 citprec=1.00
+  security         n=8   faith=1.00 ansrel=0.94 citprec=1.00
+  semantic         n=2   faith=1.00 ansrel=1.00 citprec=1.00
+  supply_chain     n=5   faith=0.90 ansrel=0.90 citprec=1.00
+  tools            n=2   faith=1.00 ansrel=1.00 citprec=1.00
+  vietnamese       n=2   faith=0.92 ansrel=1.00 citprec=1.00
+
+TỔNG  Faithfulness 0.99 (ngưỡng ≥ 0.95)   Answer Relevance 0.91   Citation Precision 1.00 (ngưỡng = 1,00)
+      từ chối đúng 5/5   must_have (phụ trợ, không gate) 66/75   lượt gọi sinh câu trả lời: 77
+
+VERDICT: PASS ✅

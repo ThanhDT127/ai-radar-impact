@@ -109,6 +109,20 @@ BASELINE_META = {
         {
             "date": "2026-07-27",
             "reason": (
+                "`chat-latency-thinking-budget`: nâng `google-genai` 0.8.0 → 1.75.0 và ghìm "
+                "`thinking_budget=256` cho đường chat ⇒ đổi lượng suy luận của model ⇒ đo lại "
+                "TOÀN BỘ bằng `--live` (luật bắt buộc khi đổi SDK/model). "
+                "Faith 0,980→0,990 · AnsRel 0,910→0,910 · CitPrec giữ 1,000 · từ chối đúng 5/5 "
+                "· lệch mode 0 · 77 lượt gọi sinh câu trả lời. PASS cả hai ngưỡng cứng nên "
+                "KHÔNG phải nâng budget lên 512. "
+                "Đổi lấy: độ trễ trung vị 4,7s (1 lượt gọi) / 6,9s (mở rộng) trên 62 câu, "
+                "thinking 1.877–2.752 → 216–253 token/câu. Chi tiết: "
+                "openspec/changes/archive/2026-07-27-chat-latency-thinking-budget/measurement.md."
+            ),
+        },
+        {
+            "date": "2026-07-27",
+            "reason": (
                 "`chat-hybrid-retrieval`: `_rank` đổi sang RRF(vector, lexical) ⇒ đổi context "
                 "⇒ đo lại TOÀN BỘ bằng `--live` (luật bắt buộc khi đụng `_rank`). "
                 "Faith 0,980→0,980 · AnsRel 0,930→0,910 · CitPrec giữ 1,000 · từ chối đúng 5/5 "

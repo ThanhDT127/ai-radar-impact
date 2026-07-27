@@ -66,7 +66,7 @@ class _FakeGemini:
         self.answer = answer
         self.prompts = []
 
-    def chat(self, system_prompt, user_prompt):
+    def chat(self, system_prompt, user_prompt, state=None):
         self.prompts.append(user_prompt)
         return self.answer, 1
 

@@ -111,7 +111,7 @@ class _StreamingGemini:
         self._cursor += 1
         return chunks
 
-    def chat(self, system_prompt, user_prompt):
+    def chat(self, system_prompt, user_prompt, state=None):
         return "".join(self._take(user_prompt)).strip(), 1
 
     def chat_stream(self, system_prompt, user_prompt, state):
@@ -510,7 +510,7 @@ async def test_bi_cat_thi_commit_mang_ban_hoi_lai_chu_khong_phai_doan_do_dang():
             state.text = "Bản gọn: lỗ hổng OpenSSL đã có bản vá [1]."
             state.replaced = True
 
-        def chat(self, system_prompt, user_prompt):
+        def chat(self, system_prompt, user_prompt, state=None):
             raise AssertionError("lối streaming không được rơi về chat() một phát")
 
         def classify_intent(self, question):

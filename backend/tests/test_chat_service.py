@@ -86,7 +86,7 @@ class _FakeGemini:
         self.calls = calls
         self.prompts = []
 
-    def chat(self, system_prompt, user_prompt):
+    def chat(self, system_prompt, user_prompt, state=None):
         self.prompts.append((system_prompt, user_prompt))
         return self.answer, self.calls
 

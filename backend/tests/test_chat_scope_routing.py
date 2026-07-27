@@ -91,7 +91,7 @@ class _ScriptedGemini:
         self.answers = list(answers)
         self.prompts: list[str] = []
 
-    def chat(self, system_prompt, user_prompt):
+    def chat(self, system_prompt, user_prompt, state=None):
         self.prompts.append(user_prompt)
         return self.answers.pop(0), 1
 
@@ -267,7 +267,7 @@ class _CostedGemini:
         self.pairs = list(pairs)
         self.prompts: list[str] = []
 
-    def chat(self, system_prompt, user_prompt):
+    def chat(self, system_prompt, user_prompt, state=None):
         self.prompts.append(user_prompt)
         return self.pairs.pop(0)
 

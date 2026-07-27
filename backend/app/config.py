@@ -36,6 +36,18 @@ class Settings(BaseSettings):
     # Tắt tầng vector (retrieval rơi hoàn toàn về lexical). Van xả khi Vertex embedding sự
     # cố kéo dài — chat vẫn chạy, chỉ kém ngữ nghĩa (design D6).
     chat_embedding_enabled: bool = True
+    # Trần token SUY LUẬN cho lượt sinh câu trả lời chat (change `chat-latency-thinking-budget`).
+    # Đây là núm đánh đổi TỐC ĐỘ ↔ CHẤT LƯỢNG, và nó chi phối độ trễ mạnh hơn mọi thứ khác:
+    # đo 27/07/2026 trên đúng prompt chat thật, không ghìm → 8,2s/1.023 token suy luận;
+    # 1024 → 7,8s; **256 → 3,7s**; 0 → 1,8s. Trong khi câu trả lời nhìn thấy được chỉ 233–282
+    # token — model nghĩ gấp ~10 lần lượng chữ nó viết ra.
+    #
+    # Chọn 256 chứ không 0: giữ một biên suy luận cho câu tổng hợp nhiều tin, đổi lấy ~1,9s.
+    #
+    # ⚠️ LUẬT CHỈNH: chỉ nâng, không bao giờ hạ ngưỡng eval. `chat_answer_harness --live` cho
+    # Faithfulness < 0,95 hoặc Citation Precision < 1,00 ⇒ nâng 256 → 512 → 1024 tới khi xanh.
+    # 0 = tắt hẳn suy luận; -1 = để model tự quyết (hành vi trước change này).
+    chat_thinking_budget: int = 256
 
     # Server
     backend_port: int = 8000

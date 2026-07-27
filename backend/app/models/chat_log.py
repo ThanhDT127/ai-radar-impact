@@ -29,6 +29,9 @@ class ChatLog(Base):
     model_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     citations_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Token SUY LUẬN của lượt trả lời. NULL = nhà cung cấp không báo cáo (bản SDK 0.8.0 cũ
+    # luôn giấu số này) — KHÁC `0` = đã ghìm về 0 và model tuân thủ. Đừng gộp hai nghĩa.
+    thinking_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=func.now()
     )

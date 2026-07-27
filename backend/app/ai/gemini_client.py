@@ -104,6 +104,51 @@ def _trim_to_last_sentence(text: str) -> str:
     return stripped[: cut + 1]
 
 
+def _chat_generation_config(system_prompt: str) -> types.GenerateContentConfig:
+    """Cấu hình lượt sinh câu trả lời chat — MỘT chỗ cho cả `chat()` lẫn `chat_stream()`.
+
+    Vì sao phải dùng chung (design D3): hai lối ra chạy chung một pipeline là bất biến đã ghi
+    của `chat-streaming-sse`. Nếu chỉ đặt `thinking_config` cho `chat()` thì bản blocking và
+    bản streaming trả lời KHÁC NHAU một cách im lặng — và tệ hơn: `chat_answer_harness` đi lối
+    blocking, nên cổng chất lượng sẽ gác một cấu hình mà người dùng thật không hề chạy.
+
+    **`thinking_budget` là thứ chi phối độ trễ chat**, không phải kích thước prompt. Đo
+    27/07/2026: prompt tầm thường (534 token vào, 10 token ra) vẫn mất 10,3s vì model nghĩ
+    1.416 token; còn cắt ngữ cảnh 6.537 → 1.540 token chỉ đưa 17,4s xuống 11,6s. Xem
+    `settings.chat_thinking_budget` để biết luật chỉnh.
+
+    `-1` = không đặt gì, để model tự quyết (hành vi trước `chat-latency-thinking-budget`).
+    """
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        temperature=0.2,
+        max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
+    )
+    if settings.chat_thinking_budget >= 0:
+        config.thinking_config = types.ThinkingConfig(
+            thinking_budget=settings.chat_thinking_budget
+        )
+    return config
+
+
+def _thinking_tokens(response) -> int | None:
+    """Số token SUY LUẬN của một lượt gọi. `None` khi nhà cung cấp không báo cáo.
+
+    Chi phí này ẩn được suốt từ 22/07 tới 27/07/2026 chỉ vì `google-genai==0.8.0` luôn trả
+    trường này rỗng — nhìn vào `usage_metadata` thì tưởng thinking = 0, trong khi thực tế nó
+    ăn 1.877–2.752 token/câu và chiếm ~90% độ trễ. Phải suy ra từ chỗ lệch của
+    `total_token_count`. Từ SDK 1.75.0 trường này có giá trị thật (đã đối chiếu: khớp đúng
+    hiệu `total − prompt − candidates`).
+
+    Thinking bị tính tiền **như output** ($2,50/1M) nên đây vừa là số liệu độ trễ vừa là
+    số liệu chi phí — lý do nó được ghi vào `chat_logs` chứ không chỉ log ra màn hình.
+    """
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None:
+        return None
+    return getattr(usage, "thoughts_token_count", None)
+
+
 def _is_truncated(response) -> bool:
     """Response có bị cắt vì chạm `max_output_tokens` không?
 
@@ -136,6 +181,17 @@ class ChatStreamState:
     # Bản cuối KHÁC phần đã stream (do hỏi lại hoặc cắt về ranh giới câu) → caller phải
     # thay text đã hiện, không được nối thêm.
     replaced: bool = False
+    # Tổng token SUY LUẬN của lượt này (cộng dồn qua cả lượt hỏi lại chống-cắt). `None` =
+    # nhà cung cấp không báo cáo — xem `_thinking_tokens`. Dùng chung cho CẢ hai lối ra:
+    # `chat()` cũng nhận `state` để bản blocking và bản streaming ghi cùng một loại sổ.
+    thinking_tokens: int | None = None
+
+    def add_thinking(self, tokens: int | None) -> None:
+        """Cộng dồn, giữ `None` nếu chưa từng có số nào — `None` và `0` KHÁC nhau ở đây:
+        `None` là "không đo được", `0` là "đã ghìm về 0 và model tuân thủ"."""
+        if tokens is None:
+            return
+        self.thinking_tokens = (self.thinking_tokens or 0) + tokens
 
 
 @dataclass
@@ -304,8 +360,13 @@ class GeminiClient:
 
         return AnalysisResult(error="Gemini 429 RESOURCE_EXHAUSTED after 3 retries")
 
-    def chat(self, system_prompt: str, user_prompt: str) -> tuple[str, int]:
+    def chat(
+        self, system_prompt: str, user_prompt: str, state: ChatStreamState | None = None
+    ) -> tuple[str, int]:
         """Một lượt hỏi đáp cho chat Q&A. Trả `(text, model_calls_used)`.
+
+        `state` là sổ ghi tuỳ chọn — cùng loại `chat_stream()` dùng — để caller đọc được số
+        token suy luận đã tiêu. Không truyền cũng chạy y như cũ.
 
         KHÁC `analyze()`/`gate_analyze()` ở hai điểm cố ý:
 
@@ -327,13 +388,13 @@ class GeminiClient:
         trọng nhất (khuyến nghị, rủi ro). Nay: cắt → HỎI LẠI kèm ràng buộc gộp ý cho
         ngắn gọn nhưng đủ ý. Lượt hỏi lại được tính vào `calls` trả về nên budget vẫn khớp.
         """
-        text, truncated, calls = self._chat_once(system_prompt, user_prompt)
+        text, truncated, calls = self._chat_once(system_prompt, user_prompt, state)
         if not truncated:
             return text, calls
 
         logger.warning("Chat response truncated (MAX_TOKENS) — hỏi lại với ràng buộc độ dài")
         retry_text, retry_truncated, retry_calls = self._chat_once(
-            system_prompt + _CONCISE_RETRY_DIRECTIVE, user_prompt
+            system_prompt + _CONCISE_RETRY_DIRECTIVE, user_prompt, state
         )
         calls += retry_calls
 
@@ -375,7 +436,7 @@ class GeminiClient:
 
         logger.warning("Chat stream bị cắt (MAX_TOKENS) — hỏi lại với ràng buộc độ dài")
         retry_text, retry_truncated, retry_calls = self._chat_once(
-            system_prompt + _CONCISE_RETRY_DIRECTIVE, user_prompt
+            system_prompt + _CONCISE_RETRY_DIRECTIVE, user_prompt, state
         )
         state.calls += retry_calls
         state.replaced = True
@@ -406,11 +467,10 @@ class GeminiClient:
                 stream = self._client.models.generate_content_stream(
                     model=MODEL_ID,
                     contents=user_prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_prompt,
-                        temperature=0.2,
-                        max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
-                    ),
+                    # CÙNG cấu hình với `chat()` — hai lối ra không được trôi khỏi nhau
+                    # (design D3). Cổng chất lượng đi lối blocking, nên khác nhau ở đây là
+                    # để cổng gác một cấu hình mà người dùng thật không chạy.
+                    config=_chat_generation_config(system_prompt),
                 )
                 last = None
                 for response in stream:
@@ -428,6 +488,8 @@ class GeminiClient:
                 if not started:
                     state.calls += 1  # gọi thành công nhưng model không sinh gì
                 state.truncated = _is_truncated(last) if last is not None else False
+                # Chunk CUỐI mang `usage_metadata` của cả lượt — cộng ở đây, không phải mỗi chunk.
+                state.add_thinking(_thinking_tokens(last) if last is not None else None)
                 return
 
             except Exception as e:
@@ -557,7 +619,9 @@ class GeminiClient:
             logger.warning("Intent classifier trả nhãn lạ %r → rơi về pipeline", label)
         return intent
 
-    def _chat_once(self, system_prompt: str, user_prompt: str) -> tuple[str, bool, int]:
+    def _chat_once(
+        self, system_prompt: str, user_prompt: str, state: ChatStreamState | None = None
+    ) -> tuple[str, bool, int]:
         """Một lượt gọi chat + retry 429. Trả `(text, bị_cắt, số_lượt_tính_tiền)`."""
         _retry_delays = [3, 10]
         calls = 0
@@ -570,13 +634,11 @@ class GeminiClient:
                 response = self._client.models.generate_content(
                     model=MODEL_ID,
                     contents=user_prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_prompt,
-                        temperature=0.2,
-                        max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
-                    ),
+                    config=_chat_generation_config(system_prompt),
                 )
                 calls += 1
+                if state is not None:
+                    state.add_thinking(_thinking_tokens(response))
                 return (response.text or "").strip(), _is_truncated(response), calls
 
             except Exception as e:

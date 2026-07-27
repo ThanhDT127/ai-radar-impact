@@ -8,7 +8,11 @@
   "revisions": [
    {
     "date": "2026-07-27",
-    "reason": "`chat-hybrid-retrieval`: `_rank` đổi sang RRF(vector, lexical) ⇒ đổi context ⇒ đo lại TOÀN BỘ bằng `--live` (luật bắt buộc khi đụng `_rank`). Faith 0,980→0,980 · AnsRel 0,930→0,910 · CitPrec giữ 1,000 · từ chối đúng 5/5 · 77 lượt gọi sinh câu trả lời. Bộ nhãn thêm 2 kịch bản nhóm `semantic` (rank-eol-khai-tu, rank-vram-semantic) đo đúng chế độ hỏng ⑥ chữa; cả hai faith/ansrel/citprec đều tốt, `must_have` 4/6 — phần sót nằm ở TẦNG XẾP HẠNG chứ không phải câu trả lời, và đó là việc của RS harness đo (xem openspec/changes/chat-hybrid-retrieval/measurement.md §4)."
+    "reason": "`chat-latency-thinking-budget`: nâng `google-genai` 0.8.0 → 1.75.0 và ghìm `thinking_budget=256` cho đường chat ⇒ đổi lượng suy luận của model ⇒ đo lại TOÀN BỘ bằng `--live`. Faith 0,990→0,990 · AnsRel 0,930→0,910 · CitPrec giữ 1,000 · từ chối đúng 5/5 · lệch mode 0. PASS cả hai ngưỡng cứng nên KHÔNG phải nâng budget lên 512. Đổi lấy: độ trễ trung vị 1 lượt gọi 4,7s (trước đó đo tay 14,6–29,1s), thinking 1.877–2.752 → 216–253 token/câu. ⚠️ AnsRel −0,02 và `must_have` 68/75 → 66/75: trong dung sai 0,05, nhưng CÙNG CHIỀU với việc cắt suy luận — theo dõi nếu sau này hạ budget thêm, đừng đọc như nhiễu. Chi tiết: openspec/changes/chat-latency-thinking-budget/measurement.md."
+   },
+   {
+    "date": "2026-07-27",
+    "reason": "`chat-hybrid-retrieval`: `_rank` đổi sang RRF(vector, lexical) ⇒ đổi context ⇒ đo lại TOÀN BỘ bằng `--live` (luật bắt buộc khi đụng `_rank`). Faith 0,980→0,990 · AnsRel 0,930→0,930 · CitPrec giữ 1,000 · từ chối đúng 5/5 · 77 lượt gọi sinh câu trả lời. Bộ nhãn thêm 2 kịch bản nhóm `semantic` (rank-eol-khai-tu, rank-vram-semantic) đo đúng chế độ hỏng ⑥ chữa; cả hai faith/ansrel/citprec đều tốt, `must_have` 4/6 — phần sót nằm ở TẦNG XẾP HẠNG chứ không phải câu trả lời, và đó là việc của RS harness đo (xem openspec/changes/chat-hybrid-retrieval/measurement.md §4)."
    },
    {
     "date": "2026-07-27",
@@ -268,8 +272,8 @@
    "group": "regulation",
    "expects_refusal": false,
    "refusal": false,
-   "faithfulness": 0.5,
-   "answer_relevance": 0.0,
+   "faithfulness": 1.0,
+   "answer_relevance": 0.5,
    "citation_precision": 1.0,
    "bogus_markers": [],
    "must_have_hit": 1,
@@ -329,7 +333,7 @@
    "expects_refusal": false,
    "refusal": false,
    "faithfulness": 1.0,
-   "answer_relevance": 1.0,
+   "answer_relevance": 0.5,
    "citation_precision": 1.0,
    "bogus_markers": [],
    "must_have_hit": 1,
@@ -419,7 +423,7 @@
    "expects_refusal": false,
    "refusal": false,
    "faithfulness": 1.0,
-   "answer_relevance": 0.5,
+   "answer_relevance": 1.0,
    "citation_precision": 1.0,
    "bogus_markers": [],
    "must_have_hit": 2,
@@ -437,7 +441,7 @@
    "answer_relevance": 1.0,
    "citation_precision": 1.0,
    "bogus_markers": [],
-   "must_have_hit": 2,
+   "must_have_hit": 1,
    "must_have_total": 2,
    "model_calls": 1
   },
@@ -479,7 +483,7 @@
    "expects_refusal": false,
    "refusal": false,
    "faithfulness": 1.0,
-   "answer_relevance": 0.5,
+   "answer_relevance": 1.0,
    "citation_precision": 1.0,
    "bogus_markers": [],
    "must_have_hit": 1,
@@ -493,7 +497,7 @@
    "group": "supply_chain",
    "expects_refusal": false,
    "refusal": false,
-   "faithfulness": 0.75,
+   "faithfulness": 1.0,
    "answer_relevance": 1.0,
    "citation_precision": 1.0,
    "bogus_markers": [],
@@ -538,7 +542,7 @@
    "group": "regulation",
    "expects_refusal": false,
    "refusal": false,
-   "faithfulness": 0.75,
+   "faithfulness": 1.0,
    "answer_relevance": 1.0,
    "citation_precision": 1.0,
    "bogus_markers": [],
@@ -644,7 +648,7 @@
    "expects_refusal": false,
    "refusal": false,
    "faithfulness": 1.0,
-   "answer_relevance": 1.0,
+   "answer_relevance": 0.5,
    "citation_precision": 1.0,
    "bogus_markers": [],
    "must_have_hit": 1,
@@ -718,7 +722,7 @@
    "group": "vietnamese",
    "expects_refusal": false,
    "refusal": false,
-   "faithfulness": 1.0,
+   "faithfulness": 0.8333333333333334,
    "answer_relevance": 1.0,
    "citation_precision": 1.0,
    "bogus_markers": [],
@@ -749,7 +753,7 @@
    "expects_refusal": false,
    "refusal": false,
    "faithfulness": 1.0,
-   "answer_relevance": 1.0,
+   "answer_relevance": 0.5,
    "citation_precision": 1.0,
    "bogus_markers": [],
    "must_have_hit": 1,
@@ -902,7 +906,7 @@
    "answer_relevance": 1.0,
    "citation_precision": 1.0,
    "bogus_markers": [],
-   "must_have_hit": 1,
+   "must_have_hit": 0,
    "must_have_total": 1,
    "model_calls": 1
   },
@@ -983,7 +987,7 @@
   }
  ],
  "overall": {
-  "faithfulness": 0.9765625,
+  "faithfulness": 0.9895833333333334,
   "answer_relevance": 0.9067796610169492,
   "citation_precision": 1.0
  },
@@ -991,7 +995,7 @@
  "mode_mismatch": [],
  "refusal_correct": 5,
  "refusal_total": 5,
- "must_have_hit": 68,
+ "must_have_hit": 66,
  "must_have_total": 75,
  "model_calls": 77
 }

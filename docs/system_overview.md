@@ -446,8 +446,12 @@ curl -X POST http://localhost:8000/api/v1/chat \
 ```
 
 Giới hạn: `MAX_DAILY_CHAT_CALLS` (mặc định 200 lượt gọi model/ngày, tính theo giờ UTC, **tách riêng**
-khỏi hạn mức phân tích). Hết lượt thì API trả 429 và widget báo bằng tiếng Việt. Mỗi câu hỏi tốn
-khoảng $0,006-0,016 và mất 5-22 giây tuỳ độ khó.
+khỏi hạn mức phân tích). Hết lượt thì API trả 429 và widget báo bằng tiếng Việt.
+
+**Tốc độ trả lời** (đo 27/07/2026 trên 62 câu thật): trung vị **4,7s** cho câu thường, **6,9s** cho
+câu phải tự mở rộng phạm vi (tốn 2 lượt gọi model). Trước 27/07 con số này là 15-30s — phần lớn thời
+gian đó là model "suy nghĩ" nội bộ; nay ngân sách suy nghĩ đã được ghìm bằng `CHAT_THINKING_BUDGET`.
+Câu tóm tắt tổng hợp nhiều tin vẫn có thể tới ~9s. Chi phí khoảng $0,002-0,004/câu.
 
 ### Xem kết quả
 
