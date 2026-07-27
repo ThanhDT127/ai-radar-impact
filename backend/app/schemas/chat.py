@@ -33,6 +33,17 @@ class ChatRequest(BaseModel):
 
 
 class Citation(BaseModel):
+    """Một nguồn được trích dẫn, kèm CHÍNH con số marker đã xuất hiện trong answer.
+
+    `n` là số thứ tự trong index do server cấp phát (1..N), **không** phải vị trí trong mảng
+    này. Hai hệ quy chiếu đó chỉ trùng nhau khi model trích dẫn liền mạch từ [1] — và nó
+    thường làm vậy chỉ vì prompt dặn "tin ở đầu danh sách đáng chọn hơn". Client cũ suy `n`
+    từ vị trí mảng (`citations[n-1]`) nên trỏ sai ngay khi model bỏ qua một tin ở giữa; tức
+    là lỗi bị che bởi chất lượng xếp hạng và sẽ lộ ra đúng lúc xếp hạng kém đi.
+    Đưa `n` thành dữ liệu để ranh giới backend↔frontend tự mô tả, không phải cùng đoán đúng.
+    """
+
+    n: int
     insight_id: uuid.UUID
     title: str
     source_url: str

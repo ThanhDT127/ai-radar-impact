@@ -63,6 +63,12 @@ def test_insight_block_notes_expired_original():
 
 
 def test_resolve_citations_maps_markers_in_order():
+    """Citation giữ THỨ TỰ XUẤT HIỆN, nhưng `n` là SỐ INDEX chứ không phải vị trí mảng.
+
+    ⚠️ Chính ca này từng xanh ở backend trong khi widget trỏ sai cả hai marker: `[2]` đứng
+    trước nên nằm ở `citations[0]`, mà widget lại tra `citations[n-1]` = `citations[1]` = A.
+    Test một bên ranh giới không bảo vệ được ranh giới — xem `tests/test_chat_citation_boundary.py`.
+    """
     a, b = _FakeInsight(title="A"), _FakeInsight(title="B")
     mapping = {1: a, 2: b}
 
@@ -71,6 +77,48 @@ def test_resolve_citations_maps_markers_in_order():
     assert [c["title"] for c in citations] == ["B", "A"], "citation giữ thứ tự xuất hiện"
     assert citations[0]["insight_id"] == b.id
     assert "[2]" in answer and "[1]" in answer
+    # `n` là con số trong marker, KHÔNG phải index của mảng citations.
+    assert [c["n"] for c in citations] == [2, 1]
+    assert citations[0]["n"] == 2 and citations[0]["insight_id"] == b.id
+
+
+def test_citation_n_is_the_index_number_not_array_position():
+    """Dãy marker cách quãng xa: `n` phải là 3/7/12, không phải 1/2/3."""
+    insights = {n: _FakeInsight(title=f"Tin {n}") for n in range(1, 13)}
+
+    answer, citations = resolve_citations(
+        "Ba [3], bảy [7], mười hai [12].", insights
+    )
+
+    assert [c["n"] for c in citations] == [3, 7, 12]
+    assert [c["title"] for c in citations] == ["Tin 3", "Tin 7", "Tin 12"]
+    for citation in citations:
+        assert citation["insight_id"] == insights[citation["n"]].id
+    # Marker trong answer giữ NGUYÊN — không đánh số lại (design D2).
+    assert "[3]" in answer and "[7]" in answer and "[12]" in answer
+    assert "[1]" not in answer and "[2]" not in answer
+
+
+def test_single_non_first_marker_keeps_its_number():
+    """Chỉ trích dẫn `[2]`: citation duy nhất phải mang n=2, không tụt về 1."""
+    a, b = _FakeInsight(title="A"), _FakeInsight(title="B")
+
+    _, citations = resolve_citations("Chỉ nói về B [2].", {1: a, 2: b})
+
+    assert len(citations) == 1
+    assert citations[0]["n"] == 2
+    assert citations[0]["insight_id"] == b.id
+
+
+def test_reversed_markers_keep_their_own_numbers():
+    """`[5]` trước `[2]`: mỗi marker giữ số của chính nó, không hoán đổi."""
+    insights = {n: _FakeInsight(title=f"Tin {n}") for n in range(1, 6)}
+
+    _, citations = resolve_citations("Năm [5] rồi hai [2].", insights)
+
+    assert [c["n"] for c in citations] == [5, 2]
+    assert citations[0]["insight_id"] == insights[5].id
+    assert citations[1]["insight_id"] == insights[2].id
 
 
 def test_resolve_citations_deduplicates():

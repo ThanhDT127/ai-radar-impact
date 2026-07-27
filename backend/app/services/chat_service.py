@@ -98,9 +98,32 @@ def _history_block(history: list) -> str:
 
 
 def _roles_in_question(question: str) -> list[str]:
-    """Vai trò được nhắc tên trong câu hỏi — dùng để chọn trục xếp hạng."""
-    lowered = question.lower()
-    return [role for role in ALLOWED_ROLES if role.lower() in lowered]
+    """Vai trò được nhắc tên trong câu hỏi — dùng để chọn trục xếp hạng.
+
+    Khớp theo **BIÊN TỪ**, không phải chuỗi con. Cách cũ (`role.lower() in question.lower()`)
+    cho `"tin về device IoT mới"` → `['Dev']` và `"DevOps cần chú ý gì"` → `['Dev']`. Ở công ty
+    có trụ cột IoT/Smart Home thì `device` xuất hiện dày đặc, và hậu quả nặng hơn `_relevance`
+    sai: `_relevance` lệch điểm MỘT tin, còn nhận nhầm vai trò **đổi cả trục xếp hạng** của toàn
+    bộ danh sách sang vai trò đó — lặng lẽ, không log, không dấu hiệu. Nó còn kéo theo
+    `empty_roles`, tức là có thể tuyên bố sai "hệ thống không có tin nào cho vai trò X".
+    (`DevOps` lại còn thuộc taxonomy `Source.target_roles`, KHÔNG thuộc `ALLOWED_ROLES` — nhận
+    ra `Dev` ở đó là sai hai lần.)
+
+    Phải so **dãy token liên tiếp**, không so tập hợp: vai trò là cụm nhiều từ —
+    `Data Analyst` (2 token), `Người dùng phổ thông` (4 token) — nên "phổ thông cho người dùng"
+    không được tính là khớp. Dùng đúng regex tách token của `_question_terms` để hai bên không
+    trôi khỏi nhau.
+    """
+    tokens = re.findall(r"[0-9a-zA-ZÀ-ỹ]+", question.lower())
+    found = []
+    for role in ALLOWED_ROLES:
+        needle = re.findall(r"[0-9a-zA-ZÀ-ỹ]+", role.lower())
+        if not needle:
+            continue
+        span = len(needle)
+        if any(tokens[i:i + span] == needle for i in range(len(tokens) - span + 1)):
+            found.append(role)
+    return found
 
 
 # Nguồn sự thật ở `chat_service_terms` (dùng chung với `chat_intent`, tránh import vòng).
@@ -119,7 +142,19 @@ def _question_terms(question: str) -> list[str]:
 
 
 def _relevance(insight: Insight, terms: list[str]) -> int:
-    """Số từ khoá của câu hỏi xuất hiện trong tin. 0 = không nhắc gì tới câu hỏi."""
+    """Số từ khoá của câu hỏi xuất hiện trong tin. 0 = không nhắc gì tới câu hỏi.
+
+    So khớp **theo BIÊN TỪ**, không phải chuỗi con. Bản cũ dùng `t in haystack`, nên `"ai"`
+    khớp trong *email, domain, training, chain, available, detail, fail, explain* — tầng độ
+    liên quan mất sạch khả năng phân biệt đúng ở nhóm từ khoá ASCII ngắn.
+
+    ⚠️ Ngưỡng 2 ký tự của `_question_terms` là ĐÚNG và phải giữ (tiếng Việt đơn âm: `mã`,
+    `mở`, `dữ`). Vấn đề chưa bao giờ nằm ở ngưỡng mà ở cách so khớp — nâng ngưỡng lên 3 sẽ
+    làm rụng từ tiếng Việt mà vẫn sai với `ML`, `OS`, `Go`.
+
+    Tách haystack bằng CÙNG regex mà `_question_terms` dùng cho câu hỏi: hai bên phải nhìn
+    thế giới bằng một luật, không thì lại sinh ra đúng loại lệch vừa phải sửa.
+    """
     if not terms:
         return 0
     haystack = " ".join(
@@ -135,7 +170,8 @@ def _relevance(insight: Insight, terms: list[str]) -> int:
             ],
         )
     ).lower()
-    return sum(1 for t in set(terms) if t in haystack)
+    words = set(re.findall(r"[0-9a-zA-ZÀ-ỹ]+", haystack))
+    return sum(1 for t in set(terms) if t in words)
 
 
 class ChatService:
@@ -306,6 +342,18 @@ class ChatService:
             for role in asked_roles
             if not any(role in (i.affected_roles or []) for i in matched)
         ]
+
+        # Trục xếp hạng đang dùng hoàn toàn vô hình từ ngoài — không có cách nào biết
+        # production xếp theo trục nào cho một câu cụ thể. Mức DEBUG chứ KHÔNG phải WARNING:
+        # đây là quan sát, không phải lỗi. Log này cũng là dữ liệu để quyết có cần bảng đồng
+        # nghĩa vai trò không (design D6: `developer` hiện KHÔNG kích hoạt trục `Dev`).
+        logger.debug(
+            "Trục xếp hạng: %s | %d/%d ứng viên | vai trò rỗng: %s",
+            ", ".join(asked_roles) if asked_roles else "(không có vai trò — dùng affected_roles)",
+            min(len(matched), settings.chat_index_top_k) if settings.chat_index_top_k > 0 else len(matched),
+            len(matched),
+            ", ".join(empty_roles) or "không",
+        )
 
         # Cắt sau khi xếp hạng: giữ tin đáng đọc nhất, bỏ phần đuôi mà câu trả lời
         # (trần 5 tin) không bao giờ dùng tới. Xem `settings.chat_index_top_k`.

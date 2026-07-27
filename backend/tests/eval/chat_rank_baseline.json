@@ -1,0 +1,930 @@
+{
+ "meta": {
+  "measured_at": "2026-07-27",
+  "commit": "a00fe2e",
+  "corpus": "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary",
+  "note": "chốt trên code CHƯA sửa (`_roles_in_question` còn khớp chuỗi con)",
+  "revisions": [
+   {
+    "date": "2026-07-27",
+    "recall_at_k": "1,000 → 0,988",
+    "recall_at_answer": "0,812 → 0,812",
+    "reason": "`chat-citation-integrity` 4.1: `_relevance` đổi sang khớp theo BIÊN TỪ. recall@60 giảm vì `exp-gemma-to-eol` mất một khớp NHẦM (`kế` khớp chuỗi con trong `kết`) — tin Cypress trước nay lọt top-60 nhờ tai nạn. recall@5 net không đổi: `glo-open-model-analysis` +0,50, `exp-nettacker-to-vnpost` −0,50 (`sql` không còn khớp `MySQL`). Chi tiết + ba kết luận ở openspec/changes/chat-citation-integrity/measurement.md."
+   }
+  ]
+ },
+ "top_k": 60,
+ "answer_budget": 5,
+ "corpus_size": 179,
+ "rows": [
+  {
+   "scenario_id": "exp-nettacker-to-zeroday",
+   "group": "security",
+   "mode": "expanded",
+   "question": "Có lỗ hổng zero-day nào của Windows đang cần vá gấp không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 4,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "lỗ",
+    "hổng",
+    "zero",
+    "day",
+    "windows",
+    "vá"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-nettacker-to-euaiact",
+   "group": "regulation",
+   "mode": "expanded",
+   "question": "EU AI Act yêu cầu gì với hệ thống AI rủi ro cao?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "eu",
+    "act",
+    "yêu",
+    "cầu",
+    "rủi",
+    "ro",
+    "cao"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-kasa-to-postquantum",
+   "group": "crypto",
+   "mode": "expanded",
+   "question": "Chuyển sang mã hoá hậu lượng tử có hạn chót nào không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "chuyển",
+    "sang",
+    "mã",
+    "hoá",
+    "hậu",
+    "lượng",
+    "tử",
+    "hạn",
+    "chót"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-kasa-to-lambda",
+   "group": "cloud",
+   "mode": "expanded",
+   "question": "Lambda MicroVMs là gì?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "lambda",
+    "microvms"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-euaiact-to-npm",
+   "group": "supply_chain",
+   "mode": "expanded",
+   "question": "Gần đây có vụ tấn công chuỗi cung ứng npm nào không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "gần",
+    "đây",
+    "vụ",
+    "tấn",
+    "chuỗi",
+    "cung",
+    "ứng",
+    "npm"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-winsrv-to-k8s",
+   "group": "security",
+   "mode": "expanded",
+   "question": "Kubernetes có CVE nào chưa được vá không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "kubernetes",
+    "cve",
+    "chưa",
+    "vá"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-cypress-to-copilot",
+   "group": "devex",
+   "mode": "expanded",
+   "question": "Có cách nào đo mức dùng GitHub Copilot theo từng repository không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "cách",
+    "đo",
+    "mức",
+    "dùng",
+    "github",
+    "copilot",
+    "theo",
+    "từng",
+    "repository"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-npm-to-layoff",
+   "group": "absent",
+   "mode": "expanded",
+   "question": "Có tin nào về sa thải nhân sự trong ngành công nghệ không?",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "sa",
+    "thải",
+    "nhân",
+    "sự",
+    "ngành",
+    "nghệ"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-rag-to-botnet",
+   "group": "security",
+   "mode": "expanded",
+   "question": "Botnet Popa là gì?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "botnet",
+    "popa"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-gemma-to-eol",
+   "group": "deprecation",
+   "mode": "expanded",
+   "question": "Có sản phẩm nào sắp hết vòng đời hỗ trợ mà cần lên kế hoạch không?",
+   "recall": 0.5,
+   "recall_at_answer": 0.5,
+   "worst_rank": 76,
+   "must_total": 2,
+   "misses": [
+    {
+     "insight_id": "ecde8525-0ad7-4e0b-9a4c-37088c27e6d3",
+     "title": "The Electron browser is being deprecated in Cypress",
+     "rank": 76
+    }
+   ],
+   "terms": [
+    "sản",
+    "phẩm",
+    "sắp",
+    "hết",
+    "vòng",
+    "đời",
+    "hỗ",
+    "trợ",
+    "lên",
+    "kế",
+    "hoạch"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-entra-to-gemma",
+   "group": "ai_model",
+   "mode": "expanded",
+   "question": "Gemma 4 12B có chạy được trên laptop không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "gemma",
+    "12b",
+    "chạy",
+    "trên",
+    "laptop"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-lerobot-to-secureboot",
+   "group": "security",
+   "mode": "expanded",
+   "question": "Secure Boot của Microsoft đang có vấn đề gì?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "secure",
+    "boot",
+    "microsoft",
+    "vấn",
+    "đề"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "exp-nettacker-to-vnpost",
+   "group": "vietnamese",
+   "mode": "expanded",
+   "question": "Có bài tiếng Việt nào hướng dẫn kỹ thuật SQL không?",
+   "recall": 1.0,
+   "recall_at_answer": 0.5,
+   "worst_rank": 9,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "bài",
+    "tiếng",
+    "việt",
+    "hướng",
+    "dẫn",
+    "kỹ",
+    "thuật",
+    "sql"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-critical-security",
+   "group": "security",
+   "mode": "global",
+   "question": "Gần đây có lỗ hổng bảo mật nghiêm trọng nào cần vá gấp không?",
+   "recall": 1.0,
+   "recall_at_answer": 0.5,
+   "worst_rank": 9,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "gần",
+    "đây",
+    "lỗ",
+    "hổng",
+    "bảo",
+    "mật",
+    "nghiêm",
+    "trọng",
+    "vá"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-fortinet",
+   "group": "security",
+   "mode": "global",
+   "question": "CISA cảnh báo gì về Fortinet?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "cisa",
+    "cảnh",
+    "báo",
+    "fortinet"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-patch-tuesday",
+   "group": "security",
+   "mode": "global",
+   "question": "Patch Tuesday gần đây có gì đáng chú ý?",
+   "recall": 1.0,
+   "recall_at_answer": 0.5,
+   "worst_rank": 37,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "patch",
+    "tuesday",
+    "gần",
+    "đây"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-secure-boot",
+   "group": "security",
+   "mode": "global",
+   "question": "Secure Boot bị hỏng như thế nào?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "secure",
+    "boot",
+    "hỏng",
+    "như"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-supply-chain",
+   "group": "supply_chain",
+   "mode": "global",
+   "question": "Có tin gì về tấn công chuỗi cung ứng phần mềm?",
+   "recall": 1.0,
+   "recall_at_answer": 0.0,
+   "worst_rank": 7,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "tấn",
+    "chuỗi",
+    "cung",
+    "ứng",
+    "phần",
+    "mềm"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-sbom",
+   "group": "supply_chain",
+   "mode": "global",
+   "question": "SBOM là gì và vì sao không thể ship thiếu nó?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "sbom",
+    "thể",
+    "ship",
+    "thiếu"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-postquantum",
+   "group": "crypto",
+   "mode": "global",
+   "question": "Chuyển đổi mã hoá hậu lượng tử có hạn chót pháp lý nào không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "chuyển",
+    "đổi",
+    "mã",
+    "hoá",
+    "hậu",
+    "lượng",
+    "tử",
+    "hạn",
+    "chót",
+    "pháp",
+    "lý"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-euaiact",
+   "group": "regulation",
+   "mode": "global",
+   "question": "EU AI Act có gì mà đội AI cần quan tâm?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "eu",
+    "act",
+    "đội"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-cra",
+   "group": "regulation",
+   "mode": "global",
+   "question": "EU Cyber Resilience Act ảnh hưởng gì tới sản phẩm có yếu tố số?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "eu",
+    "cyber",
+    "resilience",
+    "act",
+    "ảnh",
+    "hưởng",
+    "sản",
+    "phẩm",
+    "yếu",
+    "tố",
+    "số"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-open-model-analysis",
+   "group": "open_model",
+   "mode": "global",
+   "question": "Các bài phân tích về hệ sinh thái mô hình mở nói gì?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 5,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "bài",
+    "phân",
+    "tích",
+    "sinh",
+    "thái",
+    "mô",
+    "hình",
+    "mở"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-deepseek",
+   "group": "open_model",
+   "mode": "global",
+   "question": "DeepSeek có tin gì mới?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "deepseek"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-gemini-agent",
+   "group": "ai_platform",
+   "mode": "global",
+   "question": "Gemini API có cập nhật gì cho agent?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 3,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "gemini",
+    "api",
+    "cập",
+    "nhật",
+    "agent"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-bedrock",
+   "group": "cloud",
+   "mode": "global",
+   "question": "Amazon Bedrock có mô hình nào mới không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 3,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "amazon",
+    "bedrock",
+    "mô",
+    "hình"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-lambda-coldstart",
+   "group": "cloud",
+   "mode": "global",
+   "question": "Có cách nào giảm cold start cho Lambda chạy Java không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "cách",
+    "giảm",
+    "cold",
+    "start",
+    "lambda",
+    "chạy",
+    "java"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-k8s-cve",
+   "group": "cloud",
+   "mode": "global",
+   "question": "Kubernetes có vấn đề bảo mật nào đang mở không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 4,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "kubernetes",
+    "vấn",
+    "đề",
+    "bảo",
+    "mật",
+    "mở"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-secret-scanning",
+   "group": "devex",
+   "mode": "global",
+   "question": "GitHub có cải tiến gì cho secret scanning?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "github",
+    "cải",
+    "tiến",
+    "secret",
+    "scanning"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-copilot-metrics",
+   "group": "devex",
+   "mode": "global",
+   "question": "Đo mức dùng Copilot theo repository được không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "đo",
+    "mức",
+    "dùng",
+    "copilot",
+    "theo",
+    "repository"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-robotics",
+   "group": "iot",
+   "mode": "global",
+   "question": "Có tin gì về robotics không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 3,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "robotics"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-iot-security",
+   "group": "iot",
+   "mode": "global",
+   "question": "Thiết bị IoT có sự cố bảo mật nào không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 4,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "thiết",
+    "iot",
+    "sự",
+    "cố",
+    "bảo",
+    "mật"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-vn-sql",
+   "group": "vietnamese",
+   "mode": "global",
+   "question": "Có bài tiếng Việt nào về kỹ thuật SQL không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 5,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "bài",
+    "tiếng",
+    "việt",
+    "kỹ",
+    "thuật",
+    "sql"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-typescript",
+   "group": "devtools",
+   "mode": "global",
+   "question": "Có bài nào về TypeScript không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "bài",
+    "typescript"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-role-security",
+   "group": "role",
+   "mode": "global",
+   "question": "Bên Security cần chú ý tin nào nhất?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 4,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "bên",
+    "security"
+   ],
+   "roles": [
+    "Security"
+   ]
+  },
+  {
+   "scenario_id": "glo-role-data-engineer",
+   "group": "role",
+   "mode": "global",
+   "question": "Data Engineer nên đọc tin nào trong tuần?",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "data",
+    "engineer"
+   ],
+   "roles": [
+    "Data Engineer"
+   ]
+  },
+  {
+   "scenario_id": "glo-role-empty",
+   "group": "role_empty",
+   "mode": "global",
+   "question": "Có tin nào ảnh hưởng tới Data Analyst không?",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "ảnh",
+    "hưởng",
+    "data",
+    "analyst"
+   ],
+   "roles": [
+    "Data Analyst"
+   ]
+  },
+  {
+   "scenario_id": "glo-absent-bitcoin",
+   "group": "absent",
+   "mode": "global",
+   "question": "Có tin nào về giá Bitcoin không?",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "giá",
+    "bitcoin"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-absent-layoff",
+   "group": "absent",
+   "mode": "global",
+   "question": "Có tin nào về sa thải nhân sự trong ngành công nghệ không?",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "sa",
+    "thải",
+    "nhân",
+    "sự",
+    "ngành",
+    "nghệ"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-absent-vn-decree",
+   "group": "absent",
+   "mode": "global",
+   "question": "Nghị định 13 của Việt Nam về bảo vệ dữ liệu cá nhân quy định những gì?",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "nghị",
+    "định",
+    "13",
+    "việt",
+    "nam",
+    "bảo",
+    "vệ",
+    "dữ",
+    "liệu",
+    "cá",
+    "nhân",
+    "quy",
+    "định"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "rank-open-source-models",
+   "group": "open_model",
+   "mode": "global",
+   "question": "Có mô hình mã nguồn mở nào mới không?",
+   "recall": 1.0,
+   "recall_at_answer": 0.0,
+   "worst_rank": 54,
+   "must_total": 3,
+   "misses": [],
+   "terms": [
+    "mô",
+    "hình",
+    "mã",
+    "nguồn",
+    "mở"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "rank-ascii-ml",
+   "group": "ascii_short",
+   "mode": "global",
+   "question": "Có tin nào về ML không?",
+   "recall": 1.0,
+   "recall_at_answer": 0.0,
+   "worst_rank": 54,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "ml"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "rank-ascii-ai-blind",
+   "group": "ascii_short",
+   "mode": "global",
+   "question": "Có tin AI nào không?",
+   "recall": 1.0,
+   "recall_at_answer": 0.0,
+   "worst_rank": 20,
+   "must_total": 1,
+   "misses": [],
+   "terms": [],
+   "roles": []
+  },
+  {
+   "scenario_id": "rank-device-trap",
+   "group": "role_trap",
+   "mode": "global",
+   "question": "tin về device IoT mới",
+   "recall": 1.0,
+   "recall_at_answer": 0.5,
+   "worst_rank": 6,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "device",
+    "iot"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "rank-devops-trap",
+   "group": "role_trap",
+   "mode": "global",
+   "question": "DevOps cần chú ý gì",
+   "recall": 1.0,
+   "recall_at_answer": 0.0,
+   "worst_rank": 47,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "devops"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "rank-generic",
+   "group": "generic",
+   "mode": "global",
+   "question": "Có gì mới không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 1,
+   "misses": [],
+   "terms": [],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-summary-week",
+   "group": "overview",
+   "mode": "global",
+   "question": "Tóm tắt giúp mình những tin quan trọng nhất hiện có trong hệ thống.",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "tóm",
+    "tắt",
+    "giúp",
+    "trọng",
+    "hiện"
+   ],
+   "roles": []
+  }
+ ],
+ "overall": 0.9875,
+ "overall_at_answer": 0.8125,
+ "questions_scored": 40
+}

@@ -127,6 +127,29 @@ Chốt baseline recall trên code hiện tại, ghi kèm ngày. Harness fail khi
 hoặc **bất kỳ câu nào tụt**. Báo cáo in per-question, vì "tổng 88%" không nói được câu nào vỡ — mà 4b.2
 cho thấy hỏng nặng thường tập trung ở một loại câu (11% ở đúng một chủ đề trong khi tổng vẫn 42%).
 
+### D8 — recall@K **bão hoà**; đại lượng nhạy là recall@5 (thêm khi implement, 27/07/2026)
+
+Đo lần đầu: recall@60 = **1,000 trên cả 47 câu**. Bộ đo như đặc tả ban đầu **không phân biệt được gì** —
+nó chỉ bắt được hồi quy đủ lớn để đẩy một tin bắt buộc văng khỏi top-60 trên corpus 179 tin.
+
+Vì sao: `must_have` được chọn vì tin đó *hiển nhiên liên quan* tới câu hỏi ⇒ nó khớp từ khoá ⇒ tầng độ
+liên quan (tầng 1 của `_rank`) đẩy nó lên đầu. Nói cách khác K = 60/179 quá rộng so với một tập nhãn được
+định nghĩa bằng chính tiêu chí của tầng 1. Con số 42% của 4b.2 đo ở thời điểm xếp hạng **chỉ có**
+`score_for_role` — chế độ đó không còn tồn tại.
+
+Thêm **recall@5** làm đại lượng gate thứ hai, với 5 = trần tin trong `CHAT_SYSTEM_PROMPT` ("TỐI ĐA 5 tin").
+Đây mới là funnel thật: tin xếp hạng 40 lọt index nhưng model gần như chắc chắn không dùng tới — đúng
+cảnh 4b.2 mô tả ("model vẫn trả lời trôi chảy từ 2 tin sót lại"). Đo 27/07: recall@5 = **0,812**, và nó
+phân biệt rõ theo nhóm — `ascii_short` 0,00 · `role_trap` 0,25 · `open_model` 0,50 · `security` 0,88.
+Kèm cột `worst_rank` (hạng xấu nhất trong `must_have`) để đọc được "trượt sát nút" hay "trượt xa".
+
+Kiểm chứng độ nhạy (task 4.2) trên bản nháp `_relevance` khớp biên từ: **6/47 kịch bản đổi số**,
+recall@60 1,000 → 0,988, `exp-gemma-to-eol` hạng 48 → 76. Bộ đo có răng — nhưng chỉ vì có recall@5 và
+`worst_rank`; nếu chỉ nhìn recall@60 thì 41/47 câu vẫn im lặng.
+
+Giữ recall@K trong gate như spec yêu cầu (nó vẫn bắt hồi quy thảm hoạ), nhưng **đừng đọc nó như thước đo
+chính** — con số 1,000 ở đó là bình thường, không phải bằng chứng chất lượng.
+
 ## Risks / Trade-offs
 
 - **[Nhãn tay chủ quan]** → Ghi `label_reason` cho từng `must_have`, y như `human_reason` của gate. Đo

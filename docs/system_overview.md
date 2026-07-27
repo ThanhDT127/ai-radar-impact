@@ -401,10 +401,14 @@ v3, giống hệt dashboard. Muốn Việt hoá thì phải làm bảng nhãn d�
 
 Widget 💬 ở góc phải dưới mọi trang dashboard. Hai chế độ trên cùng một endpoint:
 
-- **Đang mở một tin** (`/insights/:id`) → widget tự gắn context chip, câu hỏi chạy trên **tin đó +
-  toàn bộ bài gốc**. Bấm ✕ trên chip để về chế độ toàn cục.
-- **Không mở tin nào** → hỏi toàn bộ kho tin. Server tự lọc, xếp hạng rồi nhét cả kho dạng danh
-  sách nén vào một lần gọi Gemini (không có "tìm kiếm" riêng — model đọc thẳng danh sách).
+- **Đang mở một tin** (`/insights/:id`) → câu hỏi chạy trên **tin đó + toàn bộ bài gốc**. Badge
+  "Phạm vi" trên đầu widget chuyển được **hai chiều** giữa *Bài đang xem* và *Toàn hệ thống*.
+  Hỏi câu vượt ra ngoài bài thì server **tự mở rộng** sang toàn kho và nói rõ điều đó ở đầu câu
+  trả lời — không cần bấm gì.
+- **Không mở tin nào** → hỏi toàn bộ kho tin. Server tự lọc, **xếp hạng theo hai tầng** (độ liên
+  quan tới câu hỏi trước, độ quan trọng sau), **cắt lấy 60 tin đầu** (`CHAT_INDEX_TOP_K`) rồi nén
+  thành danh sách đánh số đưa vào một lần gọi Gemini — không có "tìm kiếm" riêng, model đọc thẳng
+  danh sách đã xếp sẵn. Nhờ cắt top-K nên kho tin lớn lên không làm câu hỏi đắt thêm.
 
 Câu trả lời luôn kèm marker `[n]` bấm được, dẫn tới đúng tin nguồn. Không có dữ liệu thì bot nói
 "không tìm thấy trong hệ thống" thay vì đoán bừa.

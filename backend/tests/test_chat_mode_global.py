@@ -167,6 +167,25 @@ async def test_role_with_zero_data_is_stated_explicitly():
 
 
 @pytest.mark.asyncio
+async def test_device_question_does_not_claim_anything_about_dev_role():
+    """Hỏi `device` KHÔNG được sinh ra tuyên bố nào về vai trò `Dev`.
+
+    `empty_roles` dùng chung `asked_roles` với trục xếp hạng, nên nhận nhầm vai trò không chỉ
+    xếp sai — nó còn khiến bot nói "hệ thống KHÔNG có tin nào ảnh hưởng tới vai trò Dev" cho
+    một câu hỏi chưa bao giờ nhắc tới `Dev`. Đó là tuyên bố sai về khoảng trống dữ liệu, tệ hơn
+    xếp sai thứ tự nhiều. Bản `role.lower() in question.lower()` cũ làm đúng như vậy.
+    """
+    items = [_FakeInsight("Tin bảo mật", roles=["Security"])]
+    gemini = _FakeGemini()
+    service, _ = _service(items, gemini)
+
+    await service.answer("tin về device IoT mới", [], None)
+
+    assert "vai trò Dev" not in gemini.prompts[0]
+    assert "KHÔNG có tin nào ảnh hưởng" not in gemini.prompts[0]
+
+
+@pytest.mark.asyncio
 async def test_role_with_data_gets_no_empty_notice():
     items = [_FakeInsight("Tin bảo mật", roles=["Security"])]
     gemini = _FakeGemini()

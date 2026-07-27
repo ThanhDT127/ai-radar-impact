@@ -81,6 +81,12 @@ _(không có)_
 ## Dependencies
 
 - `chatbot-qa` (đã archive 22/07) — code và specs bị sửa đều thuộc change đó.
+- **`chat-rank-stability` — PHẢI land trước task 4.1** (đã land 27/07/2026). Task 4.1 sửa `_relevance`, tức
+  sửa thẳng vào tầng xếp hạng; `tests.eval.chat_rank_harness` là công cụ duy nhất đo được hồi quy đó, và
+  bộ câu hỏi của nó (nhóm `ascii_short`) tồn tại để đo đúng thay đổi này. Không có nó thì cam kết "recall
+  không tụt dưới 91%" ở 4.3 là lời hứa không kiểm chứng được.
+- `chat-eval-quality-gate` (land 27/07/2026) — 4.1 đổi context ⇒ đổi câu trả lời, nên phải chốt lại baseline
+  của `tests.eval.chat_answer_harness` (task 4.4).
 
 ## Impact
 

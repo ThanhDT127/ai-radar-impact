@@ -218,11 +218,7 @@ class InsightRepository:
         return list(result.scalars().all())
 
     async def list_for_chat(
-        self,
-        published_since: datetime | None = None,
-        topics: list[str] | None = None,
-        roles: list[str] | None = None,
-        keyword: str | None = None,
+        self, published_since: datetime | None = None
     ) -> list[Insight]:
         """Ứng viên dựng index cho chat chế độ toàn cục (chatbot-qa D3/D7).
 
@@ -234,6 +230,11 @@ class InsightRepository:
 
         `status="published" AND is_primary` là BẮT BUỘC: bỏ `is_primary` thì index chứa
         cả bản trùng của cụm dedup, chat sẽ trích dẫn tin mà dashboard không hiển thị.
+
+        Ba tham số lọc `topics`/`roles`/`keyword` **đã bị bỏ** (27/07/2026): chúng sinh ra
+        theo yêu cầu của task 1.7 `chatbot-qa`, rồi D3 chốt nhét cả index nên không caller
+        nào từng truyền vào — ~15 dòng SQL chết mang dáng vẻ của một tính năng đang chạy.
+        Cần lại thì `git` còn đó.
         """
         query = (
             select(Insight)
@@ -245,21 +246,6 @@ class InsightRepository:
 
         if published_since is not None:
             query = query.where(Insight.published_at >= published_since)
-        if topics:
-            query = query.where(or_(*(Insight.topics.any(t) for t in topics)))
-        if roles:
-            query = query.where(or_(*(Insight.affected_roles.any(r) for r in roles)))
-        if keyword:
-            clause = f"%{keyword}%"
-            query = query.where(
-                or_(
-                    Insight.title.ilike(clause),
-                    Insight.summary_short.ilike(clause),
-                    Insight.summary_medium.ilike(clause),
-                    Insight.signal.ilike(clause),
-                    Insight.so_what.ilike(clause),
-                )
-            )
 
         result = await self.session.execute(
             query.order_by(Insight.published_at.desc().nulls_last())

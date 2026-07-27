@@ -6,6 +6,13 @@ export interface ChatTurn {
 }
 
 export interface Citation {
+  /**
+   * Số marker do SERVER cấp phát (số thứ tự trong index, 1..N) — KHÔNG phải vị trí trong
+   * mảng `citations`. Hai hệ chỉ trùng khi model trích dẫn liền mạch từ [1], và nó thường
+   * làm vậy chỉ vì prompt dặn "tin ở đầu danh sách đáng chọn hơn". Giải marker bằng
+   * `citations.find(c => c.n === n)`, tuyệt đối không bằng `citations[n - 1]`.
+   */
+  n: number;
   insight_id: string;
   title: string;
   source_url: string;

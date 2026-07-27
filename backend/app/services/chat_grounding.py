@@ -11,11 +11,14 @@ Model không bao giờ nhìn thấy UUID nên không có gì để bịa. Đây 
 citation ở đây là *cấu trúc*, không phải hậu kiểm lọc id lạ.
 """
 
+import logging
 import re
 import uuid
 
 from app.ai.prompts import OUT_OF_SCOPE_SENTINEL
 from app.models.insight import Insight
+
+logger = logging.getLogger(__name__)
 
 # Marker dạng [1], [12] — không khớp [abc] hay [1.5].
 _MARKER_RE = re.compile(r"\[(\d+)\]")
@@ -128,14 +131,25 @@ def resolve_citations(
     cleaned = re.sub(r"\s+([.,;:!?])", r"\1", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
+    # `n` đi kèm citation, và marker trong answer GIỮ NGUYÊN — không đánh số lại (design D2).
+    # Đánh số lại nghe gọn hơn nhưng là *viết lại* nội dung model trả về (hiện chỉ *xoá* marker
+    # ngoài phạm vi), và sẽ đá nhau khi câu trả lời tự nhắc "tin số 3 ở trên".
     citations = [
         {
+            "n": n,
             "insight_id": mapping[n].id,
             "title": mapping[n].title,
             "source_url": mapping[n].source_url,
         }
         for n in seen
     ]
+
+    # Marker không liền mạch từ 1 nghĩa là model bỏ qua tin ở giữa index — tín hiệu sớm cho
+    # việc xếp hạng đặt tin không hợp vào top. Mức DEBUG chứ KHÔNG phải WARNING: sau khi `n`
+    # thành dữ liệu thì nhảy cóc không còn gây hỏng, nên đây là quan sát, không phải lỗi.
+    if seen and seen != list(range(1, len(seen) + 1)):
+        logger.debug("Marker không liền mạch từ 1: %s (index %d tin)", seen, len(mapping))
+
     return cleaned, citations
 
 

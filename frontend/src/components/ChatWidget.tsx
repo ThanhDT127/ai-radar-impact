@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { postChat, type ChatTurn, type Citation } from '../api/chat';
 import { fetchInsightById } from '../api/insights';
+import { parseAnswer } from './chatAnswer';
 import styles from './ChatWidget.module.css';
 
 interface Message {
@@ -26,25 +27,22 @@ const QUOTA_MESSAGE =
   'Đã hết lượt hỏi trong ngày hôm nay. Bạn quay lại vào ngày mai nhé, hoặc xem trực tiếp trên dashboard.';
 const NETWORK_MESSAGE = 'Không gửi được câu hỏi. Kiểm tra kết nối rồi thử lại nhé.';
 
-/** Marker [n] trong câu trả lời → link tới insight thứ n trong citations. */
+/** Marker `[n]` → link tới insight mang đúng `n` đó. Logic giải marker ở `chatAnswer.ts`. */
 function renderAnswer(content: string, citations: Citation[]) {
-  const parts = content.split(/(\[\d+\])/g);
-  return parts.map((part, idx) => {
-    const match = /^\[(\d+)\]$/.exec(part);
-    if (!match) return <span key={idx}>{part}</span>;
-    const citation = citations[Number(match[1]) - 1];
-    if (!citation) return <span key={idx}>{part}</span>;
-    return (
+  return parseAnswer(content, citations).map((segment, idx) =>
+    segment.citation ? (
       <Link
         key={idx}
-        to={`/insights/${citation.insight_id}`}
+        to={`/insights/${segment.citation.insight_id}`}
         className={styles.marker}
-        title={citation.title}
+        title={segment.citation.title}
       >
-        {part}
+        {segment.text}
       </Link>
-    );
-  });
+    ) : (
+      <span key={idx}>{segment.text}</span>
+    ),
+  );
 }
 
 export default function ChatWidget() {
@@ -232,13 +230,16 @@ export default function ChatWidget() {
               {renderAnswer(message.content, message.citations ?? [])}
               {message.citations && message.citations.length > 0 && (
                 <div className={styles.citations}>
-                  {message.citations.map((citation, n) => (
+                  {/* Số ở đây phải KHỚP marker trong câu (`citation.n`), không tự đánh lại
+                      thành [1..N]: đánh lại tạo hệ quy chiếu thứ hai cho `n` — đúng thứ vừa
+                      gây ra lỗi trỏ sai. Inline nói [12] thì list cũng phải nói [12]. */}
+                  {message.citations.map((citation) => (
                     <Link
                       key={citation.insight_id}
                       to={`/insights/${citation.insight_id}`}
                       className={styles.citationLink}
                     >
-                      [{n + 1}] {citation.title}
+                      [{citation.n}] {citation.title}
                     </Link>
                   ))}
                 </div>
