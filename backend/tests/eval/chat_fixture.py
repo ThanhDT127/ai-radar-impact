@@ -1,10 +1,18 @@
 """Fixture tự chứa cho bộ đo chất lượng câu trả lời chat (`chat-eval-quality-gate`).
 
-Ba mảnh, ba file — đọc được độc lập, sinh lại được bằng một lệnh:
+Năm mảnh, năm file — đọc được độc lập, sinh lại được bằng một lệnh:
 
-    chat_corpus.jsonl      toàn bộ insight `published` + `is_primary` (ảnh chụp corpus)
-    chat_anchors.jsonl     `normalized_content` của riêng những bài mà kịch bản mode B neo vào
-    chat_scenarios.jsonl   ~50 kịch bản gán nhãn tay (mode, câu hỏi, must_have, lý do)
+    chat_corpus.jsonl        toàn bộ insight `published` + `is_primary` (ảnh chụp corpus)
+    chat_anchors.jsonl       `normalized_content` của riêng những bài mà kịch bản mode B neo vào
+    chat_scenarios.jsonl     ~50 kịch bản gán nhãn tay (mode, câu hỏi, must_have, lý do)
+    chat_embeddings.jsonl    vector 768 chiều của từng insight (chat-hybrid-retrieval)
+    chat_query_vectors.jsonl vector 768 chiều của từng CÂU HỎI trong bộ kịch bản
+
+Hai file vector sinh ra cùng `chat-hybrid-retrieval` (27/07/2026) và tồn tại vì đúng một lý
+do: giữ bộ đo xếp hạng **miễn phí và tất định** sau khi `_rank` có tầng vector. Không có
+chúng, hoặc harness phải gọi Vertex mỗi lần chạy (mất "0 đồng, chạy trong pytest mặc định"),
+hoặc nó đo một `_rank` KHÔNG có tầng vector — tức là đo một pipeline không tồn tại trong
+production, và im lặng về việc đó.
 
 Vì sao corpus phải tự chứa (giống `gate_benchmark.jsonl`): bộ đo phải chạy được khi DB
 tắt, và phải đo trên **cùng một corpus** qua thời gian. Đo trên DB sống thì mỗi lần ingest
@@ -26,6 +34,8 @@ FIXTURE_DIR = Path(__file__).parent
 CORPUS_PATH = FIXTURE_DIR / "chat_corpus.jsonl"
 ANCHORS_PATH = FIXTURE_DIR / "chat_anchors.jsonl"
 SCENARIOS_PATH = FIXTURE_DIR / "chat_scenarios.jsonl"
+EMBEDDINGS_PATH = FIXTURE_DIR / "chat_embeddings.jsonl"
+QUERY_VECTORS_PATH = FIXTURE_DIR / "chat_query_vectors.jsonl"
 
 # Mọi field mà pipeline chat thật ĐỌC. Danh sách này là hợp đồng giữa fixture và code
 # sản phẩm — thiếu một field thì bộ đo vẫn chạy nhưng đo trên đầu vào nghèo hơn
@@ -100,6 +110,22 @@ def load_anchors(path: Path = ANCHORS_PATH) -> dict[str, str]:
     return {row["insight_id"]: row["normalized_content"] for row in _load_jsonl(path)}
 
 
+def load_embeddings(path: Path = EMBEDDINGS_PATH) -> dict[str, list[float]]:
+    """`insight_id → vector` cho tầng vector của `_rank` (chat-hybrid-retrieval).
+
+    **Ném lỗi khi thiếu file, không trả rỗng.** Thiếu embedding không làm bộ đo gãy — nó
+    làm `_rank` lặng lẽ rơi về lexical (đường suy giảm êm của D6) và cho ra một con số
+    trông hoàn toàn bình thường nhưng đo sai pipeline. Đúng loại lỗi mà harness sinh ra để
+    chặn, nên nó phải nổ.
+    """
+    return {row["insight_id"]: row["embedding"] for row in _load_jsonl(path)}
+
+
+def load_query_vectors(path: Path = QUERY_VECTORS_PATH) -> dict[str, list[float]]:
+    """`scenario_id → vector câu hỏi`. Đông lạnh để bộ đo không phải gọi Vertex."""
+    return {row["scenario_id"]: row["embedding"] for row in _load_jsonl(path)}
+
+
 def load_scenarios(path: Path = SCENARIOS_PATH) -> list[dict]:
     """Đọc bộ kịch bản + kiểm tính nhất quán của nhãn tay.
 
@@ -149,7 +175,9 @@ def _parse_dt(value) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
-def rehydrate(row: dict, content: str | None = None) -> Insight:
+def rehydrate(
+    row: dict, content: str | None = None, embedding: list[float] | None = None
+) -> Insight:
     """JSONL → `Insight` ORM **transient** (không session, không DB).
 
     Transient chứ không detached-persistent: object chưa từng có identity nên SQLAlchemy
@@ -162,14 +190,28 @@ def rehydrate(row: dict, content: str | None = None) -> Insight:
         fields[f] = _parse_dt(fields[f])
 
     insight = Insight(**fields)
+    # `None` là trạng thái HỢP LỆ ở production (tin chưa backfill) — giữ nguyên chứ không
+    # thay bằng vector 0, vì vector 0 là "chắc chắn không liên quan" chứ không phải "chưa biết".
+    insight.embedding = embedding
     if content is not None:
         insight.raw_document = RawDocument(normalized_content=content)
     return insight
 
 
 def rehydrate_corpus(
-    rows: list[dict], anchors: dict[str, str] | None = None
+    rows: list[dict],
+    anchors: dict[str, str] | None = None,
+    embeddings: dict[str, list[float]] | None = None,
 ) -> list[Insight]:
-    """Cả corpus dạng ORM; bài nào là anchor thì kèm luôn `normalized_content`."""
+    """Cả corpus dạng ORM; bài nào là anchor thì kèm luôn `normalized_content`.
+
+    `embeddings=None` → tự nạp từ fixture. Mặc định phải là "giống production", vì lối rơi
+    về lexical là một suy giảm ÊM: quên truyền embedding vào thì bộ đo vẫn chạy, vẫn ra số,
+    chỉ là số của một `_rank` khác. Truyền `{}` tường minh khi cố ý muốn đo lối lexical.
+    """
     anchors = anchors or {}
-    return [rehydrate(row, anchors.get(row["id"])) for row in rows]
+    if embeddings is None:
+        embeddings = load_embeddings()
+    return [
+        rehydrate(row, anchors.get(row["id"]), embeddings.get(row["id"])) for row in rows
+    ]

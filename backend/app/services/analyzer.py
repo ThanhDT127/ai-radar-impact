@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.gemini_client import GeminiClient
+from app.ai.embedding import build_embedding_text
+from app.ai.gemini_client import EMBED_TASK_DOCUMENT, GeminiClient
 from app.ai.prompts import (
     ALLOWED_ACTION_TYPES,
     ALLOWED_ADOPTION_RINGS,
@@ -350,7 +351,7 @@ class AnalyzerService:
         )
 
         # Create insight
-        await self.insight_repo.create(
+        insight = await self.insight_repo.create(
             raw_document_id=raw_doc.id,
             title=raw_doc.title or "Chưa có tiêu đề",
             summary_short=result.summary_short,
@@ -378,8 +379,45 @@ class AnalyzerService:
             practical_indicators=result.practical_indicators,
         )
 
+        self._attach_embedding(insight)
+
         await self.raw_doc_repo.update_status(raw_doc.id, "analyzed")
         return True
+
+    def _attach_embedding(self, insight) -> None:
+        """Sinh embedding cho insight vừa publish (chat-hybrid-retrieval, D6).
+
+        **Không bao giờ chặn việc tạo insight.** Embedding chỉ là phụ trợ cho xếp hạng
+        chat; một lỗi Vertex thoáng qua mà làm mất luôn cả insight thì đổi một suy giảm
+        nhỏ (tin đó tạm thời chỉ xếp hạng được bằng lexical) lấy một mất mát thật. `NULL`
+        là trạng thái hợp lệ và `app.scripts.embed_insights` vá lại được về sau.
+
+        Lượt embed này KHÔNG tính vào `max_daily_analysis` — bộ đếm đó đếm TÀI LIỆU qua
+        `raw_documents.analyzed_at`, và một lượt embed rẻ hơn lượt gate/analyze vài bậc.
+        """
+        text = build_embedding_text(insight)
+        if not text:
+            logger.warning("Insight %s không có text để embed — để NULL", insight.id)
+            return
+
+        # `GeminiClient.embed` tự nuốt lỗi Vertex, nhưng "không bao giờ chặn việc tạo
+        # insight" phải là bất biến của CHỖ NÀY, không phải một tính chất mượn từ nơi khác:
+        # bất cứ thứ gì ném ra ở đây — client không có hàm embed, lỗi lập trình, timeout
+        # tầng thread — đều làm `analyze_document` bỏ dở SAU KHI đã tốn hai lượt gọi model.
+        try:
+            vector = self.gemini.embed_one(text, EMBED_TASK_DOCUMENT)
+        except Exception as e:
+            logger.warning("Embed ném lỗi cho insight %s — để NULL: %s", insight.id, e)
+            return
+
+        if vector is None:
+            logger.warning(
+                "Embed lỗi cho insight %s — để embedding NULL, chạy "
+                "`python -m app.scripts.embed_insights` để vá sau",
+                insight.id,
+            )
+            return
+        insight.embedding = vector
 
     async def run_pending(self, limit: int = 50) -> dict[str, int]:
         """Process up to `limit` pending raw documents, subject to daily cap.

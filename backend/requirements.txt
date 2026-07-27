@@ -6,6 +6,9 @@ uvicorn[standard]==0.30.6
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 alembic==1.14.0
+# pgvector — kiểu cột `vector` cho ORM (chat-hybrid-retrieval). Cần kèm image Postgres có
+# extension pgvector (`pgvector/pgvector:pg16`); package Python một mình không đủ.
+pgvector==0.4.1
 
 # Scheduler (embedded auto-operation)
 apscheduler==3.10.4

@@ -109,6 +109,25 @@ BASELINE_META = {
         {
             "date": "2026-07-27",
             "reason": (
+                "`chat-hybrid-retrieval`: `_rank` đổi sang RRF(vector, lexical) ⇒ đổi context "
+                "⇒ đo lại TOÀN BỘ bằng `--live` (luật bắt buộc khi đụng `_rank`). "
+                "Faith 0,980→0,980 · AnsRel 0,930→0,910 · CitPrec giữ 1,000 · từ chối đúng 5/5 "
+                "· 77 lượt gọi sinh câu trả lời. Bộ nhãn thêm 2 kịch bản nhóm `semantic` "
+                "(rank-eol-khai-tu, rank-vram-semantic) đo đúng chế độ hỏng ⑥ chữa; cả hai "
+                "faith/ansrel/citprec đều tốt, `must_have` 4/6 — phần sót nằm ở TẦNG XẾP HẠNG "
+                "chứ không phải câu trả lời, và đó là việc của RS harness đo (xem "
+                "openspec/changes/chat-hybrid-retrieval/measurement.md §4). "
+                "⚠️ XUẤT XỨ: baseline này được SINH LẠI ngày 27/07 lúc tách commit — lượt "
+                "`--live` gốc của change đã bị lượt của `chat-latency-thinking-budget` ghi đè "
+                "trước khi kịp commit. Bản sinh lại chạy trên `google-genai` 1.75.0 với "
+                "`thinking_budget` KHÔNG đặt (hành vi tương đương bản 0.8.0 pin trong chính "
+                "commit này). Số vì thế lệch nhẹ so với lần đo gốc (Faith 0,990 · AnsRel "
+                "0,930) — chênh lệch đó là nhiễu judge giữa hai lượt, không phải hồi quy."
+            ),
+        },
+        {
+            "date": "2026-07-27",
+            "reason": (
                 "`chat-rank-stability` thêm 6 kịch bản probe (nhóm ascii_short/role_trap/"
                 "generic + ca 4b.2 mô hình mở) vào bộ nhãn dùng chung. Chỉ ĐO BÙ 6 câu mới — "
                 "56 câu cũ giữ nguyên câu trả lời vì bản sửa `_roles_in_question` chỉ đổi trục "

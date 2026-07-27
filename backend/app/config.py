@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     intent_classifier_model_id: str = "gemini-2.5-flash-lite"
     # Đặt "" để tắt tầng 2 → chỉ dùng luật tất định (lưỡng lự thì đi pipeline).
     intent_classifier_enabled: bool = True
+    # Embedding cho retrieval lai (chat-hybrid-retrieval). Multilingual, KHÔNG phải
+    # `text-embedding-004` thiên tiếng Anh: corpus trộn Việt–Anh kỹ thuật. Chiều 768 chốt
+    # cứng trong schema (`Insight.EMBEDDING_DIM`) — đổi model ở đây mà khác chiều thì phải
+    # đổi cột + backfill lại, không phải đổi một dòng env.
+    embedding_model_id: str = "text-multilingual-embedding-002"
+    # Tắt tầng vector (retrieval rơi hoàn toàn về lexical). Van xả khi Vertex embedding sự
+    # cố kéo dài — chat vẫn chạy, chỉ kém ngữ nghĩa (design D6).
+    chat_embedding_enabled: bool = True
 
     # Server
     backend_port: int = 8000

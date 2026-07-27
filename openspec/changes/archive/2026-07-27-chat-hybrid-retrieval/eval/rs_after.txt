@@ -1,0 +1,8 @@
+# rs_after.txt — RS harness SAU khi áp hybrid, chạy lúc CHỐT LẠI baseline
+#
+# Cột delta (▲/▼) so với baseline CŨ (40 câu, lexical thuần) — đó là phần đáng đọc.
+# Dòng VERDICT: FAIL ở cuối là ĐÚNG NHƯ MONG ĐỢI tại thời điểm đó: bộ kịch bản vừa thêm
+# 2 ca `semantic` khó nên tổng recall@60 thấp hơn baseline cũ, mà baseline cũ chưa biết
+# tới hai câu đó. Ngay sau lượt chạy này baseline được chốt lại ở mức mới và harness
+# chuyển PASS. So sánh trước/sau HỢP LỆ (cùng 42 câu) nằm ở rs_before.txt + measurement.md.
+

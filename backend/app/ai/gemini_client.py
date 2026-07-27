@@ -13,6 +13,7 @@ from google.genai import types
 from app.ai.prompts import ALLOWED_CONTENT_TYPES, build_gate_prompt, build_prompt
 from app.ai.schemas import build_gate_schema
 from app.config import settings
+from app.models.insight import EMBEDDING_DIM
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,18 @@ QUY TẮC:
   như "hoạt động thế nào", "hỗ trợ gì", "là ai", "dùng để làm gì".
 - Chào hoặc cảm ơn mà KÈM một câu hỏi thật thì là Q, không phải S/T.
 - Phân vân thì trả Q."""
+
+# --- Embedding cho retrieval lai (chat-hybrid-retrieval) -----------------------------
+# `task_type` KHÔNG phải trang trí: model sinh vector khác nhau cho câu hỏi và cho tài
+# liệu, và ghép đúng cặp QUERY↔DOCUMENT là cách dùng chuẩn của họ embedding này. Embed
+# cả hai bên bằng cùng một task_type vẫn chạy, chỉ kém — đúng loại lỗi im lặng.
+EMBED_TASK_QUERY = "RETRIEVAL_QUERY"
+EMBED_TASK_DOCUMENT = "RETRIEVAL_DOCUMENT"
+
+# Trần số chuỗi trong MỘT lượt gọi embed. Vertex giới hạn theo cả số instance lẫn tổng
+# token; 32 là mức an toàn cho text cô đọng của insight và vẫn cắt được ~179 tin xuống
+# 6 lượt gọi khi backfill.
+EMBED_BATCH_SIZE = 32
 
 # Ranh giới câu tiếng Việt cho lưới an toàn cuối cùng.
 _SENTENCE_END = ".!?…"
@@ -427,6 +440,85 @@ class GeminiClient:
                 raise
 
         raise RuntimeError("Chat stream 429 RESOURCE_EXHAUSTED after retries")
+
+    def embed(
+        self, texts: list[str], task_type: str = EMBED_TASK_DOCUMENT
+    ) -> list[list[float] | None]:
+        """Sinh embedding cho một lô text. Trả list CÙNG ĐỘ DÀI với `texts`.
+
+        Phần tử `None` = lô đó embed lỗi. **Không ném exception**: embedding là phụ trợ
+        xếp hạng, không phải đường sống (design D6). Cả `AnalyzerService` lẫn chat đều
+        phải chạy tiếp được khi Vertex embedding sự cố — nơi này trả `None`, nơi gọi log
+        WARNING rồi đi tiếp bằng đường lexical.
+
+        **KHÔNG đếm vào `model_calls`** — nghĩa là không tiêu `max_daily_chat_calls`.
+        Cùng lý do với bộ phân loại ý định tầng 2: bộ đếm đó canh budget của lượt sinh
+        văn bản đắt (~19k token trên `gemini-2.5-flash`). Một lượt embed là ~30–200 token
+        trên model embedding, rẻ hơn vài bậc; trộn chung là để lượt gọi rẻ bào mòn budget
+        đắt (đúng bẫy "đơn vị budget khác nhau" của repo).
+
+        SYNC như phần còn lại của client — caller trên request path phải bọc `to_thread`.
+        """
+        if not texts:
+            return []
+
+        out: list[list[float] | None] = []
+        for start in range(0, len(texts), EMBED_BATCH_SIZE):
+            batch = texts[start : start + EMBED_BATCH_SIZE]
+            out.extend(self._embed_batch(batch, task_type))
+        return out
+
+    def embed_one(
+        self, text: str, task_type: str = EMBED_TASK_DOCUMENT
+    ) -> list[float] | None:
+        """`embed()` cho đúng một chuỗi. `None` = lỗi hoặc text rỗng."""
+        if not text or not text.strip():
+            return None
+        return self.embed([text], task_type)[0]
+
+    def _embed_batch(
+        self, batch: list[str], task_type: str
+    ) -> list[list[float] | None]:
+        """Một lượt gọi embed + retry 429. Lỗi → trả `[None] * len(batch)`."""
+        _retry_delays = [3, 10]
+
+        for attempt, delay in enumerate([0] + _retry_delays):
+            if delay:
+                logger.info("Retrying embed after %ds (attempt %d/2)", delay, attempt)
+                time.sleep(delay)
+            try:
+                response = self._client.models.embed_content(
+                    model=settings.embedding_model_id,
+                    contents=batch,
+                    config=types.EmbedContentConfig(
+                        task_type=task_type,
+                        output_dimensionality=EMBEDDING_DIM,
+                        # Text dài hơn trần của model thì CẮT thay vì ném lỗi: một insight
+                        # dài bất thường không đáng để mất embedding của cả lô.
+                        auto_truncate=True,
+                    ),
+                )
+            except Exception as e:
+                err_str = str(e)
+                if ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str) and attempt < len(
+                    _retry_delays
+                ):
+                    logger.warning("Embed 429 rate-limit, will retry")
+                    continue
+                logger.warning("Embed lỗi (%d text): %s", len(batch), e)
+                return [None] * len(batch)
+
+            embeddings = list(response.embeddings or [])
+            if len(embeddings) != len(batch):
+                # Ghép sai vị trí còn tệ hơn không có embedding: nó gán vector của tin này
+                # cho tin khác và làm hỏng xếp hạng một cách im lặng.
+                logger.warning(
+                    "Embed trả %d vector cho %d text — bỏ cả lô", len(embeddings), len(batch)
+                )
+                return [None] * len(batch)
+            return [list(e.values) if e.values else None for e in embeddings]
+
+        return [None] * len(batch)
 
     def classify_intent(self, question: str) -> str | None:
         """Tầng 2 của bộ lọc ý định: model NHẸ phán ca luật lưỡng lự (~3,5% câu hỏi).

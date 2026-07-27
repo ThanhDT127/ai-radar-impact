@@ -10,16 +10,28 @@ test chat hiện có đều bảo vệ *cơ chế* (grounding, quota, mode routi
 CHẠY
     docker compose exec backend python -m tests.eval.chat_rank_harness      # báo cáo đầy đủ
     docker compose exec backend python -m tests.eval.chat_rank_harness --freeze-baseline
+    docker compose exec backend python -m tests.eval.chat_rank_harness --lexical-only
     docker compose exec backend python -m pytest tests/eval/ -q             # chạy luôn trong suite
 
 **KHÔNG có `--live`, không tốn đồng nào, không đụng model.** Khác `tests.eval.harness` (gate) và
 `tests.eval.chat_answer_harness` (chất lượng câu trả lời) ở đúng điểm đó: thứ đo ở đây là **code
 của chúng ta**, không phải phán đoán của model. Nên nó chạy được trong `pytest` mặc định.
 
+Bất biến "miễn phí" vẫn đứng sau khi `_rank` có tầng vector (`chat-hybrid-retrieval`,
+27/07/2026): vector của corpus VÀ của từng câu hỏi đều **đông lạnh trong fixture**
+(`chat_embeddings.jsonl`, `chat_query_vectors.jsonl`), nên harness không gọi Vertex lần nào và
+`_NoModel` vẫn nổ nếu ai đó lỡ tay gọi model. Thêm kịch bản mới ⇒ phải chạy lại
+`build_fixture_chat` để sinh vector câu hỏi, không thì harness NỔ chứ không lặng lẽ đo lối lexical.
+
+`--lexical-only` đo đúng pipeline **trước** khi có tầng vector (truyền vector rỗng), dùng để dựng
+cột "trước" trong bảng so sánh trước/sau. Nó KHÔNG phải một chế độ chạy hằng ngày.
+
 KHI NÀO **BẮT BUỘC** CHẠY LẠI
     Sửa bất kỳ thứ nào sau đây: `_rank`, `_relevance`, `_question_terms`, `_roles_in_question`,
     `STOPWORDS` (`chat_service_terms.py`), `score_for_role` / `role_urgency` /
-    `has_practical_indicator` (`delivery_engine.py`), hoặc `settings.chat_index_top_k`.
+    `has_practical_indicator` (`delivery_engine.py`), `settings.chat_index_top_k`, hoặc bất cứ
+    thứ gì đụng tới tầng vector: `RRF_K`, `_cosine`, `_competition_ranks`, `_vector_ranks`,
+    `build_embedding_text`, `settings.embedding_model_id`.
     Harness đọc K từ `settings.chat_index_top_k` chứ không chép cứng — đổi K là đổi phép đo.
 
 LUẬT BASELINE
@@ -53,6 +65,7 @@ from app.services.chat_service import ChatService, _question_terms, _roles_in_qu
 from tests.eval.chat_fixture import (
     FIXTURE_DIR,
     load_corpus,
+    load_query_vectors,
     load_scenarios,
     rehydrate_corpus,
 )
@@ -62,9 +75,32 @@ BASELINE_PATH = FIXTURE_DIR / "chat_rank_baseline.json"
 BASELINE_META = {
     "measured_at": "2026-07-27",
     "commit": "a00fe2e",
-    "corpus": "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary",
+    "corpus": (
+        "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary; "
+        "vector từ chat_embeddings.jsonl + chat_query_vectors.jsonl (chat-hybrid-retrieval)"
+    ),
     "note": "chốt trên code CHƯA sửa (`_roles_in_question` còn khớp chuỗi con)",
     "revisions": [
+        {
+            "date": "2026-07-27",
+            "recall_at_k": "0,988 → 0,970",
+            "recall_at_answer": "0,812 → 0,859",
+            "reason": (
+                "`chat-hybrid-retrieval`: tầng độ‑liên‑quan đổi từ lexical thuần sang RRF "
+                "(vector + lexical). ⚠️ Hai con số 'trước' ở đây KHÔNG so được với dòng trên: "
+                "bộ kịch bản vừa thêm 2 ca nhóm `semantic` (42 câu thay vì 40), và cả hai câu "
+                "mới đều là ca khó (0,50 và 0,50 ở lexical) nên chúng KÉO TỔNG XUỐNG chứ không "
+                "phải hybrid làm tụt. So sánh đúng là trên cùng 42 câu, đo bằng "
+                "`--lexical-only` cùng ngày: recall@60 0,964 → 0,970, recall@5 0,780 → 0,859, "
+                "và KHÔNG câu nào tụt. "
+                "Thắng rõ nhất (recall@5): `rank-devops-trap` 0,00 → 1,00 (hạng 47 → 1), "
+                "`glo-supply-chain` 0,00 → 1,00, `rank-device-trap` 0,50 → 1,00, "
+                "`exp-nettacker-to-vnpost` 0,50 → 1,00, `rank-open-source-models` 0,00 → 0,33. "
+                "Còn sót: `rank-eol-khai-tu` đứng yên 0,50 — embedding không nối được thành ngữ "
+                "'khai tử' với 'end of support'. Chi tiết per‑câu ở "
+                "openspec/changes/chat-hybrid-retrieval/eval/."
+            ),
+        },
         {
             "date": "2026-07-27",
             "recall_at_k": "1,000 → 0,988",
@@ -108,10 +144,10 @@ class _NoModel:
         )
 
 
-def _rank(candidates: list, question: str) -> list:
+def _rank(candidates: list, question: str, query_vector: list | None = None) -> list:
     """`ChatService._rank` thật, gắn vào một service không có DB và không có model."""
     service = ChatService(session=None, gemini=_NoModel())
-    return service._rank(candidates, question)
+    return service._rank(candidates, question, query_vector)
 
 
 def _candidates(scenario: dict, corpus: list) -> list:
@@ -126,19 +162,33 @@ def _candidates(scenario: dict, corpus: list) -> list:
     return list(corpus)
 
 
-def measure(scenarios: list[dict] | None = None) -> dict:
-    """Chạy `_rank()` thật trên fixture. Không gọi model, tất định."""
+def measure(scenarios: list[dict] | None = None, use_vectors: bool = True) -> dict:
+    """Chạy `_rank()` thật trên fixture. Không gọi model, tất định.
+
+    `use_vectors=False` tắt tầng vector ở CẢ HAI phía (corpus và câu hỏi) để tái hiện
+    pipeline trước `chat-hybrid-retrieval` — chỉ dùng cho bảng so sánh trước/sau.
+    """
     scenarios = scenarios if scenarios is not None else load_scenarios()
     # Mode B không đi qua `_rank` (context là đúng 1 bài) — đo nó ở đây là đo cái không tồn tại.
     scenarios = [s for s in scenarios if s["mode"] != "insight"]
 
-    corpus = rehydrate_corpus(load_corpus())
+    corpus = rehydrate_corpus(load_corpus(), embeddings=None if use_vectors else {})
+    query_vectors = load_query_vectors() if use_vectors else {}
+    if use_vectors:
+        missing = [s["id"] for s in scenarios if s["id"] not in query_vectors]
+        if missing:
+            raise ValueError(
+                f"{len(missing)} kịch bản chưa có vector câu hỏi ({missing[:5]}). Chạy "
+                "`python -m tests.eval.build_fixture_chat` sau khi thêm kịch bản — đo tiếp "
+                "sẽ cho những câu đó đi lối lexical và số sẽ sai một cách im lặng."
+            )
+
     top_k = settings.chat_index_top_k
     rows = []
 
     for scenario in scenarios:
         candidates = _candidates(scenario, corpus)
-        ranked = _rank(candidates, scenario["question"])
+        ranked = _rank(candidates, scenario["question"], query_vectors.get(scenario["id"]))
         position = {str(insight.id): n for n, insight in enumerate(ranked, start=1)}
         selected = {str(i.id) for i in (ranked[:top_k] if top_k > 0 else ranked)}
 
@@ -313,9 +363,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark recall xếp hạng chat (0 lượt gọi model)")
     parser.add_argument("--freeze-baseline", action="store_true",
                         help="ghi kết quả hiện tại thành baseline — CÓ CHỦ ĐÍCH, kèm lý do")
+    parser.add_argument("--lexical-only", action="store_true",
+                        help="tắt tầng vector (tái hiện pipeline trước chat-hybrid-retrieval)")
     args = parser.parse_args()
 
-    result = measure()
+    if args.lexical_only and args.freeze_baseline:
+        raise SystemExit(
+            "Không chốt baseline từ lượt --lexical-only: baseline phải mô tả pipeline THẬT."
+        )
+
+    result = measure(use_vectors=not args.lexical_only)
+    if args.lexical_only:
+        print("⚠️  LƯỢT ĐO KHÔNG CÓ TẦNG VECTOR — chỉ để dựng cột 'trước'.\n")
     baseline = load_baseline()
     print(format_report(result, baseline))
 

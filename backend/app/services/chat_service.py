@@ -17,11 +17,17 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.ai.gemini_client import ChatStreamState, GeminiClient, get_chat_client
+from app.ai.gemini_client import (
+    EMBED_TASK_QUERY,
+    ChatStreamState,
+    GeminiClient,
+    get_chat_client,
+)
 from app.ai.prompts import (
     ALLOWED_ROLES,
     CHAT_SYSTEM_PROMPT,
@@ -62,6 +68,14 @@ logger = logging.getLogger(__name__)
 # tính budget. Trần bước 2 × trần 2 lượt/bước ⇒ tối đa 4 lượt tính tiền cho một câu hỏi,
 # vẫn có biên, vẫn không thành vòng lặp.
 MAX_MODEL_CALLS_PER_QUESTION = 2
+
+# Hằng số làm phẳng của Reciprocal Rank Fusion: `1/(RRF_K + rank)`. 60 là giá trị chuẩn
+# trong tài liệu gốc và điều nó mua là **chống nhiễu ở đỉnh** — chênh lệch giữa hạng 1 và
+# hạng 2 chỉ 1/61 − 1/62, nên một tín hiệu xếp sai một bậc không lật được kết quả.
+#
+# ⚠️ Trùng số 60 với `settings.chat_index_top_k` là NGẪU NHIÊN, hai thứ không liên quan:
+# đây là hằng số làm phẳng, kia là số tin đưa vào prompt. Đổi K không được đổi số này.
+RRF_K = 60
 
 # --- Sự kiện tiến trình (design D3/D4) ------------------------------------------------
 # Phát từ MỐC THẬT của pipeline, không phải chuỗi trang trí chạy theo đồng hồ. Lý do tồn
@@ -201,6 +215,42 @@ def _question_terms(question: str) -> list[str]:
     """
     words = re.findall(r"[0-9a-zA-ZÀ-ỹ]+", question.lower())
     return [w for w in words if len(w) >= 2 and w not in _STOPWORDS]
+
+
+def _cosine(a, b) -> float:
+    """Cosine similarity giữa hai vector. Trả 0.0 nếu một bên là vector không.
+
+    Nhận cả `list[float]` (fixture, JSON) lẫn `numpy.ndarray` (pgvector trả về) — hai đường
+    này gặp nhau ở đây nên phép quy đổi phải nằm đúng một chỗ.
+    """
+    va, vb = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    norm = float(np.linalg.norm(va) * np.linalg.norm(vb))
+    if norm == 0.0:
+        return 0.0
+    return float(np.dot(va, vb) / norm)
+
+
+def _competition_ranks(scores: list[float]) -> list[int]:
+    """Thứ hạng 1..N theo điểm giảm dần, **điểm bằng nhau thì hạng bằng nhau**.
+
+    Bắt buộc phải là competition ranking chứ không phải `enumerate` trên danh sách đã sort:
+    tầng lexical cho rất nhiều tin cùng điểm 0 (câu hỏi không nhắc từ khoá nào của chúng), và
+    nếu phá hoà bằng thứ tự tình cờ trong list thì RRF nhận một tín hiệu NGẪU NHIÊN — tin nào
+    tình cờ đứng trước trong kết quả SQL được cộng điểm. Hạng bằng nhau thì đóng góp RRF bằng
+    nhau, và việc phân định nhường lại cho tầng vector và khoá phụ `score_for_role`.
+    """
+    order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+    ranks = [0] * len(scores)
+    prev_score = None
+    prev_rank = 0
+    for position, idx in enumerate(order, start=1):
+        if prev_score is not None and scores[idx] == prev_score:
+            ranks[idx] = prev_rank
+        else:
+            ranks[idx] = position
+            prev_rank = position
+            prev_score = scores[idx]
+    return ranks
 
 
 def _relevance(insight: Insight, terms: list[str]) -> int:
@@ -419,12 +469,15 @@ class ChatService:
 
         matched = await self.insight_repo.list_for_chat(published_since=since)
         asked_roles = _roles_in_question(question)
+        # Chế độ mở rộng của `chat-scope-routing` đi qua đúng hàm này, nên nó hưởng luôn
+        # recall ngữ nghĩa mà không cần một đường truy hồi riêng (task 4.4).
+        query_vector = await self._embed_question(question)
         # Chế độ mở rộng: bài đang xem đi kèm dạng block đầy đủ ở [1], nên phải loại nó
         # khỏi index toàn cục — không thì cùng một tin xuất hiện hai lần với hai số khác
         # nhau và citation trỏ trùng.
         if focus is not None:
             matched = [i for i in matched if i.id != focus.insight.id]
-        matched = self._rank(matched, question)
+        matched = self._rank(matched, question, query_vector)
 
         # ⚠️ Tính "vai trò không có tin" trên TOÀN BỘ tập khớp, TRƯỚC khi cắt top-K.
         # Nếu tính sau khi cắt, một vai trò có tin nhưng xếp hạng dưới ngưỡng sẽ bị
@@ -441,8 +494,11 @@ class ChatService:
         # đây là quan sát, không phải lỗi. Log này cũng là dữ liệu để quyết có cần bảng đồng
         # nghĩa vai trò không (design D6: `developer` hiện KHÔNG kích hoạt trục `Dev`).
         logger.debug(
-            "Trục xếp hạng: %s | %d/%d ứng viên | vai trò rỗng: %s",
+            "Trục xếp hạng: %s | truy hồi: %s | %d/%d ứng viên | vai trò rỗng: %s",
             ", ".join(asked_roles) if asked_roles else "(không có vai trò — dùng affected_roles)",
+            # Phân biệt lượt chạy lai với lượt đã rơi về lexical: suy giảm êm mà không để
+            # lại dấu vết nào thì một sự cố embedding kéo dài trông y hệt "chat hơi kém".
+            "lai (vector+lexical)" if query_vector is not None else "CHỈ LEXICAL (embed vắng)",
             min(len(matched), settings.chat_index_top_k) if settings.chat_index_top_k > 0 else len(matched),
             len(matched),
             ", ".join(empty_roles) or "không",
@@ -504,7 +560,12 @@ class ChatService:
         answer, citations = enforce_grounding(answer, citations)
         return answer, citations
 
-    def _rank(self, insights: list[Insight], question: str) -> list[Insight]:
+    def _rank(
+        self,
+        insights: list[Insight],
+        question: str,
+        query_vector: list[float] | None = None,
+    ) -> list[Insight]:
         """Xếp hạng: ĐỘ LIÊN QUAN tới câu hỏi trước, rồi mới tới độ quan trọng chung.
 
         Tầng độ-quan-trọng dùng lại `score_for_role` của delivery — KHÔNG tự chế tiêu
@@ -518,12 +579,52 @@ class ChatService:
         mở" còn **2/18 tin (11%)** — tin mã nguồn mở urgency thấp nên nằm hết ở đuôi và
         bị cắt sạch. Tệ hơn nữa là nó IM LẶNG: model vẫn trả lời trôi chảy từ 2 tin sót
         lại. Trộn độ liên quan vào khoá xếp hạng đưa recall lên ~90%.
+
+        **Tầng độ-liên-quan nay là LAI (chat-hybrid-retrieval, 27/07/2026)**: trộn thứ
+        hạng lexical (`_relevance`, khớp biên từ) với thứ hạng vector (cosine embedding)
+        bằng Reciprocal Rank Fusion `1/(60 + rank)`. Lý do là chế độ hỏng còn lại của bản
+        thuần keyword: hỏi "cắt giảm nhân sự" trong khi tin ghi *layoff* thì `_relevance`
+        trả 0 và tin đúng nằm ở đuôi — mù đồng nghĩa, và im lặng y hệt ca 42% ở trên.
+
+        Vì sao **RRF chứ không cộng điểm thô**: cosine và số-từ-khoá-khớp không cùng thang
+        đo, chuẩn hoá chúng về một thang là bịa ra một hằng số không ai kiểm được. RRF chỉ
+        đọc THỨ HẠNG nên miễn nhiễm với chuyện đó.
+
+        Vì sao **giữ cả lexical** thay vì thay hẳn bằng vector: vector kém ở khớp CHÍNH XÁC
+        (tên model, mã CVE, số phiên bản) — đúng loại câu hỏi hay gặp ở đây. RRF giữ được
+        cả hai điểm mạnh; đó là lý do dùng *hybrid* chứ không *vector-only*.
+
+        **KHÔNG ngưỡng similarity** (design D3): vector chỉ để xếp hạng TỐT HƠN, không để
+        lọc. Vẫn cắt top-K nên tập ứng viên không bao giờ rỗng vì "không tin nào đủ giống" —
+        ngưỡng cứng sẽ tái sinh đúng cái chế độ hỏng change này đang chữa.
+
+        `query_vector=None` (embed lỗi, hoặc tắt bằng `chat_embedding_enabled`) → tầng
+        vector biến mất và thứ tự **trùng khít bản lexical cũ**: RRF trên một tín hiệu là
+        hàm đơn điệu của chính thứ hạng đó. Suy giảm êm theo đúng nghĩa đen, không phải một
+        đường xếp hạng thứ hai chạy song song (design D6).
         """
         if not insights:
             return []
 
         terms = _question_terms(question)
         roles = _roles_in_question(question)
+
+        # Câu hỏi KHÔNG mang từ nội dung nào ("Có gì mới không?", "Có tin AI nào không?" —
+        # `ai` là stopword vì trùng đại từ tiếng Việt) thì embedding của nó là **nhiễu**:
+        # không có chủ đề để mà giống. Xếp hạng ở đây phải rơi về độ quan trọng, đúng như
+        # thiết kế cũ — `_relevance` trả 0 cho tất cả cũng chính là để nhường cho
+        # `score_for_role`.
+        #
+        # Đo 27/07/2026: bỏ cổng này thì `rank-generic` ("Có gì mới không?") tụt recall@5
+        # từ 1,00 xuống 0,00 — tin CISA ra lệnh vá khẩn rơi xuống hạng 23 để nhường chỗ cho
+        # những tin có embedding tình cờ gần một câu hỏi rỗng nghĩa. Tức là tầng vector
+        # **đè** tầng độ quan trọng bằng nhiễu.
+        #
+        # ⚠️ Điều kiện là "câu hỏi rỗng từ khoá", KHÔNG phải "không tin nào khớp từ khoá".
+        # Câu tiếng Việt hỏi về corpus tiếng Anh cho `_relevance` = 0 ở mọi tin nhưng vẫn có
+        # nội dung ngữ nghĩa thật — đó đúng là ca tầng vector sinh ra để cứu.
+        if not terms:
+            query_vector = None
 
         def importance(insight: Insight) -> tuple:
             if roles:
@@ -533,11 +634,92 @@ class ChatService:
                 default=score_for_role(insight, "Toàn công ty"),
             )
 
-        return sorted(
-            insights,
-            key=lambda i: (_relevance(i, terms), importance(i)),
+        lexical_ranks = _competition_ranks([_relevance(i, terms) for i in insights])
+        vector_ranks = self._vector_ranks(insights, query_vector)
+
+        def rrf(index: int) -> float:
+            rank_lexical = lexical_ranks[index]
+            # Tin không có tầng vector (chưa backfill, embed lỗi, hoặc cả lượt này không có
+            # vector câu hỏi) mượn CHÍNH thứ hạng lexical của nó cho số hạng thứ hai —
+            # "thiếu thông tin thì giả định tín hiệu vắng mặt đồng ý với tín hiệu đang có".
+            #
+            # ⚠️ Bỏ hẳn số hạng đó đi (cách viết đầu tiên) là một hình phạt NGẦM và rất nặng:
+            # tin thiếu vector chỉ được cộng một nửa số điểm, nên nó thua cả khi khớp từ khoá
+            # chính xác. Test `test_insight_without_embedding_is_not_dropped` bắt đúng ca đó:
+            # tin khớp `kubernetes` nhưng chưa embed thua một tin lạc đề đã embed. Trong cửa
+            # sổ backfill (nhiều tin NULL) điều đó thành một thiên lệch hệ thống, im lặng.
+            #
+            # Cho cosine = 0 cũng sai theo hướng khác: 0 là một thứ hạng THẬT ở cuối bảng,
+            # tức là biến "chưa biết" thành "chắc chắn không liên quan".
+            rank_vector = vector_ranks[index]
+            if rank_vector is None:
+                rank_vector = rank_lexical
+            return 1.0 / (RRF_K + rank_lexical) + 1.0 / (RRF_K + rank_vector)
+
+        order = sorted(
+            range(len(insights)),
+            key=lambda idx: (rrf(idx), importance(insights[idx])),
             reverse=True,
         )
+        return [insights[idx] for idx in order]
+
+    @staticmethod
+    def _vector_ranks(
+        insights: list[Insight], query_vector: list[float] | None
+    ) -> list[int | None]:
+        """Thứ hạng theo cosine với câu hỏi. `None` = tin này không có tầng vector.
+
+        Tin `embedding IS NULL` (chưa backfill, hoặc embed lỗi lúc publish) nhận `None` chứ
+        KHÔNG bị loại: nó vẫn cạnh tranh đầy đủ ở tầng lexical và vẫn có thể lọt top-K
+        (design D6). Cho nó cosine 0 thay vì `None` sẽ tệ hơn — 0 là một thứ hạng THẬT ở
+        cuối bảng, tức là biến "chưa biết" thành "chắc chắn không liên quan".
+
+        Xếp hạng tính trong Python trên tập ứng viên đã nạp sẵn, không phải bằng `ORDER BY
+        embedding <=> :q` trong SQL. Cố ý: `_rank` phải là hàm THUẦN để RS harness đo được
+        offline, miễn phí, tất định. Ở quy mô vài nghìn tin thì 179×768 phép nhân là vài
+        mili‑giây — đắt hơn nhiều là lượt gọi model 5–22s ngay sau đó.
+
+        Cái giá đã biết: mỗi câu hỏi toàn cục kéo thêm ~550KB vector từ Postgres (179 tin ×
+        768 × 4 byte). Chấp nhận được ở quy mô này và vẫn nhỏ so với 5–22s chờ model; khi
+        corpus tới hàng chục nghìn tin thì đây mới là lúc đẩy phần lọc thô xuống index HNSW
+        đã dựng sẵn ở migration 012, và khi đó phải nghĩ lại cách RS harness đo.
+        """
+        if query_vector is None:
+            return [None] * len(insights)
+
+        indexed = [(idx, i) for idx, i in enumerate(insights) if i.embedding is not None]
+        if not indexed:
+            return [None] * len(insights)
+
+        similarities = [_cosine(query_vector, i.embedding) for _, i in indexed]
+        ranks = _competition_ranks(similarities)
+        out: list[int | None] = [None] * len(insights)
+        for (idx, _), rank in zip(indexed, ranks):
+            out[idx] = rank
+        return out
+
+    async def _embed_question(self, question: str) -> list[float] | None:
+        """Embedding của câu hỏi cho tầng vector. `None` = xếp hạng bằng lexical thôi.
+
+        Không bao giờ ném lỗi ra ngoài: embedding là phụ trợ xếp hạng, không phải đường
+        sống của chat (design D6). Vertex embedding sự cố thì câu trả lời chỉ kém ngữ
+        nghĩa hơn tạm thời — đổi lấy một HTTP 500 là đổi sai.
+
+        Lượt gọi này KHÔNG cộng vào `self._calls_used`: bộ đếm đó canh budget lượt sinh văn
+        bản đắt (`max_daily_chat_calls`). Xem `GeminiClient.embed`.
+        """
+        if not settings.chat_embedding_enabled:
+            return None
+        try:
+            return await asyncio.to_thread(
+                self.gemini.embed_one, question, EMBED_TASK_QUERY
+            )
+        except Exception as e:
+            # `GeminiClient.embed` đã tự nuốt lỗi Vertex, nên tới đây là những thứ nó không
+            # lường: client không có hàm `embed_one` (fake trong test cũ), lỗi lập trình,
+            # timeout ở tầng thread. Vẫn không được để nổ ra ngoài — lý do y hệt.
+            logger.warning("Embed câu hỏi lỗi, xếp hạng bằng lexical: %s", e)
+            return None
 
     async def _call_model(self, prompt: str, hold_sentinel: bool = False) -> str:
         """Gọi Gemini NGOÀI event loop — chat nằm trên request path (design D6).

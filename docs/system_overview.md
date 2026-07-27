@@ -306,6 +306,27 @@ Frontend hiển thị:
 docker-compose up -d
 ```
 
+> ⚠️ **Image Postgres phải có pgvector** — `pgvector/pgvector:pg16`, không phải `postgres:16`
+> trần. Migration `012` chạy `CREATE EXTENSION vector` cho cột `insights.embedding` (chat
+> hybrid retrieval); image không có extension thì `alembic upgrade head` đỏ ngay ở bước đó.
+>
+> Nếu đang nâng cấp một volume `pgdata` cũ tạo bằng `postgres:16-alpine`: alpine dùng musl,
+> image pgvector dùng glibc, hai libc sắp xếp `en_US.utf8` khác nhau ⇒ chạy
+> `docker compose exec db psql -U radar -d ai_radar -c "REINDEX DATABASE ai_radar;"` một lần
+> sau khi đổi. Dữ liệu giữ nguyên, không phải dump/restore.
+
+### Backfill embedding (sau migration 012, hoặc sau khi ingest hàng loạt)
+
+Migration chỉ tạo **cột rỗng** — nó cố ý không gọi Vertex để `alembic upgrade head` chạy được
+offline. Tin mới tự có embedding lúc phân tích; tin cũ vá bằng:
+
+```powershell
+docker-compose exec backend python -m app.scripts.embed_insights
+```
+
+Chạy lại được nhiều lần (chỉ đụng tin đang thiếu). Thiếu embedding **không** làm chat gãy —
+tin đó vẫn tìm được bằng từ khoá, chỉ kém phần ngữ nghĩa.
+
 ### Seed source
 
 ```powershell
@@ -409,6 +430,11 @@ Widget 💬 ở góc phải dưới mọi trang dashboard. Hai chế độ trên
   quan tới câu hỏi trước, độ quan trọng sau), **cắt lấy 60 tin đầu** (`CHAT_INDEX_TOP_K`) rồi nén
   thành danh sách đánh số đưa vào một lần gọi Gemini — không có "tìm kiếm" riêng, model đọc thẳng
   danh sách đã xếp sẵn. Nhờ cắt top-K nên kho tin lớn lên không làm câu hỏi đắt thêm.
+
+  Từ 27/07/2026 tầng "độ liên quan" là **lai**: trộn khớp từ khoá với **tương đồng ngữ nghĩa**
+  (embedding). Nhờ vậy câu hỏi diễn đạt khác chữ trong tin vẫn tìm ra — hỏi "DevOps cần chú ý gì"
+  thì checklist Kubernetes (không hề chứa chữ "DevOps") vẫn lên đầu. **Không có ngưỡng loại tin**:
+  hệ thống luôn trả về 60 tin tốt nhất chứ không bao giờ báo "không đủ giống".
 
 Câu trả lời luôn kèm marker `[n]` bấm được, dẫn tới đúng tin nguồn. Không có dữ liệu thì bot nói
 "không tìm thấy trong hệ thống" thay vì đoán bừa.
