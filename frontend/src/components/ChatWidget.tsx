@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useMatch } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
-import { postChat, type ChatTurn, type Citation } from '../api/chat';
+import { useQueryClient } from '@tanstack/react-query';
+import { streamChat, type ChatTurn, type Citation } from '../api/chat';
 import { fetchInsightById } from '../api/insights';
 import { parseAnswer } from './chatAnswer';
 import styles from './ChatWidget.module.css';
@@ -26,6 +25,20 @@ const EMPTY_THREAD: Message[] = [];
 const QUOTA_MESSAGE =
   'Đã hết lượt hỏi trong ngày hôm nay. Bạn quay lại vào ngày mai nhé, hoặc xem trực tiếp trên dashboard.';
 const NETWORK_MESSAGE = 'Không gửi được câu hỏi. Kiểm tra kết nối rồi thử lại nhé.';
+
+/**
+ * Câu trả lời đang chảy về. Nằm NGOÀI `threads` có chủ đích: chỉ câu đã chốt mới được
+ * nhập luồng. Nhờ vậy phần dở không bao giờ lọt vào `history` gửi lên ở lượt sau, và huỷ
+ * giữa chừng (đổi scope) chỉ cần vứt object này đi.
+ *
+ * `scope` là scope ĐÃ HỎI, không phải scope đang xem — người dùng có thể đổi bài trong lúc
+ * chờ, và bong bóng phải ở lại đúng luồng của nó.
+ */
+interface Pending {
+  scope: string;
+  text: string;
+  status: string | null;
+}
 
 /** Marker `[n]` → link tới insight mang đúng `n` đó. Logic giải marker ở `chatAnswer.ts`. */
 function renderAnswer(content: string, citations: Citation[]) {
@@ -54,7 +67,9 @@ export default function ChatWidget() {
   const [input, setInput] = useState('');
   const [contextDropped, setContextDropped] = useState(false);
   const [contextTitle, setContextTitle] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const queryClient = useQueryClient();
 
   // Insight đang mở lấy từ route — widget nằm trong Layout nên không nhận được props
@@ -99,7 +114,16 @@ export default function ChatWidget() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, open]);
+  }, [messages, pending, open]);
+
+  // Đổi scope giữa luồng đang stream → HUỶ (design D6). Không huỷ thì phần dở vẫn chảy về
+  // và người dùng thấy câu trả lời của bài cũ trong khung của bài mới — đúng loại nhầm lẫn
+  // mà `chat-context-isolation` (①) sinh ra để chặn.
+  useEffect(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setPending(null);
+  }, [scopeKey]);
 
   // Ghi message vào luồng của scope chỉ định. Dùng `key` cố định thay vì scope hiện tại: câu
   // trả lời có thể về sau khi người dùng đã đổi bài, và phải rơi vào luồng đã hỏi, không phải
@@ -108,11 +132,11 @@ export default function ChatWidget() {
     setThreads((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), message] }));
   }
 
-  const mutation = useMutation({ mutationFn: postChat });
-
   function send(question: string) {
     const trimmed = question.trim();
-    if (!trimmed || mutation.isPending) return;
+    // Chặn gửi trùng khi luồng chưa xong — thundering herd của Nguy hiểm #1 chính là người
+    // dùng bấm Gửi nhiều lần vì tưởng treo.
+    if (!trimmed || pending) return;
 
     const targetScope = scopeKey;
     const insightId = activeInsightId;
@@ -125,26 +149,46 @@ export default function ChatWidget() {
 
     appendToScope(targetScope, { role: 'user', content: trimmed });
     setInput('');
-    mutation.mutate(
+    setPending({ scope: targetScope, text: '', status: null });
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    /** Kết thúc luồng: nhập một message vào luồng đã hỏi rồi dọn trạng thái tạm. */
+    function settle(message: Message) {
+      if (controller.signal.aborted) return;
+      appendToScope(targetScope, message);
+      setPending(null);
+      abortRef.current = null;
+    }
+
+    streamChat(
       { question: trimmed, history, insight_id: insightId },
       {
-        onSuccess: (data) =>
-          appendToScope(targetScope, {
+        onStatus: (text) =>
+          setPending((p) => (p && !controller.signal.aborted ? { ...p, status: text } : p)),
+        onToken: (text) =>
+          setPending((p) =>
+            p && !controller.signal.aborted ? { ...p, text: p.text + text } : p,
+          ),
+        // `answer` của sự kiện chốt THAY phần đã stream, không nối thêm: nó là bản đã qua
+        // grounding, và ở ca fail-closed nó là một câu hoàn toàn khác (design D2).
+        onCommit: (data) =>
+          settle({
             role: 'assistant',
             content: data.answer,
             citations: data.citations,
             expanded: data.mode === 'expanded',
           }),
-        onError: (error) => {
-          const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-          appendToScope(targetScope, {
+        onError: (code, message) =>
+          settle({
             role: 'assistant',
-            content: status === 429 ? QUOTA_MESSAGE : NETWORK_MESSAGE,
+            content: code === 'quota' ? QUOTA_MESSAGE : message,
             isError: true,
-          });
-        },
+          }),
       },
-    );
+      controller.signal,
+    ).catch(() => settle({ role: 'assistant', content: NETWORK_MESSAGE, isError: true }));
   }
 
   function retryLast() {
@@ -253,8 +297,17 @@ export default function ChatWidget() {
           ),
         )}
 
-        {mutation.isPending && (
-          <div className={styles.bubbleBot}>Đang tìm trong hệ thống…</div>
+        {/* Bong bóng đang chảy. Có token thì hiện token; chưa có thì hiện MỐC TIẾN TRÌNH
+            thật do server phát. Khoảng đầu (5–35s đo thật) là lúc model đang thinking, chưa
+            sinh token nào — status lấp đúng khoảng đó, thay cho spinner một dòng cố định. */}
+        {pending && pending.scope === scopeKey && (
+          <div className={styles.bubbleBot}>
+            {pending.text ? (
+              renderAnswer(pending.text, [])
+            ) : (
+              <span className={styles.status}>{pending.status ?? 'Đang gửi câu hỏi…'}</span>
+            )}
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -273,7 +326,7 @@ export default function ChatWidget() {
           placeholder="Nhập câu hỏi…"
           aria-label="Câu hỏi"
         />
-        <button type="submit" className={styles.sendBtn} disabled={mutation.isPending}>
+        <button type="submit" className={styles.sendBtn} disabled={pending !== null}>
           Gửi
         </button>
       </form>

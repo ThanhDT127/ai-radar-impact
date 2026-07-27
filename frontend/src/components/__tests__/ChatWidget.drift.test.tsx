@@ -13,9 +13,12 @@ import ChatWidget from '../ChatWidget';
 // khoá: `history` gửi lên CHỈ được chứa lượt của scope hiện tại (insight_id cụ thể hoặc toàn cục),
 // không bao giờ kéo theo lượt của scope khác. Test khẳng định trên PAYLOAD gửi đi, không trên DOM.
 
-const { postChatMock } = vi.hoisted(() => ({ postChatMock: vi.fn() }));
+// Widget nay tiêu thụ `streamChat` (SSE) chứ không `postChat` — bất biến các test này khoá
+// thì không đổi, chỉ đổi đường ống. Mock trả thẳng một `commit`: hình dạng luồng là việc của
+// `ChatWidget.streaming.test.tsx`.
+const { streamChatMock } = vi.hoisted(() => ({ streamChatMock: vi.fn() }));
 
-vi.mock('../../api/chat', () => ({ postChat: postChatMock }));
+vi.mock('../../api/chat', () => ({ streamChat: streamChatMock }));
 vi.mock('../../api/insights', () => ({
   fetchInsightById: vi.fn(async (id: string) => ({ id, title: `Tin ${id}` })),
 }));
@@ -23,18 +26,20 @@ vi.mock('../../api/insights', () => ({
 let answerCount = 0;
 
 beforeEach(() => {
-  postChatMock.mockReset();
+  streamChatMock.mockReset();
   answerCount = 0;
-  postChatMock.mockImplementation(async () => ({
-    answer: `trả lời ${++answerCount}`,
-    citations: [],
-    mode: 'global',
-  }));
+  streamChatMock.mockImplementation(async (_payload, handlers) => {
+    handlers.onCommit?.({
+      answer: `trả lời ${++answerCount}`,
+      citations: [],
+      mode: 'global',
+    });
+  });
 });
 
 /** Payload của lần gọi postChat thứ i (1-indexed). */
 function payload(i: number): ChatRequest {
-  return postChatMock.mock.calls[i - 1][0] as ChatRequest;
+  return streamChatMock.mock.calls[i - 1][0] as ChatRequest;
 }
 
 /** Nav buttons + widget: điều khiển route để mô phỏng đổi scope trong cùng phiên. */
@@ -65,7 +70,7 @@ async function openWidget(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Mở trợ lý hỏi đáp' }));
 }
 
-/** Gõ câu hỏi, gửi, chờ postChat được gọi lần thứ `expectCall` rồi chờ câu trả lời render. */
+/** Gõ câu hỏi, gửi, chờ streamChat được gọi lần thứ `expectCall` rồi chờ câu trả lời render. */
 async function ask(
   user: ReturnType<typeof userEvent.setup>,
   text: string,
@@ -73,7 +78,7 @@ async function ask(
 ) {
   await user.type(screen.getByRole('textbox', { name: 'Câu hỏi' }), text);
   await user.click(screen.getByRole('button', { name: 'Gửi' }));
-  await waitFor(() => expect(postChatMock).toHaveBeenCalledTimes(expectCall));
+  await waitFor(() => expect(streamChatMock).toHaveBeenCalledTimes(expectCall));
   await screen.findByText(`trả lời ${expectCall}`);
 }
 

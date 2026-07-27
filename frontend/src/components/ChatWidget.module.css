@@ -170,6 +170,13 @@
   border: 1px solid var(--color-danger-muted, var(--color-border));
 }
 
+/* Mốc tiến trình trong lúc chờ. Mờ hơn và nghiêng để đọc ra ngay là "server đang làm gì",
+   không phải một phần câu trả lời — nó sẽ bị token thật thay chỗ ngay khi có. */
+.status {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
 .citations {
   margin-top: 10px;
   padding-top: 8px;

@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from google import genai
@@ -102,6 +103,26 @@ def _is_truncated(response) -> bool:
         return False
     reason = candidates[0].finish_reason
     return getattr(reason, "value", reason) == "MAX_TOKENS"
+
+
+@dataclass
+class ChatStreamState:
+    """Sổ ghi của MỘT lượt `chat_stream` — caller đọc sau khi luồng kết thúc *hoặc bị bỏ dở*.
+
+    Vì sao là object truyền vào chứ không phải giá trị trả về: generator bị bỏ dở (client
+    ngắt kết nối) không bao giờ chạy tới `return`, mà đó lại đúng lúc ta cần biết **đã tốn
+    bao nhiêu tiền**. `calls` được cộng NGAY khi chunk đầu tiên về — thời điểm tiền đã tiêu —
+    nên dù caller vứt generator giữa chừng, budget vẫn đọc được (design D5).
+
+    `text` là toàn văn đã ráp; `truncated` để caller quyết có phải hỏi lại không.
+    """
+
+    text: str = ""
+    calls: int = 0
+    truncated: bool = False
+    # Bản cuối KHÁC phần đã stream (do hỏi lại hoặc cắt về ranh giới câu) → caller phải
+    # thay text đã hiện, không được nối thêm.
+    replaced: bool = False
 
 
 @dataclass
@@ -314,6 +335,98 @@ class GeminiClient:
             return _trim_to_last_sentence(retry_text), calls
 
         return retry_text, calls
+
+    def chat_stream(
+        self, system_prompt: str, user_prompt: str, state: ChatStreamState
+    ) -> Iterator[str]:
+        """Bản **sinh dần** của `chat()` — yield từng chunk text khi model sinh.
+
+        Cùng model, cùng system+user prompt, cùng cấu hình (vẫn KHÔNG structured output —
+        bài học `gemini-structured-output` không đổi vì đường truyền đổi). `chat()` một‑phát
+        giữ nguyên: route blocking, eval harness và test cũ vẫn đi lối đó.
+
+        Kế toán đi qua `state` chứ không qua giá trị trả về — xem `ChatStreamState`.
+
+        **Chống‑cắt dưới streaming.** `chat()` gặp `MAX_TOKENS` thì hỏi lại cho ngắn gọn mà
+        đủ ý; ở đây chữ đã hiện lên màn hình rồi nên không "rút lại" được từng token. Cách
+        xử lý: hỏi lại bằng lượt **một‑phát** (không stream — người dùng đã có chữ để đọc,
+        stream lần hai chỉ làm nhấp nháy) rồi bật `state.replaced` để caller THAY toàn bộ
+        text ở sự kiện chốt. Đây chính là kênh provisional→commit mà fail‑closed đang dùng,
+        không phải cơ chế thứ hai. Bất biến "không bao giờ trả câu trả lời dở dang" giữ
+        nguyên, và trạng thái chốt vẫn trùng bản blocking.
+        """
+        yield from self._chat_stream_once(system_prompt, user_prompt, state)
+        state.text = state.text.strip()
+        if not state.truncated:
+            return
+
+        logger.warning("Chat stream bị cắt (MAX_TOKENS) — hỏi lại với ràng buộc độ dài")
+        retry_text, retry_truncated, retry_calls = self._chat_once(
+            system_prompt + _CONCISE_RETRY_DIRECTIVE, user_prompt
+        )
+        state.calls += retry_calls
+        state.replaced = True
+
+        if not retry_text:
+            # Lượt hỏi lại rỗng (thinking ăn hết ngân sách) — bản đầu vẫn hơn không.
+            state.text = _trim_to_last_sentence(state.text)
+            return
+        state.text = _trim_to_last_sentence(retry_text) if retry_truncated else retry_text
+
+    def _chat_stream_once(
+        self, system_prompt: str, user_prompt: str, state: ChatStreamState
+    ) -> Iterator[str]:
+        """Một lượt gọi streaming + retry 429. Cập nhật `state` tại chỗ.
+
+        Chỉ retry khi **chưa** phát chunk nào: một khi chữ đã ra tới người dùng thì gọi lại
+        là sinh ra hai câu trả lời chồng nhau trên cùng một bong bóng.
+        """
+        _retry_delays = [3, 10]
+
+        for attempt, delay in enumerate([0] + _retry_delays):
+            if delay:
+                logger.info("Retrying chat stream after %ds (attempt %d/2)", delay, attempt)
+                time.sleep(delay)
+
+            started = False
+            try:
+                stream = self._client.models.generate_content_stream(
+                    model=MODEL_ID,
+                    contents=user_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        temperature=0.2,
+                        max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
+                    ),
+                )
+                last = None
+                for response in stream:
+                    if not started:
+                        # Tiền đã tiêu ngay từ chunk đầu — cộng ở đây chứ không ở cuối,
+                        # vì cuối có thể không bao giờ tới (client ngắt).
+                        state.calls += 1
+                        started = True
+                    last = response
+                    piece = response.text or ""
+                    if piece:
+                        state.text += piece
+                        yield piece
+
+                if not started:
+                    state.calls += 1  # gọi thành công nhưng model không sinh gì
+                state.truncated = _is_truncated(last) if last is not None else False
+                return
+
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    if not started and attempt < len(_retry_delays):
+                        logger.warning("Chat stream 429 rate-limit, will retry")
+                        continue
+                logger.error("Chat stream Vertex AI error: %s", e)
+                raise
+
+        raise RuntimeError("Chat stream 429 RESOURCE_EXHAUSTED after retries")
 
     def classify_intent(self, question: str) -> str | None:
         """Tầng 2 của bộ lọc ý định: model NHẸ phán ca luật lưỡng lự (~3,5% câu hỏi).

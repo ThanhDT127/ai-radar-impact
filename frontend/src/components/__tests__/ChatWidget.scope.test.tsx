@@ -13,9 +13,12 @@ import ChatWidget from '../ChatWidget';
 // nhãn — người dùng đang ở scope "Bài đang xem" mà câu trả lời đến từ tin khác, không
 // nói ra thì trông như bot bịa từ bài đang mở.
 
-const { postChatMock } = vi.hoisted(() => ({ postChatMock: vi.fn() }));
+// Widget nay tiêu thụ `streamChat` (SSE) chứ không `postChat` — bất biến các test này khoá
+// thì không đổi, chỉ đổi đường ống. Mock trả thẳng một `commit`: hình dạng luồng là việc của
+// `ChatWidget.streaming.test.tsx`.
+const { streamChatMock } = vi.hoisted(() => ({ streamChatMock: vi.fn() }));
 
-vi.mock('../../api/chat', () => ({ postChat: postChatMock }));
+vi.mock('../../api/chat', () => ({ streamChat: streamChatMock }));
 vi.mock('../../api/insights', () => ({
   fetchInsightById: vi.fn(async (id: string) => ({ id, title: `Tin ${id}` })),
 }));
@@ -23,17 +26,19 @@ vi.mock('../../api/insights', () => ({
 let answerCount = 0;
 
 beforeEach(() => {
-  postChatMock.mockReset();
+  streamChatMock.mockReset();
   answerCount = 0;
-  postChatMock.mockImplementation(async () => ({
-    answer: `trả lời ${++answerCount}`,
-    citations: [],
-    mode: 'insight',
-  }));
+  streamChatMock.mockImplementation(async (_payload, handlers) => {
+    handlers.onCommit?.({
+      answer: `trả lời ${++answerCount}`,
+      citations: [],
+      mode: 'insight',
+    });
+  });
 });
 
 function payload(i: number): ChatRequest {
-  return postChatMock.mock.calls[i - 1][0] as ChatRequest;
+  return streamChatMock.mock.calls[i - 1][0] as ChatRequest;
 }
 
 function Harness() {
@@ -69,7 +74,7 @@ async function ask(
 ) {
   await user.type(screen.getByRole('textbox', { name: 'Câu hỏi' }), text);
   await user.click(screen.getByRole('button', { name: 'Gửi' }));
-  await waitFor(() => expect(postChatMock).toHaveBeenCalledTimes(expectCall));
+  await waitFor(() => expect(streamChatMock).toHaveBeenCalledTimes(expectCall));
   await screen.findByText(`trả lời ${expectCall}`);
 }
 
@@ -135,11 +140,13 @@ describe('ChatWidget — badge phạm vi hai chiều', () => {
 
 describe('ChatWidget — nhãn câu trả lời mở rộng', () => {
   it('mode="expanded" được gắn nhãn tìm toàn hệ thống', async () => {
-    postChatMock.mockImplementation(async () => ({
-      answer: `trả lời ${++answerCount}`,
-      citations: [],
-      mode: 'expanded',
-    }));
+    streamChatMock.mockImplementation(async (_payload, handlers) => {
+      handlers.onCommit?.({
+        answer: `trả lời ${++answerCount}`,
+        citations: [],
+        mode: 'expanded',
+      });
+    });
     const user = userEvent.setup();
     renderWidget();
     await openWidget(user);

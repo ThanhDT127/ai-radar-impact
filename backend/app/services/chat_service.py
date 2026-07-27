@@ -13,6 +13,7 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -20,10 +21,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.ai.gemini_client import GeminiClient, get_chat_client
+from app.ai.gemini_client import ChatStreamState, GeminiClient, get_chat_client
 from app.ai.prompts import (
     ALLOWED_ROLES,
     CHAT_SYSTEM_PROMPT,
+    OUT_OF_SCOPE_SENTINEL,
     build_chat_expanded_prompt,
     build_chat_global_prompt,
     build_chat_insight_prompt,
@@ -60,6 +62,66 @@ logger = logging.getLogger(__name__)
 # tính budget. Trần bước 2 × trần 2 lượt/bước ⇒ tối đa 4 lượt tính tiền cho một câu hỏi,
 # vẫn có biên, vẫn không thành vòng lặp.
 MAX_MODEL_CALLS_PER_QUESTION = 2
+
+# --- Sự kiện tiến trình (design D3/D4) ------------------------------------------------
+# Phát từ MỐC THẬT của pipeline, không phải chuỗi trang trí chạy theo đồng hồ. Lý do tồn
+# tại: Gemini 2.5 tiêu 5–15s đầu cho thinking, giai đoạn đó CHƯA có token nào để stream —
+# nếu không lấp bằng status thì streaming vẫn để người dùng nhìn màn hình đứng đúng như
+# trước (Nguy hiểm #1). Status nói đúng việc server đang làm, không hứa nhanh hơn thực tế.
+STATUS_READING_INSIGHT = "Đang đọc bài đang xem…"
+STATUS_SEARCHING = "Đang tìm trong hệ thống…"
+STATUS_EXPANDING = "Bài đang xem không đề cập — đang tìm trên toàn hệ thống…"
+STATUS_COMPOSING = "Đang soạn câu trả lời…"
+
+# Kênh phát sự kiện. `None` = chế độ blocking: cùng một pipeline, chỉ khác lối ra.
+Emitter = Callable[[dict], Awaitable[None]]
+
+# Vật đánh dấu pipeline đã kết thúc, đi qua cùng hàng đợi với sự kiện thật.
+_PIPELINE_DONE = object()
+
+# Chờ tối đa ngần này giây cho pipeline tự dừng sau khi client ngắt, để `finally` của nó
+# kịp ghi `chat_logs`. Ngắn — nó chỉ còn phải chạy nốt phần thuần CPU + một INSERT.
+_ABORT_DRAIN_SECONDS = 10.0
+
+
+class _SentinelGate:
+    """Giữ token đầu luồng mode B lại cho tới khi chắc chắn KHÔNG phải sentinel.
+
+    Đo thật 27/07/2026: câu ngoài phạm vi bài làm model sinh đúng một token
+    `[[NGOÀI_PHẠM_VI_BÀI]]`, và nếu phát thẳng thì người dùng **nhìn thấy** chuỗi đó nhấp
+    nháy trước khi lượt mở rộng ghi đè. Bản blocking không có lỗi này vì nó chỉ nhìn câu
+    hoàn chỉnh — đây đúng là loại lỗi mà streaming sinh ra thêm.
+
+    Cổng rất rẻ vì sentinel ngắn và `is_out_of_scope_answer` chỉ nhận khi nó là TOÀN BỘ câu
+    trả lời: chỉ cần giữ chừng nào phần đã nhận còn có thể là *tiền tố* của sentinel. Câu
+    trả lời bình thường lệch khỏi tiền tố ngay ở chunk đầu nên gần như không bị trễ.
+    """
+
+    def __init__(self, sentinel: str) -> None:
+        self._sentinel = sentinel
+        self._buffer = ""
+        self._open = False
+
+    def feed(self, piece: str) -> str:
+        """Trả phần được phép phát ngay (có thể rỗng nếu còn phải giữ)."""
+        if self._open:
+            return piece
+        self._buffer += piece
+        # Cùng cách chuẩn hoá với `is_out_of_scope_answer` — hai bên phải nhìn cùng một thứ.
+        probe = self._buffer.strip().strip("`").strip()
+        if probe and not self._sentinel.startswith(probe):
+            self._open = True
+            return self._buffer
+        return ""
+
+
+def _next_chunk(iterator):
+    """`next()` an toàn để chạy trong thread: `StopIteration` KHÔNG băng qua được ranh giới
+    coroutine (nó biến thành `RuntimeError`), nên dịch sang một vật đánh dấu."""
+    try:
+        return next(iterator)
+    except StopIteration:
+        return _PIPELINE_DONE
 
 
 @dataclass
@@ -192,6 +254,17 @@ class ChatService:
         # một bước có thể tốn 2 lượt khi câu trả lời bị cắt và phải hỏi lại — xem ghi chú
         # ở `MAX_MODEL_CALLS_PER_QUESTION`.
         self._steps_used = 0
+        # Kênh phát sự kiện của lượt hiện tại. `None` = blocking (không phát gì). Đây là
+        # KHÁC BIỆT DUY NHẤT giữa hai lối ra — grounding, xếp hạng, fail‑closed, budget đều
+        # dùng chung một đoạn code (design D1).
+        self._emit: Emitter | None = None
+        # Client đã bỏ đi — token sinh thêm không còn ai đọc, nên dừng sớm. Không phải lỗi.
+        self._aborted = False
+
+    async def _status(self, text: str) -> None:
+        """Phát một mốc tiến trình. No-op ở chế độ blocking."""
+        if self._emit is not None:
+            await self._emit({"type": "status", "text": text})
 
     async def _route_intent(self, question: str) -> str | None:
         """Bộ lọc ý định HAI TẦNG (25/07/2026). Trả nhóm preset, hoặc `None` = đi pipeline.
@@ -218,9 +291,20 @@ class ChatService:
         return await asyncio.to_thread(self.gemini.classify_intent, question)
 
     async def answer(
-        self, question: str, history: list, insight_id: uuid.UUID | None
+        self,
+        question: str,
+        history: list,
+        insight_id: uuid.UUID | None,
+        emit: Emitter | None = None,
     ) -> dict:
-        """Điểm vào duy nhất. Ghi `chat_logs` trong `finally` để budget không rò rỉ."""
+        """Điểm vào duy nhất. Ghi `chat_logs` trong `finally` để budget không rò rỉ.
+
+        `emit` là lối ra streaming: truyền vào thì pipeline phát thêm `status`/`token` dọc
+        đường; bỏ trống thì hàm chạy y hệt bản blocking cũ. KHÔNG có nhánh logic thứ hai —
+        `answer_stream()` chỉ là hàm này cộng một hàng đợi (design D1).
+        """
+        self._emit = emit
+        self._aborted = False
         # Định tuyến ý định TRƯỚC cửa quota (design D3): câu chào/meta/cảm ơn 0 lượt gọi
         # model phải trả lời được kể cả khi budget đã cạn, và không tiêu budget. Áp dụng
         # bất kể có `insight_id` hay không — chào trong lúc đang mở một bài vẫn là chào.
@@ -257,6 +341,10 @@ class ChatService:
                     # trong bài", nên lượt 2 trả lời lại với context rộng hơn. Đây KHÔNG
                     # phải một lượt phân loại — tín hiệu là byproduct của lượt trả lời B.
                     mode = "expanded"
+                    # Người dùng vừa thấy vài token của lượt B (nếu model có sinh gì trước
+                    # sentinel) rồi phải chờ thêm 5–20s nữa. Nói thẳng đang làm gì, không
+                    # để khoảng lặng thứ hai (design D4).
+                    await self._status(STATUS_EXPANDING)
                     answer, citations = await self._answer_global(
                         question, history, focus=attempt
                     )
@@ -279,6 +367,7 @@ class ChatService:
     async def _answer_insight(
         self, question: str, history: list, insight_id: uuid.UUID
     ) -> _InsightAttempt:
+        await self._status(STATUS_READING_INSIGHT)
         result = await self.session.execute(
             select(Insight)
             .where(Insight.id == insight_id)
@@ -299,7 +388,7 @@ class ChatService:
             history_block=_history_block(history),
             question=question,
         )
-        raw_answer = await self._call_model(prompt)
+        raw_answer = await self._call_model(prompt, hold_sentinel=True)
 
         # Dò sentinel TRƯỚC grounding: sentinel không mang marker [n] nào, nên để
         # `enforce_grounding` chạy trước thì nó bị thay bằng INSUFFICIENT_GROUNDS_MESSAGE
@@ -318,6 +407,10 @@ class ChatService:
     async def _answer_global(
         self, question: str, history: list, focus: _InsightAttempt | None = None
     ) -> tuple[str, list[dict]]:
+        if focus is None:
+            # Ở chế độ mở rộng, `answer()` đã phát STATUS_EXPANDING — nói lại "đang tìm
+            # trong hệ thống" chỉ là nhiễu.
+            await self._status(STATUS_SEARCHING)
         since = None
         if settings.chat_window_days > 0:
             since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
@@ -446,19 +539,116 @@ class ChatService:
             reverse=True,
         )
 
-    async def _call_model(self, prompt: str) -> str:
+    async def _call_model(self, prompt: str, hold_sentinel: bool = False) -> str:
         """Gọi Gemini NGOÀI event loop — chat nằm trên request path (design D6).
 
         Cộng vào `self._calls_used` NGAY khi model trả về, trước khi caller làm bất cứ
         việc gì khác: đó là thời điểm tiền đã tiêu, và mọi lỗi sau đó vẫn phải tính.
+
+        Có `self._emit` thì đi lối streaming — vẫn ĐÚNG MỘT bước, vẫn cùng prompt, vẫn trả
+        về toàn văn cho phần grounding phía sau chạy y như cũ.
         """
+        await self._status(STATUS_COMPOSING)
         if self._steps_used >= MAX_MODEL_CALLS_PER_QUESTION:
             raise RuntimeError(
                 f"Chạm trần {MAX_MODEL_CALLS_PER_QUESTION} bước trả lời cho một câu hỏi"
             )
         self._steps_used += 1
+
+        if self._emit is not None:
+            return await self._stream_model(prompt, hold_sentinel=hold_sentinel)
+
         text, calls = await asyncio.to_thread(self.gemini.chat, CHAT_SYSTEM_PROMPT, prompt)
         # `calls` có thể là 2 nếu lượt đầu bị cắt và client đã hỏi lại — vẫn tốn tiền thật
         # nên vẫn phải cộng vào budget, chỉ là KHÔNG tính như một bước mới.
         self._calls_used += calls
         return text
+
+    async def _stream_model(self, prompt: str, hold_sentinel: bool = False) -> str:
+        """Một bước trả lời dạng streaming: phát `token` dọc đường, trả toàn văn ở cuối.
+
+        `gemini.chat_stream` là generator SYNC (như phần còn lại của client), nên mỗi lần
+        lấy chunk phải qua `to_thread` — không thì vòng lặp chặn event loop và mọi request
+        khác đứng hình đúng lúc ta đang cố làm cho giao diện mượt hơn.
+
+        `state.calls` cộng vào budget trong `finally`: lượt gọi đã tốn tiền phải được tính
+        kể cả khi vòng lặp thoát vì client ngắt (design D5).
+
+        `hold_sentinel` bật cổng chặn sentinel cho lượt mode B — xem `_SentinelGate`.
+        """
+        state = ChatStreamState()
+        gate = _SentinelGate(OUT_OF_SCOPE_SENTINEL) if hold_sentinel else None
+        iterator = self.gemini.chat_stream(CHAT_SYSTEM_PROMPT, prompt, state)
+        try:
+            while True:
+                piece = await asyncio.to_thread(_next_chunk, iterator)
+                if piece is _PIPELINE_DONE:
+                    break
+                if gate is not None:
+                    piece = gate.feed(piece)
+                    if not piece:
+                        continue
+                await self._emit({"type": "token", "text": piece})
+                if self._aborted:
+                    logger.info("Client đã ngắt — dừng sinh token giữa chừng")
+                    break
+        finally:
+            iterator.close()
+            self._calls_used += state.calls
+        return state.text
+
+    async def answer_stream(
+        self, question: str, history: list, insight_id: uuid.UUID | None
+    ) -> AsyncIterator[dict]:
+        """Lối ra streaming: yield `status`/`token` dọc đường, kết bằng `commit` hoặc `error`.
+
+        **Sự kiện chốt luôn mang toàn văn câu trả lời**, không chỉ citations. Token đã phát
+        là *tạm* theo đúng nghĩa đen: `resolve_citations` dọn marker ngoài phạm vi và
+        `enforce_grounding` có thể thay sạch câu trả lời (fail‑closed), mà cả hai chỉ chạy
+        được trên câu HOÀN CHỈNH. Cho `commit` mang text cuối là cách duy nhất khiến trạng
+        thái chốt trùng bản blocking mà không phải bịa ra một luật hoà giải thứ hai ở
+        widget (design D2).
+
+        Pipeline chạy trong task riêng để việc client ngắt (generator này bị đóng) không
+        cắt ngang `finally` ghi `chat_logs`. Đó là chỗ rò budget dễ nhất của streaming.
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def emit(event: dict) -> None:
+            await queue.put(event)
+
+        async def run() -> None:
+            try:
+                result = await self.answer(question, history, insight_id, emit=emit)
+                await queue.put({"type": "commit", **result})
+            except InsightNotFoundError:
+                await queue.put({"type": "error", "code": "not_found"})
+            except QuotaExceededError:
+                await queue.put({"type": "error", "code": "quota"})
+            except Exception as e:
+                logger.error("Chat stream request failed: %s", e)
+                await queue.put({"type": "error", "code": "server"})
+            finally:
+                await queue.put(_PIPELINE_DONE)
+
+        task = asyncio.create_task(run())
+        try:
+            while True:
+                event = await queue.get()
+                if event is _PIPELINE_DONE:
+                    break
+                yield event
+        finally:
+            if not task.done():
+                # Tới đây nghĩa là người tiêu thụ bỏ đi trước khi pipeline xong.
+                self._aborted = True
+                logger.info("Luồng chat bị bỏ dở — dừng sinh, vẫn chờ ghi budget")
+                # `shield` để lượt huỷ của Starlette không kéo theo cả pipeline: nó còn
+                # phải chạy nốt `finally` ghi `chat_logs`. Hết giờ thì thả cho chạy nốt ở
+                # nền — thà ghi muộn còn hơn không ghi.
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(task), timeout=_ABORT_DRAIN_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Pipeline chat chưa kết thúc kịp sau khi client ngắt")
