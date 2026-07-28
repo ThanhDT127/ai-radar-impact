@@ -1,10 +1,22 @@
 {
  "meta": {
   "measured_at": "2026-07-28",
-  "commit": "(chat-context-depth, chưa commit)",
+  "commit": "(chat-chunk-retrieval, chưa commit)",
   "corpus": "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary; vector từ chat_embeddings.jsonl + chat_query_vectors.jsonl (chat-hybrid-retrieval)",
   "note": "Nhóm `comparison_anaphora` cố ý đỏ — nó là mốc đo cho working set, không phải mục tiêu của `_rank`. Đừng 'chữa' nó bằng cách sửa câu hỏi cho gần chữ trong tin.",
   "revisions": [
+   {
+    "date": "2026-07-28",
+    "recall_at_k": "0,968 → 0,968 (không đổi)",
+    "recall_at_answer": "0,900 → 0,900 (không đổi)",
+    "reason": "Chốt lại để bản ghi khớp bộ kịch bản, KHÔNG phải vì xếp hạng đổi — cả hai số y nguyên. Hai việc: (a) `det-gpai-annex` đổi câu hỏi (nhãn cũ có TIỀN ĐỀ SAI: nghĩa vụ GPAI nằm ở Chapter V chứ không ở Annex nào; xem revision cùng ngày trong `chat_answer_harness`), nên dòng đông lạnh phải mang câu hỏi mới. (b) Suất ô sâu cho tin có đoạn khớp nhất là thay đổi ở `build_context`, **không** ở `_rank` — RS đo `_rank` nên không thấy gì, đúng như thiết kế. Ghi ra đây để người đọc sau không đi tìm một thay đổi số liệu không tồn tại."
+   },
+   {
+    "date": "2026-07-28",
+    "recall_at_k": "0,969 → 0,968",
+    "recall_at_answer": "0,876 → 0,900",
+    "reason": "`chat-chunk-retrieval`: tầng độ‑liên‑quan thêm số hạng RRF THỨ BA — tương đồng ở mức ĐOẠN thân bài (`document_chunks`, 535 đoạn / 179 bài). Kèm 15 kịch bản mới nhóm `detail_discovery`. \n\n⚠️ HAI CON SỐ TỔNG KHÔNG SO ĐƯỢC với dòng dưới (bộ kịch bản đi từ 83 lên 98 câu). So sánh ĐÚNG là trên cùng 98 câu, đo bằng `--without-chunks` cùng ngày: **recall@5 0,832 → 0,900** và recall@60 0,975 → 0,968. \n\nTHẮNG (cái change nhắm tới): `detail_discovery` r@5 **0,67 → 1,00** — 15/15 câu hỏi bằng định danh chỉ có trong thân bài (`SquashFS`, `SPDX`, `HMAC-SHA256`, `ChunkingStrategy`) nay đưa đúng bài lên top‑5; hạng xấu nhất 29 → 4. Lan sang nhóm khác: `security` r@5 0,88 → 0,94, `open_model` 0,78 → 0,89. \n\nTRẢ GIÁ — 4 câu tụt, ghi rõ để đừng ai đọc nhầm là 'không mất gì': (a) `glo-iot-security` r@5 1,00 → 0,50, `rank-device-trap` 1,00 → 0,50, `cmp-pq-partial` 1,00 → 0,50 — cả ba GIỮ NGUYÊN `must_have` chính ở hạng 1, cái rơi là tin THỨ HAI của một câu hỏi rộng, và chỗ nó nhường lại cho tin cùng chủ đề khớp sâu hơn ở thân bài. Đây là đổi thứ tự TRONG một vùng liên quan, không phải tin đúng bị đẩy ra ngoài. (b) ⚠️ `rank-eol-khai-tu` r@60 **0,50 → 0,00** — nặng nhất, vì mất luôn chỗ trong index chứ không chỉ trong top‑5 (hai tin rơi xuống hạng 80 và 92). Câu 'công nghệ nào sắp bị khai tử' vốn đã là ca đỏ có chủ đích: embedding không nối được thành ngữ đó với 'end of support', và tầng đoạn thêm nhiễu vào đúng câu mà cả hai tín hiệu cũ đều mù. Nó GIỮ NGUYÊN vai trò mốc đo cho rerank cross‑encoder — **đừng chữa bằng cách sửa câu hỏi cho gần chữ trong tin hơn**, làm thế là xoá phép đo."
+   },
    {
     "date": "2026-07-28",
     "recall_at_k": "0,922 → 0,969",
@@ -42,7 +54,7 @@
    "question": "Có lỗ hổng zero-day nào của Windows đang cần vá gấp không?",
    "recall": 1.0,
    "recall_at_answer": 1.0,
-   "worst_rank": 3,
+   "worst_rank": 5,
    "must_total": 2,
    "misses": [],
    "terms": [
@@ -83,7 +95,7 @@
    "question": "Chuyển sang mã hoá hậu lượng tử có hạn chót nào không?",
    "recall": 1.0,
    "recall_at_answer": 1.0,
-   "worst_rank": 3,
+   "worst_rank": 2,
    "must_total": 1,
    "misses": [],
    "terms": [
@@ -221,13 +233,13 @@
    "question": "Có sản phẩm nào sắp hết vòng đời hỗ trợ mà cần lên kế hoạch không?",
    "recall": 0.5,
    "recall_at_answer": 0.5,
-   "worst_rank": 121,
+   "worst_rank": 153,
    "must_total": 2,
    "misses": [
     {
      "insight_id": "ecde8525-0ad7-4e0b-9a4c-37088c27e6d3",
      "title": "The Electron browser is being deprecated in Cypress",
-     "rank": 121
+     "rank": 153
     }
    ],
    "terms": [
@@ -311,7 +323,7 @@
    "question": "Gần đây có lỗ hổng bảo mật nghiêm trọng nào cần vá gấp không?",
    "recall": 1.0,
    "recall_at_answer": 0.5,
-   "worst_rank": 8,
+   "worst_rank": 13,
    "must_total": 2,
    "misses": [],
    "terms": [
@@ -351,8 +363,8 @@
    "mode": "global",
    "question": "Patch Tuesday gần đây có gì đáng chú ý?",
    "recall": 1.0,
-   "recall_at_answer": 0.5,
-   "worst_rank": 7,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
    "must_total": 2,
    "misses": [],
    "terms": [
@@ -388,7 +400,7 @@
    "question": "Có tin gì về tấn công chuỗi cung ứng phần mềm?",
    "recall": 1.0,
    "recall_at_answer": 1.0,
-   "worst_rank": 3,
+   "worst_rank": 1,
    "must_total": 1,
    "misses": [],
    "terms": [
@@ -493,7 +505,7 @@
    "question": "Các bài phân tích về hệ sinh thái mô hình mở nói gì?",
    "recall": 1.0,
    "recall_at_answer": 1.0,
-   "worst_rank": 2,
+   "worst_rank": 3,
    "must_total": 2,
    "misses": [],
    "terms": [
@@ -646,7 +658,7 @@
    "question": "Có tin gì về robotics không?",
    "recall": 1.0,
    "recall_at_answer": 1.0,
-   "worst_rank": 2,
+   "worst_rank": 3,
    "must_total": 2,
    "misses": [],
    "terms": [
@@ -660,8 +672,8 @@
    "mode": "global",
    "question": "Thiết bị IoT có sự cố bảo mật nào không?",
    "recall": 1.0,
-   "recall_at_answer": 1.0,
-   "worst_rank": 3,
+   "recall_at_answer": 0.5,
+   "worst_rank": 6,
    "must_total": 2,
    "misses": [],
    "terms": [
@@ -715,7 +727,7 @@
    "question": "Bên Security cần chú ý tin nào nhất?",
    "recall": 1.0,
    "recall_at_answer": 1.0,
-   "worst_rank": 2,
+   "worst_rank": 3,
    "must_total": 1,
    "misses": [],
    "terms": [
@@ -833,8 +845,8 @@
    "mode": "global",
    "question": "Có mô hình mã nguồn mở nào mới không?",
    "recall": 1.0,
-   "recall_at_answer": 0.3333333333333333,
-   "worst_rank": 32,
+   "recall_at_answer": 0.6666666666666666,
+   "worst_rank": 17,
    "must_total": 3,
    "misses": [],
    "terms": [
@@ -853,7 +865,7 @@
    "question": "Có tin nào về ML không?",
    "recall": 1.0,
    "recall_at_answer": 0.0,
-   "worst_rank": 26,
+   "worst_rank": 54,
    "must_total": 1,
    "misses": [],
    "terms": [
@@ -880,8 +892,8 @@
    "mode": "global",
    "question": "tin về device IoT mới",
    "recall": 1.0,
-   "recall_at_answer": 1.0,
-   "worst_rank": 4,
+   "recall_at_answer": 0.5,
+   "worst_rank": 18,
    "must_total": 2,
    "misses": [],
    "terms": [
@@ -942,15 +954,20 @@
    "group": "semantic",
    "mode": "global",
    "question": "Công nghệ nào sắp bị khai tử, team cần chuẩn bị gì?",
-   "recall": 0.5,
+   "recall": 0.0,
    "recall_at_answer": 0.0,
-   "worst_rank": 67,
+   "worst_rank": 92,
    "must_total": 2,
    "misses": [
     {
      "insight_id": "104ba8cc-3b94-40f0-b990-57eb2810f09c",
      "title": "Windows Server 2022 reach end of mainstream support in 90 days",
-     "rank": 67
+     "rank": 80
+    },
+    {
+     "insight_id": "ecde8525-0ad7-4e0b-9a4c-37088c27e6d3",
+     "title": "The Electron browser is being deprecated in Cypress",
+     "rank": 92
     }
    ],
    "terms": [
@@ -969,13 +986,13 @@
    "question": "Có cách nào giúp mô hình AI bớt ngốn bộ nhớ không?",
    "recall": 0.75,
    "recall_at_answer": 0.25,
-   "worst_rank": 95,
+   "worst_rank": 66,
    "must_total": 4,
    "misses": [
     {
      "insight_id": "8f4fc18b-2e17-4f26-9cb4-54e9c58b5f73",
      "title": "ExTernD: Expanded-Rank Ternary Decomposition Ternary LLM PTQ with Accuracy Approaching Any Quantization Level [P]",
-     "rank": 95
+     "rank": 66
     }
    ],
    "terms": [
@@ -1260,8 +1277,8 @@
    "mode": "global",
    "question": "Bài post-quantum vừa xem so với bài kia thì cái nào gấp hơn?",
    "recall": 1.0,
-   "recall_at_answer": 1.0,
-   "worst_rank": 2,
+   "recall_at_answer": 0.5,
+   "worst_rank": 7,
    "must_total": 2,
    "misses": [],
    "terms": [
@@ -1279,7 +1296,7 @@
    "question": "EU AI Act so với tin kia thì bên nào ảnh hưởng tới mình sớm hơn?",
    "recall": 1.0,
    "recall_at_answer": 1.0,
-   "worst_rank": 2,
+   "worst_rank": 3,
    "must_total": 2,
    "misses": [],
    "terms": [
@@ -1300,14 +1317,14 @@
    "mode": "global",
    "question": "Vụ AsyncAPI đó với bài còn lại thì bài nào cần xử lý trước?",
    "recall": 0.5,
-   "recall_at_answer": 0.0,
-   "worst_rank": 98,
+   "recall_at_answer": 0.5,
+   "worst_rank": 131,
    "must_total": 2,
    "misses": [
     {
      "insight_id": "9ede2e2f-0d7e-479a-910a-3df4808437c7",
      "title": "What is an SBOM (and Why Can’t You Ship Without One)?",
-     "rank": 98
+     "rank": 131
     }
    ],
    "terms": [
@@ -1396,9 +1413,322 @@
     "hơn"
    ],
    "roles": []
+  },
+  {
+   "scenario_id": "det-squashfs",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Bài nào bung firmware bằng SquashFS để tìm lỗ hổng?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 4,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "bung",
+    "firmware",
+    "bằng",
+    "squashfs",
+    "để",
+    "tìm",
+    "lỗ",
+    "hổng"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-gpai-annex",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Hệ thống AI rủi ro cao được liệt kê ở phụ lục nào?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "rủi",
+    "ro",
+    "cao",
+    "liệt",
+    "kê",
+    "phụ",
+    "lục"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-ipfs-c2",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Mã độc nào lấy payload qua IPFS?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "mã",
+    "độc",
+    "lấy",
+    "payload",
+    "qua",
+    "ipfs"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-servfail",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Sự cố nào khiến resolver trả SERVFAIL cho cả một TLD?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "sự",
+    "cố",
+    "khiến",
+    "resolver",
+    "trả",
+    "servfail",
+    "tld"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-arnnotequals",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Chính sách nào dùng điều kiện ArnNotEquals để chặn truy cập?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "chính",
+    "sách",
+    "dùng",
+    "điều",
+    "kiện",
+    "arnnotequals",
+    "để",
+    "chặn",
+    "truy",
+    "cập"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-ssrf-assumerole",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Làm sao giảm rủi ro SSRF khi lấy credential tạm thời?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 3,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "giảm",
+    "rủi",
+    "ro",
+    "ssrf",
+    "lấy",
+    "credential",
+    "tạm",
+    "thời"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-spdx-cyclonedx",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "SPDX và CycloneDX khác nhau ở điểm nào?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 5,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "spdx",
+    "cyclonedx",
+    "điểm"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-firecracker",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Dịch vụ nào chạy trên microVM Firecracker?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "dịch",
+    "vụ",
+    "chạy",
+    "trên",
+    "microvm",
+    "firecracker"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-eytzinger",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Bố cục Eytzinger giúp tăng tốc tìm kiếm ra sao?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "bố",
+    "cục",
+    "eytzinger",
+    "giúp",
+    "tăng",
+    "tốc",
+    "tìm",
+    "kiếm"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-chunking-strategy",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Bài nào cài lớp ChunkingStrategy để so các cách chia đoạn?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "cài",
+    "lớp",
+    "chunkingstrategy",
+    "để",
+    "so",
+    "cách",
+    "chia",
+    "đoạn"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-jubair",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Vụ án nào có bị cáo tên Thalha Jubair?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "vụ",
+    "án",
+    "cáo",
+    "tên",
+    "thalha",
+    "jubair"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-qurium",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Botnet nào bị tổ chức Qurium điều tra?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "botnet",
+    "tổ",
+    "chức",
+    "qurium",
+    "điều",
+    "tra"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-hmac-agent",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Cơ chế nào ký yêu cầu giữa các agent bằng HMAC-SHA256?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 3,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "cơ",
+    "chế",
+    "ký",
+    "yêu",
+    "cầu",
+    "giữa",
+    "agent",
+    "bằng",
+    "hmac",
+    "sha256"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-cypress-defaultbrowser",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Vì sao phải đổi defaultBrowser trong defineConfig?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "đổi",
+    "defaultbrowser",
+    "defineconfig"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "det-rabbitmq-c2",
+   "group": "detail_discovery",
+   "mode": "global",
+   "question": "Backdoor nào dùng RabbitMQ và Redis làm kênh điều khiển?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "backdoor",
+    "dùng",
+    "rabbitmq",
+    "redis",
+    "kênh",
+    "điều",
+    "khiển"
+   ],
+   "roles": []
   }
  ],
- "overall": 0.96875,
- "overall_at_answer": 0.8764880952380952,
- "questions_scored": 56
+ "overall": 0.9683098591549296,
+ "overall_at_answer": 0.9002347417840375,
+ "questions_scored": 71
 }

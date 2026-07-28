@@ -33,6 +33,13 @@ mục nguồn được đánh số riêng, và bảng ánh xạ marker `n → ng
 
 Nội dung bài gốc đưa vào câu trả lời SHALL tiếp tục đến từ cơ chế ô sâu hiện hành, không đến từ tầng đoạn.
 
+> ⚠️ **Hệ quả đã ĐO, không phải suy đoán** (28/07/2026): tầng đoạn chữa **truy hồi**, không chữa
+> **bằng chứng**. Một tin được tầng đoạn kéo lên hạng 4 vẫn chỉ vào prompt dưới dạng dòng index
+> nén của phần *phân tích* — nơi không chứa định danh mà người dùng hỏi — nên câu trả lời đúng
+> vẫn là từ chối. Đo trên 15 kịch bản `detail_discovery`: 13 xếp hạng ≤ `CHAT_DEEP_SLOTS` (3) nên
+> trả lời được, 2 xếp hạng 4 nên vẫn bị từ chối. Đây là ranh giới **có chủ đích** của yêu cầu
+> này; nới nó là việc của một change khác, kèm phép đo riêng.
+
 #### Scenario: Nhiều đoạn cùng một bài khớp câu hỏi
 - **WHEN** ba đoạn của cùng một bài đều khớp câu hỏi
 - **THEN** bài đó xuất hiện đúng một lần trong context với đúng một số thứ tự

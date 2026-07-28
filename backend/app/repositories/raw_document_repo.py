@@ -109,6 +109,21 @@ class RawDocumentRepository:
         )
         return int(result.scalar_one())
 
+    async def ids_older_than(self, cutoff: datetime) -> list[uuid.UUID]:
+        """Id của các tài liệu mà `tombstone_older_than` sắp xoá content.
+
+        Phải hỏi TRƯỚC khi tombstone: sau lượt update thì `processing_status = 'expired'`
+        và cùng vị từ đó trả về rỗng. Dùng để xoá đoạn kèm theo — cascade FK **không** bắn
+        ở đây vì purge không xoá hàng, nó chỉ rỗng hoá `normalized_content`.
+        """
+        result = await self.session.execute(
+            select(RawDocument.id).where(
+                RawDocument.published_at < cutoff,
+                RawDocument.processing_status != "expired",
+            )
+        )
+        return list(result.scalars().all())
+
     async def tombstone_older_than(self, cutoff: datetime) -> int:
         """Tombstone-purge tài liệu có published_at < cutoff.
 

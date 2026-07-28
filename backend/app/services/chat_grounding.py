@@ -146,6 +146,7 @@ def build_context(
     k_deep: int,
     index_limit: int,
     include_content: bool = True,
+    best_chunk_match: uuid.UUID | None = None,
 ) -> ChatContext:
     """Dựng context: ô sâu lấp TẤT ĐỊNH (refs trước, xếp hạng sau), rồi index nén.
 
@@ -161,6 +162,19 @@ def build_context(
 
     `index_limit` là TỔNG số tin vào prompt (ô sâu tính trong đó), để ngân sách token không
     phình lên khi thêm ô sâu: 60 tin vẫn là 60 tin, chỉ khác 3 trong số đó được rót sâu.
+
+    `best_chunk_match` — tin có **đoạn thân bài khớp nhất toàn corpus** (hạng đoạn 1) — được
+    ưu tiên một ô sâu ngay sau refs, kể cả khi thứ hạng TỔNG của nó rơi ngoài `k_deep`
+    (`chat-chunk-retrieval`, 28/07/2026). Lý do là một bất đối xứng đo được: tầng đoạn chữa
+    **truy hồi** nhưng không chữa **bằng chứng** — bài xếp hạng 4–5 vẫn vào prompt dưới dạng
+    dòng index nén của phần *phân tích*, đúng chỗ KHÔNG chứa định danh được hỏi, nên model
+    từ chối dù bài đúng đã nằm trong context. Đo 28/07: `det-squashfs` (hạng tổng 4) và
+    `det-spdx-cyclonedx` (hạng 5) đều có hạng đoạn **1**.
+
+    Đây KHÔNG phải heuristic đoán ý định câu hỏi — thứ mà repo này đã trả giá nhiều lần. Nó
+    là một sự kiện đo được: "đoạn khớp nhất toàn corpus nằm ở bài này", tức là bằng chứng
+    trả lời gần như chắc chắn nằm trong thân bài đó. Và nó vẫn tôn trọng ranh giới của spec:
+    nội dung vào câu trả lời **vẫn đi qua ô sâu**, chỉ khác ở chỗ tin nào được rót.
     """
     # Ô sâu KHÔNG được vượt trần tổng: `index_limit` đếm cả ô sâu, nên `k_deep=3` với
     # `index_limit=1` phải cho đúng 1 tin, không phải 3. Bỏ dòng này thì trần top-K trở
@@ -178,6 +192,13 @@ def build_context(
 
     for insight in refs:
         take(insight)
+    # Sau refs (tin người dùng CHỦ ĐỘNG chọn — không gì được chen lên trước chúng), nhưng
+    # trước phần lấp theo thứ hạng tổng.
+    if best_chunk_match is not None:
+        for insight in ranked:
+            if insight.id == best_chunk_match:
+                take(insight)
+                break
     for insight in ranked:
         take(insight)
 

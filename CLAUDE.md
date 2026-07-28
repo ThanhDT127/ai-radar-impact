@@ -40,6 +40,11 @@ docker-compose exec backend python -m app.scripts.run_analysis
 docker-compose exec backend python -m app.scripts.embed_insights
 docker-compose exec backend python -m app.scripts.embed_insights --redo   # đổi model/embedding text
 
+# Backfill ĐOẠN thân bài + embedding cho tín hiệu xếp hạng thứ ba (idempotent — chỉ bài chưa có đoạn)
+docker-compose exec backend python -m app.scripts.chunk_documents
+docker-compose exec backend python -m app.scripts.chunk_documents --dry-run   # chỉ đếm, 0 đồng
+docker-compose exec backend python -m app.scripts.chunk_documents --redo      # đổi hằng số chunk/model
+
 # Maintenance
 docker-compose exec backend python -m app.scripts.reset_failed       # re-queue failed docs
 docker-compose exec backend python -m app.scripts.cleanup_en_insights # remove English insights
@@ -97,6 +102,8 @@ PostgreSQL 16 **có pgvector** — image phải là `pgvector/pgvector:pg16`, KH
 > ⚠️ **Đổi image từ `postgres:16-alpine` trên volume `pgdata` CŨ**: alpine dùng musl, image pgvector dùng glibc, mà hai libc sắp xếp `en_US.utf8` khác nhau ⇒ chạy `REINDEX DATABASE ai_radar` ngay sau khi đổi (dữ liệu và layout PG16 thì tương thích, không phải dump/restore). Dựng mới hoàn toàn thì không cần.
 >
 > Sau migration 012, cột `embedding` **rỗng** — nó là schema, không phải dữ liệu (migration cố ý không gọi Vertex). Backfill bằng `docker compose exec backend python -m app.scripts.embed_insights`.
+>
+> Migration **014** thêm bảng `document_chunks` (đoạn thân bài + `vector(768)` + HNSW cosine) — cũng **rỗng sau migration**, backfill bằng `python -m app.scripts.chunk_documents`. Đo 28/07: 179 bài → **535 đoạn**, bảng 5,4MB kể cả index, backfill 1 phút 55.
 
 Key models: `Source` (RSS feeds with trust_tier, **`region`** ∈ `global`/`china`/`vietnam`, **`target_roles`** VARCHAR[]) → `RawDocument` (fetched content, processing_status) → `Insight` (analyzed output). Delivery: `Subscriber` (id UUID PK, `email` unique, roles[] từ `ALLOWED_ROLES`, active, `unsubscribe_token`) + `DeliveryLog` (unique insight_id+subscriber_id+kind — idempotent).
 
@@ -156,6 +163,8 @@ không bắn alert hồi tố.
 Backwards compatible: insights cũ chưa có 7 fields trả `null`; UI hide gracefully (không render placeholder).
 
 Regenerate insights cũ với prompt v2: `docker-compose exec backend python -m app.scripts.regenerate_insights --limit 50`.
+
+> ⚠️ `regenerate_insights` ghi đè `signal`/`summary_short`/`topics` — đúng bộ field `build_embedding_text` dùng — nên nó **phải embed lại** (sửa 28/07/2026; trước đó vector vẫn mô tả bản phân tích CŨ và tầng vector của chat xếp hạng theo một nội dung không còn tồn tại, **không có gì báo lỗi**). Embed lỗi thì **giữ vector cũ** chứ không set NULL. `document_chunks` KHÔNG cần sinh lại — chúng cắt từ `normalized_content`, mà regenerate không đụng thân bài.
 
 ## Vietnamese Taxonomy (Closed Sets)
 
@@ -245,6 +254,18 @@ Minimum confidence to publish: **0.3** (below this → `failed`, no insight crea
     - Marker trong answer **giữ nguyên số**, server KHÔNG đánh số lại (đánh lại là *viết lại* output của model, và đá nhau khi câu trả lời tự nhắc "tin số 3 ở trên"). Danh sách nguồn dưới bong bóng vì thế hiện `[3][7][12]` — **khớp marker inline**, không phải `[1][2][3]`.
     - Đây là lỗi **sống ở khe giữa hai tầng**: `test_resolve_citations_maps_markers_in_order` khẳng định `[2]→B, [1]→A` và **xanh** ở backend, trong khi chính ca đó làm widget trỏ sai cả hai. Test một bên ranh giới không bảo vệ được ranh giới — lưới thật là `frontend/src/components/__tests__/chatAnswer.boundary.test.ts` (6 dãy marker, kèm một test đối chứng chứng minh cách cũ sai 5/6).
     - Marker không liền mạch từ 1 được log mức **DEBUG** ở `resolve_citations` — tín hiệu sớm cho việc xếp hạng đặt tin lệch vào top. Quan sát, không phải lỗi.
+  - **Tín hiệu THỨ BA: tương đồng mức ĐOẠN thân bài** (change `chat-chunk-retrieval`, 28/07/2026). RRF nay là `1/(60+r_lex) + 1/(60+r_vec) + 1/(60+r_chunk)`. Lý do: hai tín hiệu cũ đều đọc **bản phân tích do Gemini viết** (`_relevance` soi 5 field, `build_embedding_text` embed đúng 5 field đó), phủ **4%** từ vựng thân bài — nên hỏi bằng định danh chỉ có trong bài (`SquashFS`, `SPDX`, `HMAC-SHA256`) thì không tín hiệu nào biết bài đó tồn tại. Đo 28/07 trên 15 kịch bản `detail_discovery`: recall@5 **0,667 → 1,000**, hạng xấu nhất 29 → 4; toàn bộ 98 câu RS: r@5 0,832 → 0,900, r@60 0,975 → 0,968.
+    - **Một suất Ô SÂU dành cho tin có đoạn khớp NHẤT toàn corpus** (`_best_chunk_match`, chỉ nhận **hạng đoạn = 1**, hoà thì bỏ qua; đứng sau `referenced_insight_ids`, trước phần lấp theo thứ hạng tổng). Vì sao cần: tầng đoạn chữa **truy hồi** nhưng không chữa **bằng chứng** — bài hạng 4–5 vào prompt chỉ dưới dạng dòng index nén của phần *phân tích*, đúng chỗ KHÔNG chứa định danh được hỏi, nên model từ chối dù bài đúng đã nằm trong context. Đo 28/07: `det-squashfs` (hạng tổng 4) và `det-spdx-cyclonedx` (hạng 5) đều có hạng đoạn 1 → AnsRel **0,00 → 1,00**; nhóm `detail_discovery` **12/15 → 15/15** câu trả lời được, AnsRel 0,73 → **0,93**. Đây KHÔNG phải heuristic đoán ý định câu hỏi (thứ repo này đã trả giá nhiều lần) mà là một **sự kiện đo được**; và ranh giới spec vẫn nguyên — nội dung vẫn đi qua ô sâu, chỉ đổi tin nào được rót. **Không** áp cho chế độ mở rộng (ô sâu duy nhất ở đó là bài đang xem).
+    - **ĐOẠN XẾP HẠNG, INSIGHT TRÍCH DẪN** — bất biến quan trọng nhất. Đoạn KHÔNG BAO GIỜ là đích của marker `[n]`, không bao giờ vào prompt như một mục nguồn đánh số riêng. Nội dung vào câu trả lời vẫn đến từ **ô sâu** của `chat-context-depth`. Cho đoạn thành nguồn trích dẫn là dựng lại cái bẫy "hai hệ quy chiếu cho `n`" của `chat-citation-integrity`, ở quy mô lớn hơn (bài 5 đoạn ⇒ 5 số cho một nguồn). Khoá bằng `tests/test_chunk_not_citable.py`.
+    - **Insight nhận hạng của ĐOẠN TỐT NHẤT** (`min`), không phải trung bình — trung bình phạt bài dài vì những đoạn lạc đề mà chính nó không chọn có.
+    - **Tin chưa có đoạn mượn `rank_vector` của chính nó**; nhưng **cả lượt không có tín hiệu đoạn thì BỎ HẲN số hạng thứ ba**, không phải cho mượn. Mượn ở mức toàn lượt sẽ nhân đôi trọng số tầng vector và cho một thứ tự KHÁC bản hai tín hiệu — tức là một đường xếp hạng thứ ba xuất hiện đúng lúc hệ thống đang hỏng. Suy giảm êm nghĩa là **trùng khít**.
+    - ⚠️ **Câu RỖNG TỪ KHOÁ phải tắt CẢ tầng đoạn, không chỉ tầng vector.** Bỏ sót đúng dòng này thì `rank-generic` ("Có gì mới không?") tụt recall@60 1,00 → 0,00 — tin CISA vá khẩn rơi xuống **hạng 109/179**, văng khỏi cả index. Lượt mô phỏng ngoài `_rank` KHÔNG thấy lỗi này; chỉ RS harness chạy qua đúng `_rank` production mới lộ.
+    - **Lọc thô đẩy xuống SQL** (`ORDER BY embedding <=>` trên HNSW, `DEFAULT_CHUNK_LIMIT=300`) — đây là **cắt lấy ứng viên**, KHÔNG phải ngưỡng similarity. Đo 28/07: **13ms/câu** (ngưỡng mở lại thiết kế là 0,5s), ~125 tin có thứ hạng đoạn, rộng hơn `chat_index_top_k`=60 một quãng an toàn.
+    - **RS harness vẫn MIỄN PHÍ và offline** nhờ đông lạnh **THỨ HẠNG**, không phải vector đoạn (`chat_chunk_ranks.jsonl`, 0,6MB): đông lạnh vector buộc harness tự dựng lại phép `ORDER BY <=>` + gộp `min` bằng code thứ hai — đúng chế độ hỏng "hai đường tính khác nhau, không có gì báo lỗi". Thêm kịch bản / đổi hằng số chunk ⇒ `build_fixture_chat --top-up`. File mang **dòng meta dấu vân tay** (số đoạn + hằng số chunk + model embedding) và `load_chunk_ranks` **NỔ** nếu lệch — không có nó thì đổi hằng số chunk rồi `--redo` sẽ để fixture mốc mà mọi con số vẫn trông bình thường.
+    - ⚠️ **Bảng đoạn rỗng = suy giảm IM LẶNG**: `alembic downgrade -1` DROP TABLE nên xoá sạch dữ liệu, và chat chỉ lặng lẽ tụt về 2 tín hiệu. Sau mỗi round-trip migration **phải** chạy lại `chunk_documents`. `_chunk_ranks` nay log WARNING khi bảng rỗng để biến nó thành lỗi nghe được.
+    - **Hằng số chunk là hợp đồng embedding** (`app/ai/chunking.py`: 2000/2400/300 ký tự): đổi ⇒ **bắt buộc** `chunk_documents --redo` + sinh lại fixture, vì trộn hai họ vector làm cosine lệch mà **không có gì báo lỗi**.
+    - **`purge_expired` phải xoá đoạn TƯỜNG MINH**: bảng có `ON DELETE CASCADE`, nhưng purge không xoá hàng `raw_documents` — nó chỉ rỗng hoá `normalized_content`, nên cascade không bắn và đoạn sống sót cùng nội dung đã bị yêu cầu xoá.
+    - Lượt embed đoạn **KHÔNG** tính vào `MAX_DAILY_CHAT_CALLS`/`MAX_DAILY_ANALYSIS` (cùng lý do với embed insight).
   - **Truy hồi LAI: RRF(vector, lexical), KHÔNG ngưỡng** (change `chat-hybrid-retrieval`, 27/07/2026). Tầng độ‑liên‑quan của `_rank` trộn **thứ hạng** lexical (`_relevance`, khớp biên từ) với **thứ hạng** vector (cosine embedding) bằng `1/(60 + rank)`, rồi mới tới khoá phụ `score_for_role`, rồi cắt `chat_index_top_k`. Chữa chế độ hỏng còn lại của keyword thuần: hỏi "DevOps cần chú ý gì" mà tin đúng là checklist Kubernetes **không chứa chữ DevOps** → lexical đẩy xuống hạng 47, vector kéo lên hạng 1. Đo 27/07 trên 42 câu RS: recall@60 0,964 → 0,970, **recall@5 0,780 → 0,859**, không câu nào tụt.
     - **RRF chứ không cộng điểm thô**: cosine và số‑từ‑khoá‑khớp không cùng thang đo; chuẩn hoá chúng về một thang là bịa ra một hằng số không ai kiểm được. RRF chỉ đọc thứ hạng nên miễn nhiễm. `RRF_K = 60` trùng số với `chat_index_top_k` là **ngẫu nhiên** — hằng số làm phẳng ≠ số tin vào prompt, đổi K không được đổi nó.
     - **Giữ CẢ lexical, không thay hẳn bằng vector**: vector kém ở khớp CHÍNH XÁC (tên model, mã CVE, số phiên bản) — đúng loại câu hỏi hay gặp ở đây.

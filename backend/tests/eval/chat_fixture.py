@@ -7,6 +7,7 @@ Năm mảnh, năm file — đọc được độc lập, sinh lại được b�
     chat_scenarios.jsonl     ~50 kịch bản gán nhãn tay (mode, câu hỏi, must_have, lý do)
     chat_embeddings.jsonl    vector 768 chiều của từng insight (chat-hybrid-retrieval)
     chat_query_vectors.jsonl vector 768 chiều của từng CÂU HỎI trong bộ kịch bản
+    chat_chunk_ranks.jsonl   thứ hạng đoạn thân bài theo từng câu hỏi (chat-chunk-retrieval)
 
 Hai file vector sinh ra cùng `chat-hybrid-retrieval` (27/07/2026) và tồn tại vì đúng một lý
 do: giữ bộ đo xếp hạng **miễn phí và tất định** sau khi `_rank` có tầng vector. Không có
@@ -24,6 +25,7 @@ bài. Nhét content của cả 179 tin vào corpus là ~840KB thừa trong repo.
 
 import json
 import uuid
+from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
 
@@ -36,6 +38,7 @@ ANCHORS_PATH = FIXTURE_DIR / "chat_anchors.jsonl"
 SCENARIOS_PATH = FIXTURE_DIR / "chat_scenarios.jsonl"
 EMBEDDINGS_PATH = FIXTURE_DIR / "chat_embeddings.jsonl"
 QUERY_VECTORS_PATH = FIXTURE_DIR / "chat_query_vectors.jsonl"
+CHUNK_RANKS_PATH = FIXTURE_DIR / "chat_chunk_ranks.jsonl"
 
 # Mọi field mà pipeline chat thật ĐỌC. Danh sách này là hợp đồng giữa fixture và code
 # sản phẩm — thiếu một field thì bộ đo vẫn chạy nhưng đo trên đầu vào nghèo hơn
@@ -125,6 +128,58 @@ def load_embeddings(path: Path = EMBEDDINGS_PATH) -> dict[str, list[float]]:
 def load_query_vectors(path: Path = QUERY_VECTORS_PATH) -> dict[str, list[float]]:
     """`scenario_id → vector câu hỏi`. Đông lạnh để bộ đo không phải gọi Vertex."""
     return {row["scenario_id"]: row["embedding"] for row in _load_jsonl(path)}
+
+
+@lru_cache(maxsize=1)
+def load_chunk_ranks(path: Path = CHUNK_RANKS_PATH) -> dict[str, dict[uuid.UUID, int]]:
+    """`scenario_id → {insight_id: thứ hạng đoạn khớp tốt nhất}` (chat-chunk-retrieval, D4-C).
+
+    Đông lạnh **kết quả truy vấn**, không phải vector đoạn: harness nhận đúng con số mà
+    `DocumentChunkRepository.retrieve_chunk_ranks` đưa cho production, thay vì tự dựng lại
+    phép `ORDER BY embedding <=>` bằng một đoạn code thứ hai (đó là chế độ hỏng "hai đường
+    tính khác nhau, không có gì báo lỗi").
+
+    **Ném lỗi khi thiếu file** — cùng lý do với `load_embeddings`: thiếu tín hiệu đoạn không
+    làm bộ đo gãy, nó chỉ lặng lẽ đo một `_rank` hai tín hiệu và cho ra một con số trông
+    hoàn toàn bình thường.
+
+    ⚠️ **Kiểm dấu vân tay lô chunk.** Thứ hạng ở đây là đầu ra của một lô `document_chunks`
+    cụ thể. Đổi hằng số chunk hoặc đổi model embedding rồi `chunk_documents --redo` sẽ tạo
+    một lô khác, trong khi file này vẫn giữ thứ hạng của lô CŨ — và mọi con số vẫn trông
+    bình thường. Đó là hỏng im lặng, đúng loại lỗi bộ đo sinh ra để chặn, nên nó phải NỔ.
+
+    Cache vì `chat_answer_harness` hỏi một lần MỖI kịch bản (98 lượt × 0,6MB nếu đọc lại).
+    """
+    from app.ai.chunking import MAX_CHARS, OVERLAP_CHARS, TARGET_CHARS
+    from app.config import settings
+
+    rows = _load_jsonl(path)
+    meta = rows[0] if rows[0].get("meta") else None
+    if meta is None:
+        raise ValueError(
+            f"{path.name} thiếu dòng meta (dấu vân tay lô chunk). Sinh lại bằng "
+            "`python -m tests.eval.build_fixture_chat --top-up`."
+        )
+
+    now = [TARGET_CHARS, MAX_CHARS, OVERLAP_CHARS]
+    if meta.get("chunk_constants") != now:
+        raise ValueError(
+            f"Hằng số chunk đã đổi {meta.get('chunk_constants')} → {now}, nhưng "
+            f"{path.name} vẫn mang thứ hạng của lô đoạn CŨ. Chạy "
+            "`python -m app.scripts.chunk_documents --redo`, rồi "
+            "`python -m tests.eval.build_fixture_chat --top-up`, rồi chốt lại baseline RS."
+        )
+    if meta.get("embedding_model") != settings.embedding_model_id:
+        raise ValueError(
+            f"Model embedding đã đổi {meta.get('embedding_model')} → "
+            f"{settings.embedding_model_id}; thứ hạng đoạn đông lạnh không còn so được. "
+            "Chạy lại `chunk_documents --redo` + `build_fixture_chat --top-up`."
+        )
+    return {
+        row["scenario_id"]: {uuid.UUID(k): v for k, v in row["ranks"].items()}
+        for row in rows
+        if not row.get("meta")
+    }
 
 
 def load_scenarios(path: Path = SCENARIOS_PATH) -> list[dict]:

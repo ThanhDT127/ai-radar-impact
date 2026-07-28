@@ -41,6 +41,7 @@ from app.config import settings
 from app.models.insight import Insight
 from app.models.raw_document import RawDocument
 from app.repositories.chat_log_repo import ChatLogRepository
+from app.repositories.document_chunk_repo import DocumentChunkRepository
 from app.repositories.insight_repo import InsightRepository
 from app.services.chat_grounding import (
     build_context,
@@ -274,6 +275,23 @@ def _question_terms(question: str) -> list[str]:
     return [w for w in words if len(w) >= 2 and w not in _STOPWORDS]
 
 
+def _best_chunk_match(chunk_ranks: dict[uuid.UUID, int] | None) -> uuid.UUID | None:
+    """Tin giữ đoạn khớp NHẤT toàn corpus (hạng đoạn 1), hoặc `None`.
+
+    Chỉ nhận hạng **1** chứ không phải "hạng tốt nhất trong số đã trả về": hạng 1 nghĩa là
+    trên toàn bảng `document_chunks` không đoạn nào gần câu hỏi hơn đoạn này. Nới ra hạng 2–3
+    là bắt đầu đoán, và ô sâu chỉ có 3 suất — mỗi suất chen vào là một tin xếp hạng cao bị
+    đẩy ra.
+
+    Hoà nhau (nhiều tin cùng hạng 1) thì trả `None`: không có căn cứ chọn tin nào, mà chọn
+    bừa theo thứ tự dict là đưa một yếu tố tuỳ tiện vào context.
+    """
+    if not chunk_ranks:
+        return None
+    firsts = [i for i, rank in chunk_ranks.items() if rank == 1]
+    return firsts[0] if len(firsts) == 1 else None
+
+
 def _cosine(a, b) -> float:
     """Cosine similarity giữa hai vector. Trả 0.0 nếu một bên là vector không.
 
@@ -352,6 +370,9 @@ class ChatService:
         self.gemini = gemini or get_chat_client()
         self.insight_repo = InsightRepository(session)
         self.chat_log_repo = ChatLogRepository(session)
+        # Tầng đoạn chạm DB ở ĐÂY và chỉ ở đây (design D4, phương án B) — `_rank` nhận
+        # `chunk_ranks` làm tham số và vẫn là hàm thuần, nhờ vậy RS harness đo được offline.
+        self.chunk_repo = DocumentChunkRepository(session)
         # Bộ đếm lượt gọi ĐÃ TỐN TIỀN của request hiện tại. Phải là thuộc tính instance
         # chứ không phải giá trị trả về: nếu đếm bằng return thì một lỗi giữa chừng
         # (sau khi model đã trả lời) làm số đếm biến mất và budget rò rỉ.
@@ -595,11 +616,19 @@ class ChatService:
         #
         # Chế độ mở rộng của `chat-scope-routing` đi qua đúng hàm này, nên nó hưởng luôn
         # recall ngữ nghĩa mà không cần một đường truy hồi riêng.
-        matched, query_vector = await asyncio.gather(
+        # Tín hiệu đoạn PHỤ THUỘC vector câu hỏi, nên nó không thể song song với
+        # `_embed_question` — nhưng chuỗi (embed → truy vấn đoạn) thì song song được với
+        # `list_for_chat`. Gộp thành một nhánh để phần chờ Postgres (~0,2s) che luôn truy vấn
+        # HNSW (~13ms), thay vì cộng nối tiếp vào sau.
+        async def _vector_then_chunks():
+            vector = await self._embed_question(question)
+            return vector, await self._chunk_ranks(vector)
+
+        matched, (query_vector, chunk_ranks) = await asyncio.gather(
             self.insight_repo.list_for_chat(published_since=since),
-            self._embed_question(question),
+            _vector_then_chunks(),
         )
-        matched = self._rank(matched, question, query_vector)
+        matched = self._rank(matched, question, query_vector, chunk_ranks)
 
         # ⚠️ Tính "vai trò không có tin" trên TOÀN BỘ tập khớp, TRƯỚC khi cắt top-K.
         # Nếu tính sau khi cắt, một vai trò có tin nhưng xếp hạng dưới ngưỡng sẽ bị
@@ -627,6 +656,10 @@ class ChatService:
             k_deep=1 if focus is not None else settings.chat_deep_slots,
             index_limit=settings.chat_index_top_k,
             include_content=True if focus is not None else settings.chat_deep_include_content,
+            # Chỉ áp cho chế độ toàn cục/working set. Chế độ mở rộng có đúng MỘT ô sâu là bài
+            # đang xem (design D5 giữ đường cũ nguyên xi), chen tin khác vào đó sẽ đẩy chính
+            # bài người dùng đang đọc ra ngoài.
+            best_chunk_match=None if focus is not None else _best_chunk_match(chunk_ranks),
         )
         index_block, mapping = ctx.index_block, ctx.mapping
 
@@ -702,6 +735,7 @@ class ChatService:
         insights: list[Insight],
         question: str,
         query_vector: list[float] | None = None,
+        chunk_ranks: dict[uuid.UUID, int] | None = None,
     ) -> list[Insight]:
         """Xếp hạng: ĐỘ LIÊN QUAN tới câu hỏi trước, rồi mới tới độ quan trọng chung.
 
@@ -739,6 +773,19 @@ class ChatService:
         vector biến mất và thứ tự **trùng khít bản lexical cũ**: RRF trên một tín hiệu là
         hàm đơn điệu của chính thứ hạng đó. Suy giảm êm theo đúng nghĩa đen, không phải một
         đường xếp hạng thứ hai chạy song song (design D6).
+
+        **Số hạng THỨ BA: tương đồng ở mức ĐOẠN THÂN BÀI** (`chat-chunk-retrieval`,
+        28/07/2026). Hai tín hiệu trên đều đọc *bản phân tích do Gemini viết*, không đọc bài
+        viết: `_relevance` soi 5 field phân tích, `build_embedding_text` embed đúng 5 field
+        đó. Đo 28/07 trên 179 bài, biểu diễn truy hồi phủ **4%** từ vựng thân bài — thứ mất
+        đi là phần đặc trưng nhất (`CVE-2026-9770`, `SquashFS`, `SPDX`, `Annex III`). Hệ quả
+        là **khám phá bằng chi tiết** hỏng: hỏi bằng một định danh chỉ có trong thân bài thì
+        không tín hiệu nào biết bài đó tồn tại. `chunk_ranks` mang thứ hạng của **đoạn khớp
+        tốt nhất** thuộc mỗi tin (design D1 — trung bình sẽ phạt bài dài có nhiều đoạn lạc đề).
+
+        `chunk_ranks=None` hoặc tin vắng mặt trong đó → mượn `rank_vector` của chính nó, đúng
+        luật mà tin thiếu embedding đang dùng (design D2). Đây là điều kiện làm cửa sổ backfill
+        không thành một thiên lệch hệ thống.
         """
         if not insights:
             return []
@@ -762,6 +809,16 @@ class ChatService:
         # nội dung ngữ nghĩa thật — đó đúng là ca tầng vector sinh ra để cứu.
         if not terms:
             query_vector = None
+            # ⚠️ Tầng ĐOẠN phải tắt cùng lúc, không chỉ tầng vector mức insight. Lý do y hệt
+            # và hậu quả còn nặng hơn: câu không có chủ đề thì đoạn nào cũng "hơi giống", mà
+            # đoạn là văn bản thô nên nhiễu còn mạnh hơn bản phân tích cô đọng.
+            #
+            # Đo 28/07/2026, bỏ sót đúng dòng này: `rank-generic` ("Có gì mới không?") tụt
+            # recall@60 1,00 → 0,00 — tin CISA ra lệnh vá khẩn rơi xuống **hạng 109/179**,
+            # tức là văng khỏi cả index chứ không chỉ khỏi top-5. Lượt mô phỏng trước đó
+            # KHÔNG thấy lỗi này vì script mô phỏng tự áp cổng ở ngoài; chỉ khi tầng đoạn
+            # chạy qua đúng `_rank` của production thì nó mới lộ ra.
+            chunk_ranks = None
 
         def importance(insight: Insight) -> tuple:
             if roles:
@@ -791,7 +848,21 @@ class ChatService:
             rank_vector = vector_ranks[index]
             if rank_vector is None:
                 rank_vector = rank_lexical
-            return 1.0 / (RRF_K + rank_lexical) + 1.0 / (RRF_K + rank_vector)
+            score = 1.0 / (RRF_K + rank_lexical) + 1.0 / (RRF_K + rank_vector)
+            if not chunk_ranks:
+                # ⚠️ Cả lượt không có tín hiệu đoạn (truy vấn chunk lỗi, chưa backfill, câu
+                # rỗng từ khoá) thì BỎ HẲN số hạng thứ ba — không phải cho nó mượn
+                # `rank_vector`. Mượn ở đây sẽ nhân đôi trọng số tầng vector và cho ra một
+                # thứ tự KHÁC bản hai tín hiệu, tức là một đường xếp hạng thứ ba xuất hiện
+                # đúng vào lúc hệ thống đang hỏng. Suy giảm êm nghĩa là **trùng khít**.
+                return score
+            # Trong lượt CÓ tín hiệu đoạn, tin chưa được chunk mượn `rank_vector` của chính
+            # nó (design D2) — cùng luật với tin thiếu embedding ở trên, và cùng lý do: bỏ
+            # số hạng đi là phạt ngầm một phần ba, cho cosine 0 là biến "chưa biết" thành
+            # "chắc chắn không liên quan". Đó là điều kiện để cửa sổ backfill không thành
+            # một thiên lệch hệ thống.
+            rank_chunk = chunk_ranks.get(insights[index].id, rank_vector)
+            return score + 1.0 / (RRF_K + rank_chunk)
 
         order = sorted(
             range(len(insights)),
@@ -834,6 +905,35 @@ class ChatService:
         for (idx, _), rank in zip(indexed, ranks):
             out[idx] = rank
         return out
+
+    async def _chunk_ranks(self, query_vector: list[float] | None) -> dict[uuid.UUID, int]:
+        """Thứ hạng đoạn khớp tốt nhất mỗi insight. `{}` = không có tín hiệu đoạn lượt này.
+
+        **Suy giảm êm là bất biến, không phải nỗ lực** (cùng luật với tầng vector): truy vấn
+        lỗi → `{}` → `_rank` bỏ hẳn số hạng thứ ba → thứ tự **trùng khít** bản hai tín hiệu.
+        Chat không bao giờ 500 vì bảng đoạn.
+        """
+        if query_vector is None or not settings.chat_embedding_enabled:
+            return {}
+        try:
+            ranks = await self.chunk_repo.retrieve_chunk_ranks(query_vector)
+            if not ranks:
+                # Bảng đoạn RỖNG trong khi mọi điều kiện đều bật = chưa backfill, hoặc vừa
+                # `alembic downgrade` (DROP TABLE xoá sạch dữ liệu rồi upgrade dựng lại bảng
+                # trống). Không có dòng này thì hệ thống chỉ **âm thầm** tụt về hai tín hiệu:
+                # chat vẫn trả lời trôi chảy, không lỗi nào bắn ra, và người vận hành không
+                # có cách nào biết mình đang chạy một pipeline kém hơn.
+                logger.warning(
+                    "Không có thứ hạng đoạn nào — bảng `document_chunks` rỗng? "
+                    "Chạy `python -m app.scripts.chunk_documents`. Xếp hạng đang chạy bằng "
+                    "2 tín hiệu thay vì 3."
+                )
+            return ranks
+        except Exception as e:
+            # WARNING chứ không ERROR: pipeline vẫn trả lời đúng, chỉ kém một tín hiệu. Nhưng
+            # phải để lại dấu vết — một sự cố kéo dài ở đây trông y hệt "chat hơi kém".
+            logger.warning("Truy hồi mức đoạn lỗi — xếp hạng bằng 2 tín hiệu: %s", e)
+            return {}
 
     async def _embed_question(self, question: str) -> list[float] | None:
         """Embedding của câu hỏi cho tầng vector. `None` = xếp hạng bằng lexical thôi.

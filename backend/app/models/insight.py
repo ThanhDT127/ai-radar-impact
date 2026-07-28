@@ -74,3 +74,9 @@ class Insight(Base):
     raw_document: Mapped["RawDocument"] = relationship(  # noqa: F821
         "RawDocument", back_populates="insight"
     )
+    # Đoạn thân bài — tín hiệu XẾP HẠNG, không phải nguồn trích dẫn (chat-chunk-retrieval).
+    # `lazy="raise"` cố ý: đường phục vụ chat nạp hàng trăm insight một lượt, và một lazy-load
+    # lọt vào đó là N+1 im lặng trên đúng đường nóng. Cần đoạn thì `selectinload` tường minh.
+    chunks: Mapped[list["DocumentChunk"]] = relationship(  # noqa: F821
+        "DocumentChunk", back_populates="insight", lazy="raise", passive_deletes=True
+    )

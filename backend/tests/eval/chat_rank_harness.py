@@ -64,6 +64,7 @@ from app.config import settings
 from app.services.chat_service import ChatService, _question_terms, _roles_in_question
 from tests.eval.chat_fixture import (
     FIXTURE_DIR,
+    load_chunk_ranks,
     load_corpus,
     load_query_vectors,
     load_scenarios,
@@ -74,7 +75,7 @@ BASELINE_PATH = FIXTURE_DIR / "chat_rank_baseline.json"
 
 BASELINE_META = {
     "measured_at": "2026-07-28",
-    "commit": "(chat-context-depth, chưa commit)",
+    "commit": "(chat-chunk-retrieval, chưa commit)",
     "corpus": (
         "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary; "
         "vector từ chat_embeddings.jsonl + chat_query_vectors.jsonl (chat-hybrid-retrieval)"
@@ -84,6 +85,55 @@ BASELINE_META = {
         "mục tiêu của `_rank`. Đừng 'chữa' nó bằng cách sửa câu hỏi cho gần chữ trong tin."
     ),
     "revisions": [
+        {
+            "date": "2026-07-28",
+            "recall_at_k": "0,968 → 0,968 (không đổi)",
+            "recall_at_answer": "0,900 → 0,900 (không đổi)",
+            "reason": (
+                "Chốt lại để bản ghi khớp bộ kịch bản, KHÔNG phải vì xếp hạng đổi — cả hai "
+                "số y nguyên. Hai việc: "
+                "(a) `det-gpai-annex` đổi câu hỏi (nhãn cũ có TIỀN ĐỀ SAI: nghĩa vụ GPAI "
+                "nằm ở Chapter V chứ không ở Annex nào; xem revision cùng ngày trong "
+                "`chat_answer_harness`), nên dòng đông lạnh phải mang câu hỏi mới. "
+                "(b) Suất ô sâu cho tin có đoạn khớp nhất là thay đổi ở `build_context`, "
+                "**không** ở `_rank` — RS đo `_rank` nên không thấy gì, đúng như thiết kế. "
+                "Ghi ra đây để người đọc sau không đi tìm một thay đổi số liệu không tồn tại."
+            ),
+        },
+        {
+            "date": "2026-07-28",
+            "recall_at_k": "0,969 → 0,968",
+            "recall_at_answer": "0,876 → 0,900",
+            "reason": (
+                "`chat-chunk-retrieval`: tầng độ‑liên‑quan thêm số hạng RRF THỨ BA — tương "
+                "đồng ở mức ĐOẠN thân bài (`document_chunks`, 535 đoạn / 179 bài). "
+                "Kèm 15 kịch bản mới nhóm `detail_discovery`. "
+                "\n\n"
+                "⚠️ HAI CON SỐ TỔNG KHÔNG SO ĐƯỢC với dòng dưới (bộ kịch bản đi từ 83 lên "
+                "98 câu). So sánh ĐÚNG là trên cùng 98 câu, đo bằng `--without-chunks` "
+                "cùng ngày: **recall@5 0,832 → 0,900** và recall@60 0,975 → 0,968. "
+                "\n\n"
+                "THẮNG (cái change nhắm tới): `detail_discovery` r@5 **0,67 → 1,00** — "
+                "15/15 câu hỏi bằng định danh chỉ có trong thân bài (`SquashFS`, `SPDX`, "
+                "`HMAC-SHA256`, `ChunkingStrategy`) nay đưa đúng bài lên top‑5; hạng xấu "
+                "nhất 29 → 4. Lan sang nhóm khác: `security` r@5 0,88 → 0,94, "
+                "`open_model` 0,78 → 0,89. "
+                "\n\n"
+                "TRẢ GIÁ — 4 câu tụt, ghi rõ để đừng ai đọc nhầm là 'không mất gì': "
+                "(a) `glo-iot-security` r@5 1,00 → 0,50, `rank-device-trap` 1,00 → 0,50, "
+                "`cmp-pq-partial` 1,00 → 0,50 — cả ba GIỮ NGUYÊN `must_have` chính ở hạng "
+                "1, cái rơi là tin THỨ HAI của một câu hỏi rộng, và chỗ nó nhường lại cho "
+                "tin cùng chủ đề khớp sâu hơn ở thân bài. Đây là đổi thứ tự TRONG một vùng "
+                "liên quan, không phải tin đúng bị đẩy ra ngoài. "
+                "(b) ⚠️ `rank-eol-khai-tu` r@60 **0,50 → 0,00** — nặng nhất, vì mất luôn "
+                "chỗ trong index chứ không chỉ trong top‑5 (hai tin rơi xuống hạng 80 và "
+                "92). Câu 'công nghệ nào sắp bị khai tử' vốn đã là ca đỏ có chủ đích: "
+                "embedding không nối được thành ngữ đó với 'end of support', và tầng đoạn "
+                "thêm nhiễu vào đúng câu mà cả hai tín hiệu cũ đều mù. Nó GIỮ NGUYÊN vai "
+                "trò mốc đo cho rerank cross‑encoder — **đừng chữa bằng cách sửa câu hỏi "
+                "cho gần chữ trong tin hơn**, làm thế là xoá phép đo."
+            ),
+        },
         {
             "date": "2026-07-28",
             "recall_at_k": "0,922 → 0,969",
@@ -200,10 +250,19 @@ class _NoModel:
         )
 
 
-def _rank(candidates: list, question: str, query_vector: list | None = None) -> list:
-    """`ChatService._rank` thật, gắn vào một service không có DB và không có model."""
+def _rank(
+    candidates: list,
+    question: str,
+    query_vector: list | None = None,
+    chunk_ranks: dict | None = None,
+) -> list:
+    """`ChatService._rank` thật, gắn vào một service không có DB và không có model.
+
+    `chunk_ranks` đến từ fixture đông lạnh (`chat_chunk_ranks.jsonl`) chứ không từ DB —
+    đó là cách tầng đoạn giữ được bất biến "miễn phí, offline, tất định" (design D4-C).
+    """
     service = ChatService(session=None, gemini=_NoModel())
-    return service._rank(candidates, question, query_vector)
+    return service._rank(candidates, question, query_vector, chunk_ranks)
 
 
 def _candidates(scenario: dict, corpus: list) -> list:
@@ -225,7 +284,11 @@ def _candidates(scenario: dict, corpus: list) -> list:
     return list(corpus)
 
 
-def measure(scenarios: list[dict] | None = None, use_vectors: bool = True) -> dict:
+def measure(
+    scenarios: list[dict] | None = None,
+    use_vectors: bool = True,
+    use_chunks: bool = True,
+) -> dict:
     """Chạy `_rank()` thật trên fixture. Không gọi model, tất định.
 
     `use_vectors=False` tắt tầng vector ở CẢ HAI phía (corpus và câu hỏi) để tái hiện
@@ -237,6 +300,16 @@ def measure(scenarios: list[dict] | None = None, use_vectors: bool = True) -> di
 
     corpus = rehydrate_corpus(load_corpus(), embeddings=None if use_vectors else {})
     query_vectors = load_query_vectors() if use_vectors else {}
+    chunk_ranks = load_chunk_ranks() if (use_vectors and use_chunks) else {}
+    if use_vectors and use_chunks:
+        missing_chunks = [s["id"] for s in scenarios if s["id"] not in chunk_ranks]
+        if missing_chunks:
+            raise ValueError(
+                f"{len(missing_chunks)} kịch bản chưa có thứ hạng đoạn "
+                f"({missing_chunks[:5]}). Chạy `python -m tests.eval.build_fixture_chat "
+                "--top-up` — đo tiếp sẽ cho những câu đó đi lối HAI tín hiệu và số sẽ sai "
+                "một cách im lặng."
+            )
     if use_vectors:
         missing = [s["id"] for s in scenarios if s["id"] not in query_vectors]
         if missing:
@@ -251,7 +324,12 @@ def measure(scenarios: list[dict] | None = None, use_vectors: bool = True) -> di
 
     for scenario in scenarios:
         candidates = _candidates(scenario, corpus)
-        ranked = _rank(candidates, scenario["question"], query_vectors.get(scenario["id"]))
+        ranked = _rank(
+            candidates,
+            scenario["question"],
+            query_vectors.get(scenario["id"]),
+            chunk_ranks.get(scenario["id"]),
+        )
         position = {str(insight.id): n for n, insight in enumerate(ranked, start=1)}
         selected = {str(i.id) for i in (ranked[:top_k] if top_k > 0 else ranked)}
 
@@ -433,16 +511,21 @@ def main() -> None:
                         help="ghi kết quả hiện tại thành baseline — CÓ CHỦ ĐÍCH, kèm lý do")
     parser.add_argument("--lexical-only", action="store_true",
                         help="tắt tầng vector (tái hiện pipeline trước chat-hybrid-retrieval)")
+    parser.add_argument("--without-chunks", action="store_true",
+                        help="tắt tầng ĐOẠN (tái hiện pipeline trước chat-chunk-retrieval)")
     args = parser.parse_args()
 
-    if args.lexical_only and args.freeze_baseline:
+    if (args.lexical_only or args.without_chunks) and args.freeze_baseline:
         raise SystemExit(
-            "Không chốt baseline từ lượt --lexical-only: baseline phải mô tả pipeline THẬT."
+            "Không chốt baseline từ lượt --lexical-only/--without-chunks: baseline phải "
+            "mô tả pipeline THẬT."
         )
 
-    result = measure(use_vectors=not args.lexical_only)
+    result = measure(use_vectors=not args.lexical_only, use_chunks=not args.without_chunks)
     if args.lexical_only:
         print("⚠️  LƯỢT ĐO KHÔNG CÓ TẦNG VECTOR — chỉ để dựng cột 'trước'.\n")
+    elif args.without_chunks:
+        print("⚠️  LƯỢT ĐO KHÔNG CÓ TẦNG ĐOẠN — chỉ để dựng cột 'trước'.\n")
     baseline = load_baseline()
     print(format_report(result, baseline))
 

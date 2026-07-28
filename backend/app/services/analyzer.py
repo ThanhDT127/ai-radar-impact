@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.chunking import split_content
 from app.ai.embedding import build_embedding_text
 from app.ai.gemini_client import EMBED_TASK_DOCUMENT, GeminiClient
 from app.ai.prompts import (
@@ -16,6 +17,7 @@ from app.ai.prompts import (
 from app.config import settings
 from app.models.raw_document import RawDocument
 from app.models.source import Source
+from app.repositories.document_chunk_repo import DocumentChunkRepository
 from app.repositories.insight_repo import InsightRepository
 from app.repositories.raw_document_repo import RawDocumentRepository
 
@@ -265,6 +267,7 @@ class AnalyzerService:
         self.session = session
         self.raw_doc_repo = RawDocumentRepository(session)
         self.insight_repo = InsightRepository(session)
+        self.chunk_repo = DocumentChunkRepository(session)
         self.gemini = GeminiClient()
 
     async def analyze_document(self, raw_doc: RawDocument, source: Source) -> bool:
@@ -380,6 +383,7 @@ class AnalyzerService:
         )
 
         self._attach_embedding(insight)
+        await self._attach_chunks(insight, raw_doc)
 
         await self.raw_doc_repo.update_status(raw_doc.id, "analyzed")
         return True
@@ -418,6 +422,42 @@ class AnalyzerService:
             )
             return
         insight.embedding = vector
+
+    async def _attach_chunks(self, insight, raw_doc: RawDocument) -> None:
+        """Cắt thân bài thành đoạn + embed, làm tín hiệu xếp hạng thứ ba (chat-chunk-retrieval).
+
+        Cùng luật với `_attach_embedding` và cùng một lý do: **không bao giờ chặn việc tạo
+        insight**. Đoạn là phụ trợ xếp hạng; mất nó thì tin đó tạm thời chỉ cạnh tranh bằng
+        hai tín hiệu cũ (`_rank` cho nó mượn thứ hạng vector của chính nó, không phạt ngầm),
+        và `app.scripts.chunk_documents` vá lại được về sau.
+
+        Lượt embed này KHÔNG tính vào `max_daily_analysis` / `max_daily_chat_calls` — hai bộ
+        đếm đó canh budget lượt sinh văn bản (~19k token trên `gemini-2.5-flash`), còn đây là
+        vài trăm token trên model embedding, rẻ hơn vài bậc. Trộn chung là để lượt gọi rẻ bào
+        mòn budget đắt.
+        """
+        try:
+            chunks = split_content(raw_doc.normalized_content)
+            if not chunks:
+                return
+            vectors = self.gemini.embed(chunks, EMBED_TASK_DOCUMENT)
+            await self.chunk_repo.replace_for_document(
+                raw_document_id=raw_doc.id,
+                insight_id=insight.id,
+                chunks=chunks,
+                embeddings=vectors,
+            )
+        except Exception as e:
+            # Bắt rộng có chủ đích: bất cứ thứ gì ném ra ở đây — lỗi lập trình, timeout,
+            # DB từ chối — đều làm `analyze_document` bỏ dở SAU KHI đã tốn hai lượt gọi
+            # model và đã tạo insight. Đó là cái giá không tương xứng với một tín hiệu
+            # xếp hạng phụ trợ.
+            logger.warning(
+                "Sinh đoạn thất bại cho insight %s — bỏ qua, vá bằng "
+                "`python -m app.scripts.chunk_documents`: %s",
+                insight.id,
+                e,
+            )
 
     async def run_pending(self, limit: int = 50) -> dict[str, int]:
         """Process up to `limit` pending raw documents, subject to daily cap.

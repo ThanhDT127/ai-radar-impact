@@ -18,7 +18,8 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.ai.gemini_client import GeminiClient
+from app.ai.embedding import build_embedding_text
+from app.ai.gemini_client import EMBED_TASK_DOCUMENT, GeminiClient
 from app.database import async_session_maker
 from app.models.insight import Insight
 from app.models.raw_document import RawDocument
@@ -95,6 +96,31 @@ async def main(limit: int, since: str | None, source_id: str | None) -> None:
             ins.risks = ai.risks
             ins.urgency = _compute_urgency(impact_label, raw_doc.published_at)
             ins.vietnam_relevance = _compute_vietnam_relevance(source, ai.topics)
+
+            # ⚠️ PHẢI embed lại: vừa ghi đè `signal`, `summary_short`, `topics` — đúng bộ
+            # field mà `build_embedding_text` dùng. Không embed lại thì vector vẫn mô tả bản
+            # phân tích CŨ, và tầng vector của `_rank` lặng lẽ xếp tin này theo một nội dung
+            # không còn tồn tại. Không có gì báo lỗi: cosine vẫn tính được, chỉ là sai.
+            #
+            # Đoạn (`document_chunks`) KHÔNG cần sinh lại — chúng cắt từ `normalized_content`,
+            # mà regenerate không đụng tới thân bài.
+            text = build_embedding_text(ins)
+            if text:
+                try:
+                    vector = gemini.embed_one(text, EMBED_TASK_DOCUMENT)
+                except Exception as e:  # embed lỗi không được làm hỏng lượt regenerate
+                    logger.warning("Embed lại lỗi cho insight %s: %s", ins.id, e)
+                    vector = None
+                if vector is None:
+                    # Để NGUYÊN vector cũ chứ không set NULL: vector cũ tuy lệch nhưng vẫn
+                    # gần chủ đề, còn NULL là mất hẳn tầng vector cho tin đó.
+                    logger.warning(
+                        "Insight %s giữ embedding CŨ (đã lệch với text mới) — vá bằng "
+                        "`python -m app.scripts.embed_insights --redo`",
+                        ins.id,
+                    )
+                else:
+                    ins.embedding = vector
             updated += 1
 
         await session.commit()

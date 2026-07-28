@@ -39,8 +39,12 @@ from sqlalchemy.orm import selectinload
 from app.ai.gemini_client import EMBED_TASK_QUERY, GeminiClient
 from app.database import async_session_maker
 from app.models.insight import Insight
+from app.ai.chunking import MAX_CHARS, OVERLAP_CHARS, TARGET_CHARS
+from app.config import settings
+from app.repositories.document_chunk_repo import DocumentChunkRepository
 from tests.eval.chat_fixture import (
     ANCHORS_PATH,
+    CHUNK_RANKS_PATH,
     CORPUS_FIELDS,
     CORPUS_PATH,
     EMBEDDINGS_PATH,
@@ -68,6 +72,20 @@ def _serialize(insight: Insight) -> dict:
 
 
 def _wanted_anchor_ids(scenarios_path: Path) -> set[str]:
+    """Bài nào cần `normalized_content` trong fixture.
+
+    Hai nguồn, và nguồn thứ hai là thứ dễ quên:
+      · `anchor_insight_id` — bài mà mode B/expanded neo vào;
+      · `must_have` của nhóm **`detail_discovery`** — câu hỏi bằng định danh chỉ có trong
+        THÂN BÀI. Chúng đi đường `global`, không có anchor, nhưng từ `chat-context-depth`
+        thì ô sâu rót cả `normalized_content` cho vài tin xếp hạng cao nhất của BẤT KỲ câu
+        toàn cục nào.
+
+    ⚠️ Thiếu nguồn thứ hai thì bộ đo nói dối theo hướng bi quan: đo 28/07, ba kịch bản
+    `detail_discovery` xếp **hạng 1** (tức là đã nằm trong ô sâu) vẫn bị chấm "từ chối", chỉ
+    vì fixture không có thân bài để rót — production thì có. Nhóm bị chấm AnsRel 0,57 trong
+    khi pipeline thật không hề hỏng như vậy.
+    """
     if not scenarios_path.exists():
         print(f"(chưa có {scenarios_path.name} — bỏ qua phần anchor, chạy lại sau khi soạn kịch bản)")
         return set()
@@ -78,6 +96,8 @@ def _wanted_anchor_ids(scenarios_path: Path) -> set[str]:
         row = json.loads(line)
         if row.get("anchor_insight_id"):
             ids.add(row["anchor_insight_id"])
+        if row.get("group") == "detail_discovery":
+            ids.update(row.get("must_have") or [])
     return ids
 
 
@@ -141,6 +161,69 @@ def _write_query_vectors(scenarios_path: Path, path: Path) -> None:
     print(f"Đã ghi {len(questions)} vector câu hỏi vào {path}")
 
 
+async def _write_chunk_ranks(session, scenarios_path: Path, path: Path) -> None:
+    """Đông lạnh **KẾT QUẢ** truy vấn đoạn cho từng kịch bản (design D4, phương án C).
+
+    Đông lạnh thứ hạng chứ KHÔNG đông lạnh vector đoạn. Hai lý do, lý do thứ hai mới là lý
+    do thật:
+
+    1. dung lượng — 535 vector đoạn là 4,3MB, gấp ba `chat_embeddings.jsonl`;
+    2. ⚠️ đông lạnh vector buộc harness phải **tự tính lại** thứ hạng đoạn trong Python, tức
+       là dựng lại phép `ORDER BY embedding <=>` + gộp `min` của SQL bằng một đoạn code thứ
+       hai. Đó đúng là chế độ hỏng "hai đường tính khác nhau, không có gì báo lỗi" mà phương
+       án A bị loại vì nó. Đông lạnh đầu ra thì harness đo `_rank` với **chính con số
+       production đưa vào**.
+
+    Cái giá: đổi hằng số chunk / đổi model embedding / thêm kịch bản ⇒ phải chạy lại.
+    """
+    if not scenarios_path.exists():
+        print(f"(chưa có {scenarios_path.name} — bỏ qua chunk ranks)")
+        return
+    if not QUERY_VECTORS_PATH.exists():
+        raise SystemExit("Cần query vector trước khi đông lạnh chunk ranks.")
+
+    vectors = {
+        json.loads(l)["scenario_id"]: json.loads(l)["embedding"]
+        for l in QUERY_VECTORS_PATH.open(encoding="utf-8")
+        if l.strip()
+    }
+    rows = [json.loads(l) for l in scenarios_path.open(encoding="utf-8") if l.strip()]
+    repo = DocumentChunkRepository(session)
+
+    if await repo.count() == 0:
+        raise SystemExit(
+            "Bảng document_chunks rỗng — chạy `python -m app.scripts.chunk_documents` "
+            "trước, không thì fixture đông lạnh một pipeline KHÔNG có tầng đoạn và bộ đo "
+            "sẽ im lặng chấm sai."
+        )
+
+    # Dòng META đầu file: dấu vân tay của LÔ CHUNK đã sinh ra bảng thứ hạng này. Không có
+    # nó thì fixture mốc một cách IM LẶNG — đổi hằng số chunk rồi `chunk_documents --redo`
+    # tạo ra một lô đoạn khác hẳn, trong khi thứ hạng đông lạnh vẫn là của lô cũ, và RS
+    # harness tiếp tục cho ra những con số trông hoàn toàn bình thường. Cùng họ với hai lỗi
+    # "bộ đo nói dối" đã phải sửa ở change này.
+    meta = {
+        "meta": True,
+        "chunk_count": await repo.count(),
+        "chunk_constants": [TARGET_CHARS, MAX_CHARS, OVERLAP_CHARS],
+        "embedding_model": settings.embedding_model_id,
+    }
+    with path.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps(meta, ensure_ascii=False) + "\n")
+        for row in rows:
+            vector = vectors.get(row["id"])
+            ranks = await repo.retrieve_chunk_ranks(vector) if vector else {}
+            fh.write(
+                json.dumps(
+                    {"scenario_id": row["id"],
+                     "ranks": {str(k): v for k, v in ranks.items()}},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    print(f"Đã ghi chunk ranks của {len(rows)} kịch bản vào {path}")
+
+
 async def build(corpus_path: Path, anchors_path: Path, scenarios_path: Path) -> None:
     async with async_session_maker() as session:
         result = await session.execute(
@@ -159,6 +242,7 @@ async def build(corpus_path: Path, anchors_path: Path, scenarios_path: Path) -> 
 
         _write_embeddings(insights, EMBEDDINGS_PATH)
         _write_query_vectors(scenarios_path, QUERY_VECTORS_PATH)
+        await _write_chunk_ranks(session, scenarios_path, CHUNK_RANKS_PATH)
 
         wanted = _wanted_anchor_ids(scenarios_path)
         if not wanted:
@@ -233,6 +317,12 @@ async def top_up(anchors_path: Path, scenarios_path: Path) -> None:
         print(f"Đã thêm {len(new)} vector câu hỏi vào {QUERY_VECTORS_PATH.name}")
     else:
         print("Mọi kịch bản đã có vector câu hỏi")
+
+    # Chunk ranks sinh lại TOÀN BỘ, không chỉ phần mới: nó là truy vấn DB thuần, miễn phí
+    # và tất định, nên không có lý do gì để nó lệch pha với bộ kịch bản. (Khác query vector —
+    # cái đó tốn tiền embed nên chỉ bù phần thiếu.)
+    async with async_session_maker() as session:
+        await _write_chunk_ranks(session, scenarios_path, CHUNK_RANKS_PATH)
 
     have_anchors = set()
     if anchors_path.exists():

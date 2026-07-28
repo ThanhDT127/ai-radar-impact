@@ -81,6 +81,7 @@ from tests.eval.chat_fixture import (
     SCENARIO_MODES,
     FIXTURE_DIR,
     load_anchors,
+    load_chunk_ranks,
     load_corpus,
     load_scenarios,
     rehydrate,
@@ -96,7 +97,7 @@ BASELINE_PATH = FIXTURE_DIR / "chat_answer_baseline.json"
 # lại để test chuyển xanh là tự tháo lưới: lần hồi quy sau sẽ nằm dưới mức mới mà vẫn "pass".
 BASELINE_META = {
     "measured_at": "2026-07-28",
-    "commit": "(chat-context-depth, chưa commit)",
+    "commit": "(chat-chunk-retrieval, chưa commit)",
     "model": "gemini-2.5-flash",
     "corpus": "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary",
     "note": (
@@ -107,6 +108,41 @@ BASELINE_META = {
         "sự có nhắc Ethereum/IPFS — model trả lời đúng, nhãn mới là cái sai."
     ),
     "revisions": [
+        {
+            "date": "2026-07-28",
+            "reason": (
+                "`chat-chunk-retrieval` — tín hiệu xếp hạng THỨ BA ở mức ĐOẠN thân bài, "
+                "cộng một suất ô sâu dành cho tin có đoạn khớp nhất toàn corpus. "
+                "Bộ kịch bản 83 → 98 (thêm 15 câu nhóm `detail_discovery`). "
+                "TỔNG: Faith **0,99** (≥0,95 ✅) · AnsRel **0,92 → 0,95** · CitPrec **1,00** "
+                "(=1,00 ✅) · từ chối đúng 5/5 · lệch mode 0/98. "
+                "Nhóm `detail_discovery`: AnsRel 0,57 → 0,73 → **0,93**, và **15/15 câu trả "
+                "lời được**. "
+                "\n\n"
+                "BA LẦN 'BỘ ĐO NÓI DỐI' đã phải sửa — cả ba đều im lặng, ghi lại để không "
+                "tái sinh: "
+                "(a) `_FixtureSession` chỉ phục vụ `select(Insight)` nên truy vấn đoạn ném "
+                "lỗi, `_chunk_ranks` **nuốt lỗi rồi rơi về hai tín hiệu** — đúng thiết kế "
+                "suy giảm êm, nhưng nghĩa là lượt `--live` đầu tiên chấm một pipeline KHÁC "
+                "production mà không báo gì. Nay tiêm thứ hạng đoạn đông lạnh vào "
+                "`_make_service`. "
+                "(b) `_wanted_anchor_ids` chỉ lấy thân bài cho `anchor_insight_id`, trong "
+                "khi từ `chat-context-depth` thì ô sâu rót `normalized_content` cho tin xếp "
+                "hạng cao của BẤT KỲ câu toàn cục nào ⇒ ba kịch bản xếp **hạng 1** bị chấm "
+                "'từ chối' chỉ vì fixture không có gì để rót. "
+                "(c) Hai lần chốt baseline TRƯỚC ĐÓ ghi đè file mà **không** kèm lý do vào "
+                "`BASELINE_META` (edit script trượt, không ai kiểm) — chính là cái 'chốt lại "
+                "để test chuyển xanh' mà luật baseline cấm. Mục này là bản ghi bù. "
+                "\n\n"
+                "⚠️ MỘT NHÃN SAI ĐÃ SỬA TRƯỚC KHI CHỐT: `det-gpai-annex` hỏi 'nghĩa vụ nhà "
+                "cung cấp GPAI nằm ở Annex mấy' — **tiền đề sai**: bài ghi nghĩa vụ GPAI ở "
+                "*Chapter V*, còn Annex I/III là hai đường phân loại rủi ro cao. Model từ "
+                "chối VÀ nêu đúng Chapter V, tức là trả lời đúng; nhãn mới là cái sai. Đổi "
+                "câu hỏi sang 'Hệ thống AI rủi ro cao được liệt kê ở phụ lục nào?' "
+                "(AnsRel 0,00 → 1,00). Tiền lệ 'sửa nhãn, đừng sửa ngưỡng' của ca "
+                "blockchain — **KHÁC** `rank-eol-khai-tu`, ở đó sửa câu hỏi là xoá phép đo."
+            ),
+        },
         {
             "date": "2026-07-28",
             "reason": (
@@ -324,12 +360,25 @@ class _Capture:
     deep_blocks: dict[int, str] = field(default_factory=dict)
 
 
-def _make_service(corpus_insights: list, by_id: dict):
-    """Dựng `ChatService` chạy trên fixture, có gián điệp ghi lại context đã phục vụ."""
+def _make_service(corpus_insights: list, by_id: dict, chunk_ranks: dict | None = None):
+    """Dựng `ChatService` chạy trên fixture, có gián điệp ghi lại context đã phục vụ.
+
+    `chunk_ranks` là thứ hạng đoạn ĐÔNG LẠNH của kịch bản này (`chat_chunk_ranks.jsonl`).
+    ⚠️ Bắt buộc phải tiêm: `_FixtureSession` chỉ phục vụ `select(Insight)`, nên truy vấn
+    đoạn ném lỗi và `_chunk_ranks` **nuốt lỗi rồi rơi về hai tín hiệu** — đúng như thiết kế
+    suy giảm êm. Hệ quả với bộ đo là nó lặng lẽ chấm một pipeline KHÁC production, và số đo
+    trông hoàn toàn bình thường. Đã xảy ra thật ở lượt `--live` đầu tiên (28/07): log đầy
+    dòng "Truy hồi mức đoạn lỗi — xếp hạng bằng 2 tín hiệu".
+    """
     from app.ai.gemini_client import GeminiClient
     from app.services import chat_service as cs
 
     service = cs.ChatService(session=_FixtureSession(by_id), gemini=GeminiClient())
+
+    async def _chunk_ranks(_query_vector):
+        return dict(chunk_ranks or {})
+
+    service.chunk_repo.retrieve_chunk_ranks = _chunk_ranks
 
     async def _list_for_chat(*_args, **_kwargs):
         return list(corpus_insights)
@@ -390,7 +439,9 @@ async def _run_one(scenario: dict, corpus_insights: list, by_id: dict) -> dict:
     capture: list[_Capture] = []
     restore = _install_spy(capture)
     try:
-        service = _make_service(corpus_insights, by_id)
+        service = _make_service(
+            corpus_insights, by_id, load_chunk_ranks().get(scenario["id"])
+        )
         started = time.monotonic()
         anchor = scenario.get("anchor_insight_id")
         refs = [uuid.UUID(i) for i in scenario.get("referenced_insight_ids", [])]

@@ -51,6 +51,31 @@ Ba phương án, phải chốt một trong `design.md` trước khi implement:
 **Khuyến nghị: B + C** — B cho ranh giới, C cho fixture của phần chạm DB. A bị loại vì nó tái tạo đúng
 chế độ hỏng "hai đường tính khác nhau, không có gì báo lỗi".
 
+#### ✅ CHỐT (task 0.4, 28/07/2026): **B + C**, và C đông lạnh **THỨ HẠNG**, không phải vector
+
+- **B** — `_rank(insights, question, query_vector, chunk_ranks)` nhận `chunk_ranks` **làm tham số**
+  và vẫn là hàm thuần; phần chạm DB nằm trọn trong `InsightRepository.retrieve_chunk_ranks()`.
+  Ranh giới này đã được dùng thật ở lượt đo 0.3: script mô phỏng gọi **chính `_rank` sản phẩm**,
+  không bản sao nào.
+- **C** — fixture đông lạnh `chunk_ranks` **cho từng kịch bản** (`scenario_id → {insight_id: rank}`),
+  chứ **không** đông lạnh 535 vector đoạn.
+
+**Vì sao đông lạnh thứ hạng chứ không vector** — hai lý do, lý do thứ hai mới là lý do thật:
+
+1. Dung lượng: vector đoạn là **4,3MB** JSONL (đo 0.3), gấp ba `chat_embeddings.jsonl` (1,4MB).
+   Bảng thứ hạng cho 76 kịch bản ≈ 0,6MB.
+2. ⚠️ **Đông lạnh vector buộc harness phải tự tính thứ hạng đoạn trong Python — tức là dựng lại
+   phép `ORDER BY embedding <=> :q` + gộp `min` của SQL bằng một đoạn code thứ hai.** Đó đúng là
+   chế độ hỏng "hai đường tính khác nhau, không có gì báo lỗi" mà phương án A bị loại vì nó. Đông
+   lạnh **đầu ra** của truy vấn thì harness đo `_rank` với chính con số production đưa vào.
+
+Cái giá của C, ghi rõ để không ai ngạc nhiên: đổi hằng số chunk, đổi model embedding, hoặc thêm
+kịch bản ⇒ **phải sinh lại bảng thứ hạng** (cùng luật với `chat_query_vectors.jsonl` hôm nay).
+Phần chạm DB (`retrieve_chunk_ranks`) không có lưới trong `pytest` mặc định — đúng như cột "mất"
+của B — nên nó được phủ bằng một test cần DB, chạy riêng.
+
+**A vẫn bị loại**, không đổi lý do.
+
 ### D5 — Ngưỡng: vẫn KHÔNG có
 Chunk chỉ thêm một số hạng RRF. `LIMIT n` trong SQL là **cắt để lấy ứng viên**, không phải ngưỡng
 similarity — tập ứng viên cuối vẫn không bao giờ rỗng vì "không chunk nào đủ giống". Ngưỡng 0,65 của báo

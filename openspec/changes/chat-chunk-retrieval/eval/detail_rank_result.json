@@ -1,0 +1,385 @@
+{
+ "corpus_size": 179,
+ "top_k": 60,
+ "answer_budget": 5,
+ "recall_at_5": 0.6666666666666666,
+ "recall_at_k": 1.0,
+ "outside_top5_ratio": 0.3333333333333333,
+ "rows": [
+  {
+   "id": "det-squashfs",
+   "question": "Bài nào bung firmware bằng SquashFS để tìm lỗ hổng?",
+   "probe": "SquashFS",
+   "rank": 7,
+   "in_top5": false,
+   "in_index": true,
+   "title": "TP-Link Kasa cameras leaked home GPS via unauthenticated UDP for 6 years",
+   "terms": [
+    "bung",
+    "firmware",
+    "bằng",
+    "squashfs",
+    "để",
+    "tìm",
+    "lỗ",
+    "hổng"
+   ],
+   "top5_titles": [
+    "Microsoft’s Secure Boot has been broken for ",
+    "HollowByte DDoS flaw bloats OpenSSL server m",
+    "OWASP/Nettacker",
+    "CISA urges immediate action on actively expl",
+    "usestrix/strix"
+   ]
+  },
+  {
+   "id": "det-gpai-annex",
+   "question": "Nghĩa vụ của nhà cung cấp GPAI nằm ở Annex mấy?",
+   "probe": "GPAI / Annex",
+   "rank": 1,
+   "in_top5": true,
+   "in_index": true,
+   "title": "What Does EU AI Act Compliance Require?",
+   "terms": [
+    "nghĩa",
+    "vụ",
+    "nhà",
+    "cung",
+    "cấp",
+    "gpai",
+    "nằm",
+    "annex",
+    "mấy"
+   ],
+   "top5_titles": [
+    "What Does EU AI Act Compliance Require?",
+    "diegosouzapw/OmniRoute",
+    "AnovaX: A Local, Multi-Agent Voice Assistant",
+    "Introducing Grok on Amazon Bedrock",
+    "Expanding Managed Agents in Gemini API:  bac"
+   ]
+  },
+  {
+   "id": "det-ipfs-c2",
+   "question": "Mã độc nào lấy payload qua IPFS?",
+   "probe": "IPFS",
+   "rank": 2,
+   "in_top5": true,
+   "in_index": true,
+   "title": "Unpacking the AsyncAPI npm supply chain compromise and import-time payload delivery",
+   "terms": [
+    "mã",
+    "độc",
+    "lấy",
+    "payload",
+    "qua",
+    "ipfs"
+   ],
+   "top5_titles": [
+    "GigaWiper: Anatomy of a destructive backdoor",
+    "Unpacking the AsyncAPI npm supply chain comp",
+    "HollowByte DDoS flaw bloats OpenSSL server m",
+    "OWASP/Nettacker",
+    "CISA urges immediate action on actively expl"
+   ]
+  },
+  {
+   "id": "det-servfail",
+   "question": "Sự cố nào khiến resolver trả SERVFAIL cho cả một TLD?",
+   "probe": "SERVFAIL / DNSKEY",
+   "rank": 1,
+   "in_top5": true,
+   "in_index": true,
+   "title": "A broken DNSSEC rollover took down .al. Now 1.1.1.1 tells you when validation is bypassed",
+   "terms": [
+    "sự",
+    "cố",
+    "khiến",
+    "resolver",
+    "trả",
+    "servfail",
+    "tld"
+   ],
+   "top5_titles": [
+    "A broken DNSSEC rollover took down .al. Now ",
+    "HollowByte DDoS flaw bloats OpenSSL server m",
+    "Investigation update: GitHub Enterprise Serv",
+    "Reconciling the Past: Correcting Records for",
+    "TP-Link Kasa cameras leaked home GPS via una"
+   ]
+  },
+  {
+   "id": "det-arnnotequals",
+   "question": "Chính sách nào dùng điều kiện ArnNotEquals để chặn truy cập?",
+   "probe": "ArnNotEquals / PrincipalArn",
+   "rank": 1,
+   "in_top5": true,
+   "in_index": true,
+   "title": "Restrict AWS Management Console access to expected networks with sign-in resource-based policies and RCPs",
+   "terms": [
+    "chính",
+    "sách",
+    "dùng",
+    "điều",
+    "kiện",
+    "arnnotequals",
+    "để",
+    "chặn",
+    "truy",
+    "cập"
+   ],
+   "top5_titles": [
+    "Restrict AWS Management Console access to ex",
+    "A broken DNSSEC rollover took down .al. Now ",
+    "Enforce zero data retention on Amazon Bedroc",
+    "Flowseal/zapret-discord-youtube",
+    "Enforce least-privilege authorization in mul"
+   ]
+  },
+  {
+   "id": "det-ssrf-assumerole",
+   "question": "Làm sao giảm rủi ro SSRF khi lấy credential tạm thời?",
+   "probe": "SSRF / AssumeRole",
+   "rank": 6,
+   "in_top5": false,
+   "in_index": true,
+   "title": "How to use the AWS Workload Credentials Provider for cross-account secret retrieval and prefetching secrets",
+   "terms": [
+    "giảm",
+    "rủi",
+    "ro",
+    "ssrf",
+    "lấy",
+    "credential",
+    "tạm",
+    "thời"
+   ],
+   "top5_titles": [
+    "Temporary Cloudflare Accounts for AI agents",
+    "What is an SBOM (and Why Can’t You Ship With",
+    "Using AI makes people less likely to admit t",
+    "CISA urges immediate action on actively expl",
+    "Enforce least-privilege authorization in mul"
+   ]
+  },
+  {
+   "id": "det-spdx-cyclonedx",
+   "question": "SPDX và CycloneDX khác nhau ở điểm nào?",
+   "probe": "SPDX / CycloneDX",
+   "rank": 29,
+   "in_top5": false,
+   "in_index": true,
+   "title": "What is an SBOM (and Why Can’t You Ship Without One)?",
+   "terms": [
+    "spdx",
+    "cyclonedx",
+    "điểm"
+   ],
+   "top5_titles": [
+    "usestrix/strix",
+    "Announcing etcd v3.7.0",
+    "OWASP Dependency-Track 5.0 is now generally ",
+    "The Electron browser is being deprecated in ",
+    "deepseek-ai/DeepSeek-V4-Flash-DSpark"
+   ]
+  },
+  {
+   "id": "det-firecracker",
+   "question": "Dịch vụ nào chạy trên microVM Firecracker?",
+   "probe": "Firecracker / microVM",
+   "rank": 2,
+   "in_top5": true,
+   "in_index": true,
+   "title": "Announcing Lambda MicroVMs: serverless compute environments with VM-level isolation and near-instant startup",
+   "terms": [
+    "dịch",
+    "vụ",
+    "chạy",
+    "trên",
+    "microvm",
+    "firecracker"
+   ],
+   "top5_titles": [
+    "Temporary Cloudflare Accounts for AI agents",
+    "Announcing Lambda MicroVMs: serverless compu",
+    "GigaWiper: Anatomy of a destructive backdoor",
+    "Expanding Managed Agents in Gemini API:  bac",
+    "Your Worker can now have its own cache in fr"
+   ]
+  },
+  {
+   "id": "det-eytzinger",
+   "question": "Bố cục Eytzinger giúp tăng tốc tìm kiếm ra sao?",
+   "probe": "Eytzinger",
+   "rank": 1,
+   "in_top5": true,
+   "in_index": true,
+   "title": "Static search trees: 40x faster than binary search (2024)",
+   "terms": [
+    "bố",
+    "cục",
+    "eytzinger",
+    "giúp",
+    "tăng",
+    "tốc",
+    "tìm",
+    "kiếm"
+   ],
+   "top5_titles": [
+    "Static search trees: 40x faster than binary ",
+    "One Map Key, One Lookup",
+    "Graphify-Labs/graphify",
+    "Bayesian Optimization from scratch: a GP sur",
+    "RyanCodrai/turbovec"
+   ]
+  },
+  {
+   "id": "det-chunking-strategy",
+   "question": "Bài nào cài lớp ChunkingStrategy để so các cách chia đoạn?",
+   "probe": "ChunkingStrategy",
+   "rank": 15,
+   "in_top5": false,
+   "in_index": true,
+   "title": "Optimizing RAG at Scale: Chunking, Retrieval, and the Bayesian Search That Cut Latency 40%",
+   "terms": [
+    "cài",
+    "lớp",
+    "chunkingstrategy",
+    "để",
+    "so",
+    "cách",
+    "chia",
+    "đoạn"
+   ],
+   "top5_titles": [
+    "EU AI Act OpenRAG: 933 legally structured ch",
+    "Bài 33: Các phương pháp đánh giá một hệ thốn",
+    "One Map Key, One Lookup",
+    "MGDT: MLLM-Guided Diffusion Transformer with",
+    "One Adapter, Both Modalities: Field Notes fr"
+   ]
+  },
+  {
+   "id": "det-jubair",
+   "question": "Vụ án nào có bị cáo tên Thalha Jubair?",
+   "probe": "Jubair / Thalha",
+   "rank": 1,
+   "in_top5": true,
+   "in_index": true,
+   "title": "Scattered Spider Hackers Plead Guilty on Day 1 of Trial",
+   "terms": [
+    "vụ",
+    "án",
+    "cáo",
+    "tên",
+    "thalha",
+    "jubair"
+   ],
+   "top5_titles": [
+    "Scattered Spider Hackers Plead Guilty on Day",
+    "‘Popa’ Botnet Linked to Publicly-Traded Isra",
+    "Cura 1T: Specialized Model for Agentic Healt",
+    "Government of Alberta uses Claude to find an",
+    "Temporary Cloudflare Accounts for AI agents"
+   ]
+  },
+  {
+   "id": "det-qurium",
+   "question": "Botnet nào bị tổ chức Qurium điều tra?",
+   "probe": "Qurium / Synthient",
+   "rank": 1,
+   "in_top5": true,
+   "in_index": true,
+   "title": "‘Popa’ Botnet Linked to Publicly-Traded Israeli Firm",
+   "terms": [
+    "botnet",
+    "tổ",
+    "chức",
+    "qurium",
+    "điều",
+    "tra"
+   ],
+   "top5_titles": [
+    "‘Popa’ Botnet Linked to Publicly-Traded Isra",
+    "CISA urges immediate action on actively expl",
+    "Security Hub adds AI workload protection and",
+    "Microsoft Patches a Record 570 Security Flaw",
+    "Q00/ouroboros"
+   ]
+  },
+  {
+   "id": "det-hmac-agent",
+   "question": "Cơ chế nào ký yêu cầu giữa các agent bằng HMAC-SHA256?",
+   "probe": "HMAC-SHA256 / AgentAuthz",
+   "rank": 20,
+   "in_top5": false,
+   "in_index": true,
+   "title": "Enforce least-privilege authorization in multi-agent AI chains using Cedar",
+   "terms": [
+    "cơ",
+    "chế",
+    "ký",
+    "yêu",
+    "cầu",
+    "giữa",
+    "agent",
+    "bằng",
+    "hmac",
+    "sha256"
+   ],
+   "top5_titles": [
+    "Investigation update: GitHub Enterprise Serv",
+    "The White House's post-quantum executive ord",
+    "Do Coding Agents Need Executable World Model",
+    "Enforce zero data retention on Amazon Bedroc",
+    "Why we cannot wait for better post-quantum s"
+   ]
+  },
+  {
+   "id": "det-cypress-defaultbrowser",
+   "question": "Vì sao phải đổi defaultBrowser trong defineConfig?",
+   "probe": "defaultBrowser / defineConfig",
+   "rank": 1,
+   "in_top5": true,
+   "in_index": true,
+   "title": "The Electron browser is being deprecated in Cypress",
+   "terms": [
+    "đổi",
+    "defaultbrowser",
+    "defineconfig"
+   ],
+   "top5_titles": [
+    "The Electron browser is being deprecated in ",
+    "protocolbuffers/protobuf",
+    "Amazon OpenSearch UI now supports one-click ",
+    "Microsoft Entra ID security updates: Passkey",
+    "Kubernetes Production checklist -Checklist t"
+   ]
+  },
+  {
+   "id": "det-rabbitmq-c2",
+   "question": "Backdoor nào dùng RabbitMQ và Redis làm kênh điều khiển?",
+   "probe": "RabbitMQ / Redis",
+   "rank": 1,
+   "in_top5": true,
+   "in_index": true,
+   "title": "GigaWiper: Anatomy of a destructive backdoor assembled from multiple malware",
+   "terms": [
+    "backdoor",
+    "dùng",
+    "rabbitmq",
+    "redis",
+    "kênh",
+    "điều",
+    "khiển"
+   ],
+   "top5_titles": [
+    "GigaWiper: Anatomy of a destructive backdoor",
+    "New ClickLock macOS malware traps users into",
+    "Flowseal/zapret-discord-youtube",
+    "‘Popa’ Botnet Linked to Publicly-Traded Isra",
+    "Build your own vulnerability harness"
+   ]
+  }
+ ]
+}
