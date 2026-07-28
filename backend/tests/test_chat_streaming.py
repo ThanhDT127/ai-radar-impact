@@ -167,10 +167,14 @@ async def test_luong_phat_status_roi_token_roi_commit():
     assert kinds[0] == "status", "status phải đến TRƯỚC token — nó lấp khoảng thinking"
     assert kinds[-1] == "commit"
     assert kinds.count("commit") == 1
-    assert [e["text"] for e in _of(events, "status")] == [
-        STATUS_SEARCHING,
-        STATUS_COMPOSING,
-    ]
+    statuses = [e["text"] for e in _of(events, "status")]
+    # Mốc thứ hai nay mang SỐ LIỆU THẬT của lượt (tên tin đang đọc kỹ, tổng tin khớp) thay
+    # cho `STATUS_COMPOSING` chung chung — TTFT 2,6–3,8s không cắt được, nên thứ duy nhất
+    # cải thiện được là nói đúng việc đang làm. Vẫn ĐÚNG HAI status: thêm một sự kiện nữa
+    # cách nhau vài chục ms chỉ làm dòng chữ nhấp nháy.
+    assert len(statuses) == 2
+    assert statuses[0] == STATUS_SEARCHING
+    assert statuses[1].startswith("Đang đọc kỹ") and "Tin OpenSSL" in statuses[1]
     assert [e["text"] for e in _of(events, "token")] == ["Có ", "lỗ hổng ", "OpenSSL [1]."]
 
 
@@ -182,6 +186,7 @@ async def test_mode_B_phat_status_doc_bai():
 
     events = await _collect(service, "bài này nói gì", insight_id=tin.id)
 
+    # Mode B KHÔNG đi qua `build_context` (context là đúng một bài) nên giữ mốc chung chung.
     assert [e["text"] for e in _of(events, "status")] == [
         STATUS_READING_INSIGHT,
         STATUS_COMPOSING,
@@ -312,12 +317,12 @@ async def test_status_mo_rong_phat_truoc_luot_hai():
 
     events = await _collect(service, "có tin gì về Kubernetes", insight_id=insight.id)
 
-    assert [e["text"] for e in _of(events, "status")] == [
-        STATUS_READING_INSIGHT,
-        STATUS_COMPOSING,
-        STATUS_EXPANDING,
-        STATUS_COMPOSING,
-    ]
+    statuses = [e["text"] for e in _of(events, "status")]
+    # Bước 1 là mode B (không qua `build_context`) nên giữ mốc chung; bước 2 đi qua
+    # `_answer_global` nên mang số liệu thật của lượt mở rộng.
+    assert statuses[:3] == [STATUS_READING_INSIGHT, STATUS_COMPOSING, STATUS_EXPANDING]
+    assert len(statuses) == 4
+    assert statuses[3].startswith("Đang đọc kỹ") and "Tin OpenSSL" in statuses[3]
     commit = _of(events, "commit")[0]
     assert commit["mode"] == "expanded", "nhãn mở rộng phải đi qua được đường streaming"
     assert [c["insight_id"] for c in commit["citations"]] == [other.id]

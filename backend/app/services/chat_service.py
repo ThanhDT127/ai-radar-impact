@@ -33,6 +33,7 @@ from app.ai.prompts import (
     CHAT_SYSTEM_PROMPT,
     OUT_OF_SCOPE_SENTINEL,
     build_chat_expanded_prompt,
+    build_chat_focused_prompt,
     build_chat_global_prompt,
     build_chat_insight_prompt,
 )
@@ -42,7 +43,7 @@ from app.models.raw_document import RawDocument
 from app.repositories.chat_log_repo import ChatLogRepository
 from app.repositories.insight_repo import InsightRepository
 from app.services.chat_grounding import (
-    build_index_block,
+    build_context,
     build_insight_block,
     enforce_grounding,
     is_out_of_scope_answer,
@@ -86,6 +87,39 @@ STATUS_READING_INSIGHT = "Đang đọc bài đang xem…"
 STATUS_SEARCHING = "Đang tìm trong hệ thống…"
 STATUS_EXPANDING = "Bài đang xem không đề cập — đang tìm trên toàn hệ thống…"
 STATUS_COMPOSING = "Đang soạn câu trả lời…"
+
+# Số tin nêu tên trong status. Hai là đủ để người dùng nhận ra hệ thống đang đọc ĐÚNG bài
+# mình quan tâm; nhiều hơn thì dòng status dài quá và bị cắt trên panel hẹp.
+_STATUS_TITLES = 2
+_STATUS_TITLE_LEN = 38
+
+
+def _reading_status(ctx) -> str:
+    """Mốc "đang đọc kỹ" mang SỐ LIỆU THẬT của lượt này.
+
+    Vì sao đáng làm: đo 28/07/2026 trên đường SSE (client singleton, kết nối ấm) — TTFT
+    2,6–3,8s, và **85% của nó là lượt gọi model**, không cắt được bằng cách nhỏ prompt hay
+    ngắn câu trả lời (đã đo cả hai: bỏ raw content khỏi ô sâu đổi TTFT 3,3 → 3,2s trong khi
+    câu hỏi chi tiết quay lại từ chối). Bài học `chat-streaming-sse` giữ nguyên: TTFT thật
+    không cắt được, **status mới là thứ chữa** — nên cải thiện nằm ở chỗ nói ĐÚNG việc đang
+    làm, không ở chỗ chạy nhanh hơn.
+
+    Số liệu lấy từ `ctx`, không phải chuỗi trang trí chạy theo đồng hồ: nói sai việc còn tệ
+    hơn nói chung chung.
+    """
+    if not ctx.deep_count:
+        return STATUS_COMPOSING
+
+    def short(title: str) -> str:
+        title = (title or "").strip()
+        return title if len(title) <= _STATUS_TITLE_LEN else title[: _STATUS_TITLE_LEN - 1] + "…"
+
+    titles = [f"«{short(ctx.mapping[n].title)}»" for n in range(1, ctx.deep_count + 1)]
+    named = ", ".join(titles[:_STATUS_TITLES])
+    if len(titles) > _STATUS_TITLES:
+        named += f" và {len(titles) - _STATUS_TITLES} tin nữa"
+    scope = f" trong {ctx.total_matched} tin khớp" if ctx.total_matched else ""
+    return f"Đang đọc kỹ {ctx.deep_count} tin: {named}{scope}…"
 
 # Kênh phát sự kiện. `None` = chế độ blocking: cùng một pipeline, chỉ khác lối ra.
 Emitter = Callable[[dict], Awaitable[None]]
@@ -162,14 +196,37 @@ class InsightNotFoundError(Exception):
     """`insight_id` không có trong DB — route dịch thành HTTP 404."""
 
 
+_HISTORY_MARKER_RE = re.compile(r"\[(\d+)\]")
+
+
 def _history_block(history: list) -> str:
-    """Ghép history thành text. `history` là list ChatTurn (đã cap 10 ở schema)."""
+    """Ghép history thành text, **giải marker `[n]` thành tên bài** (design D4).
+
+    Bảng ánh xạ `n → insight` được dựng LẠI mỗi lượt (theo kết quả `_rank` của lượt đó),
+    nên một con số trong history gần như chắc chắn trỏ tin khác ở lượt hiện tại: lượt trước
+    `[3]` là tin Kubernetes, lượt này `[3]` là tin EU AI Act, và model đọc được hai nghĩa
+    của cùng một số. Đây là lỗi **đã tồn tại** trước change này, chỉ chưa lộ vì mỗi lượt
+    model chủ yếu nhìn khối DỮ LIỆU mới.
+
+    Không đánh số lại và không xoá trắng: đánh lại đòi một sổ đánh số sống qua nhiều lượt
+    mà server thì stateless; xoá trắng thì mất luôn khả năng hiểu "so sánh [1] với [2] ở
+    trên". Thay bằng nhãn đọc được giữ nguyên ngữ nghĩa tham chiếu mà không tạo hệ quy
+    chiếu số thứ hai.
+
+    Lượt không kèm citations (client cũ) → marker bị **bỏ**, vì một con số vô nghĩa còn tệ
+    hơn không có gì.
+    """
     if not history:
         return ""
     lines = []
     for turn in history:
         who = "Người dùng" if turn.role == "user" else "Trợ lý"
-        lines.append(f"{who}: {turn.content}")
+        titles = {c.n: c.title for c in getattr(turn, "citations", None) or []}
+        content = _HISTORY_MARKER_RE.sub(
+            lambda m: f"[«{titles[int(m.group(1))]}»]" if int(m.group(1)) in titles else "",
+            turn.content,
+        )
+        lines.append(f"{who}: {content.strip()}")
     return "\n".join(lines)
 
 
@@ -350,12 +407,17 @@ class ChatService:
         history: list,
         insight_id: uuid.UUID | None,
         emit: Emitter | None = None,
+        referenced_insight_ids: list[uuid.UUID] | None = None,
     ) -> dict:
         """Điểm vào duy nhất. Ghi `chat_logs` trong `finally` để budget không rò rỉ.
 
         `emit` là lối ra streaming: truyền vào thì pipeline phát thêm `status`/`token` dọc
         đường; bỏ trống thì hàm chạy y hệt bản blocking cũ. KHÔNG có nhánh logic thứ hai —
         `answer_stream()` chỉ là hàm này cộng một hàng đợi (design D1).
+
+        `referenced_insight_ids` là working set người dùng chọn (chat-context-depth). Có
+        refs ⇒ `mode="focused"`, **một** lượt gọi, không sentinel: context đã mang cả ô sâu
+        lẫn index toàn hệ thống nên không còn gì để mở rộng sang (design D5).
         """
         self._emit = emit
         self._aborted = False
@@ -382,14 +444,26 @@ class ChatService:
             )
             raise QuotaExceededError
 
-        mode = "insight" if insight_id else "global"
+        # Refs nạp TRƯỚC khi chốt mode: ref chết bị bỏ lặng lẽ (design D7), nên "có refs
+        # trong payload" chưa chắc là "có ô sâu do người dùng chọn".
+        refs = await self._load_refs(referenced_insight_ids)
+        if refs:
+            mode = "focused"
+        elif insight_id:
+            mode = "insight"
+        else:
+            mode = "global"
         started = time.monotonic()
         self._calls_used = 0
         self._steps_used = 0
         self._thinking_tokens = None
         citations: list[dict] = []
         try:
-            if insight_id:
+            if refs:
+                # Đường working set: bỏ qua hoàn toàn mode B + sentinel. `insight_id` (bài
+                # đang mở) đã nằm trong refs do widget tự thêm, nên không mất ngữ cảnh.
+                answer, citations = await self._answer_global(question, history, refs=refs)
+            elif insight_id:
                 attempt = await self._answer_insight(question, history, insight_id)
                 if attempt.out_of_scope:
                     # Auto-fallback (design D2/D4): model đã tự nói "câu này không nằm
@@ -419,6 +493,34 @@ class ChatService:
                     latency_ms=int((time.monotonic() - started) * 1000),
                     thinking_tokens=self._thinking_tokens,
                 )
+
+    async def _load_refs(self, ids: list[uuid.UUID] | None) -> list[Insight]:
+        """Nạp working set theo `referenced_insight_ids`, GIỮ thứ tự client gửi.
+
+        Suy giảm êm (design D7) — ref chết bị bỏ **lặng lẽ**, không 404: người dùng có thể
+        ghim một tin rồi tin đó bị unpublish giữa chừng, và làm hỏng cả câu hỏi vì một chip
+        cũ là đổi sai. Thứ tự client gửi quyết định thứ tự ô sâu, nên phải sắp lại sau khi
+        SQL trả về (`IN` không bảo toàn thứ tự).
+
+        Cắt ở `chat_deep_slots`: gửi thừa thì lấy phần đầu, không báo lỗi.
+        """
+        if not ids:
+            return []
+        wanted = ids[: settings.chat_deep_slots]
+        result = await self.session.execute(
+            select(Insight)
+            .where(Insight.id.in_(wanted))
+            .where(Insight.status == "published")
+            # Ô sâu cần `normalized_content`; nạp kèm ngay để không thành N+1 khi dựng block.
+            .options(selectinload(Insight.raw_document).selectinload(RawDocument.source))
+        )
+        by_id = {i.id: i for i in result.scalars().all()}
+        refs = [by_id[i] for i in wanted if i in by_id]
+        if len(refs) < len(wanted):
+            logger.info(
+                "Bỏ %d tham chiếu không còn khả dụng (còn %d)", len(wanted) - len(refs), len(refs)
+            )
+        return refs
 
     async def _answer_insight(
         self, question: str, history: list, insight_id: uuid.UUID
@@ -461,12 +563,25 @@ class ChatService:
         return _InsightAttempt(answer=answer, citations=citations)
 
     async def _answer_global(
-        self, question: str, history: list, focus: _InsightAttempt | None = None
+        self,
+        question: str,
+        history: list,
+        focus: _InsightAttempt | None = None,
+        refs: list[Insight] | None = None,
     ) -> tuple[str, list[dict]]:
-        if focus is None:
+        """Một đường trả lời cho ba ca: toàn cục · working set · mở rộng.
+
+        Chúng chỉ khác nhau ở **ai chọn tin để rót sâu** — và đó đúng là tham số `refs` của
+        `build_context`. Tách thành hai method là để hai lối ra trôi khỏi nhau trong im lặng
+        (bài học `chat-streaming-sse`: grounding/xếp hạng/fail-closed phải dùng chung code).
+        """
+        refs = refs or []
+        if focus is None and not refs:
             # Ở chế độ mở rộng, `answer()` đã phát STATUS_EXPANDING — nói lại "đang tìm
             # trong hệ thống" chỉ là nhiễu.
             await self._status(STATUS_SEARCHING)
+        elif refs:
+            await self._status(STATUS_READING_INSIGHT)
         since = None
         if settings.chat_window_days > 0:
             since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
@@ -484,11 +599,6 @@ class ChatService:
             self.insight_repo.list_for_chat(published_since=since),
             self._embed_question(question),
         )
-        # Chế độ mở rộng: bài đang xem đi kèm dạng block đầy đủ ở [1], nên phải loại nó
-        # khỏi index toàn cục — không thì cùng một tin xuất hiện hai lần với hai số khác
-        # nhau và citation trỏ trùng.
-        if focus is not None:
-            matched = [i for i in matched if i.id != focus.insight.id]
         matched = self._rank(matched, question, query_vector)
 
         # ⚠️ Tính "vai trò không có tin" trên TOÀN BỘ tập khớp, TRƯỚC khi cắt top-K.
@@ -505,42 +615,43 @@ class ChatService:
         # production xếp theo trục nào cho một câu cụ thể. Mức DEBUG chứ KHÔNG phải WARNING:
         # đây là quan sát, không phải lỗi. Log này cũng là dữ liệu để quyết có cần bảng đồng
         # nghĩa vai trò không (design D6: `developer` hiện KHÔNG kích hoạt trục `Dev`).
+        # Ô sâu lấp tất định rồi mới tới index nén — cắt vẫn ở `chat_index_top_k`, chỉ khác
+        # là vài tin đầu được rót đầy đủ thay vì một dòng 115 token.
+        #
+        # Mở rộng (`focus`) đi qua đúng hàm này với **một** ô sâu là bài đang xem, tức là
+        # trùng khít hành vi cũ ([1] = bài đang xem, index từ [2], bài đó bị loại khỏi
+        # index) — design D5 giữ đường cũ nguyên xi.
+        ctx = build_context(
+            refs=[focus.insight] if focus is not None else refs,
+            ranked=matched,
+            k_deep=1 if focus is not None else settings.chat_deep_slots,
+            index_limit=settings.chat_index_top_k,
+            include_content=True if focus is not None else settings.chat_deep_include_content,
+        )
+        index_block, mapping = ctx.index_block, ctx.mapping
+
         logger.debug(
-            "Trục xếp hạng: %s | truy hồi: %s | %d/%d ứng viên | vai trò rỗng: %s",
+            "Trục xếp hạng: %s | truy hồi: %s | %d ô sâu (%d do người dùng chọn) + %d index / %d ứng viên"
+            " | vai trò rỗng: %s",
             ", ".join(asked_roles) if asked_roles else "(không có vai trò — dùng affected_roles)",
             # Phân biệt lượt chạy lai với lượt đã rơi về lexical: suy giảm êm mà không để
             # lại dấu vết nào thì một sự cố embedding kéo dài trông y hệt "chat hơi kém".
             "lai (vector+lexical)" if query_vector is not None else "CHỈ LEXICAL (embed vắng)",
-            min(len(matched), settings.chat_index_top_k) if settings.chat_index_top_k > 0 else len(matched),
-            len(matched),
+            ctx.deep_count,
+            len(refs),
+            len(ctx.mapping) - ctx.deep_count,
+            ctx.total_matched,
             ", ".join(empty_roles) or "không",
         )
 
-        # Cắt sau khi xếp hạng: giữ tin đáng đọc nhất, bỏ phần đuôi mà câu trả lời
-        # (trần 5 tin) không bao giờ dùng tới. Xem `settings.chat_index_top_k`.
-        total_matched = len(matched)
-        candidates = (
-            matched[: settings.chat_index_top_k]
-            if settings.chat_index_top_k > 0
-            else matched
-        )
-
-        # Mở rộng: [1] dành cho bài đang xem, tin toàn cục đánh số từ [2] — một dãy số
-        # liên tục qua cả hai khối context ⇒ vẫn đúng MỘT bảng ánh xạ.
-        index_block, mapping = build_index_block(
-            candidates, start=2 if focus is not None else 1
-        )
-        if focus is not None:
-            mapping[1] = focus.insight
-
         # Model chỉ nhìn thấy phần đã cắt, nên nếu để nó tự đếm "Còn N tin khác" thì con
         # số sẽ thiếu đúng bằng phần bị cắt. Đưa tổng thật vào.
-        hidden = total_matched - len(candidates)
-        if hidden > 0:
+        if ctx.hidden > 0:
+            shown = ctx.total_matched - ctx.hidden
             index_block += (
-                f"\n\nLƯU Ý: đây là {len(candidates)} tin đáng chú ý nhất; hệ thống còn "
-                f"{hidden} tin nữa xếp hạng thấp hơn. Khi cần nói \"Còn N tin khác\", "
-                f"N tính trên tổng {total_matched} tin."
+                f"\n\nLƯU Ý: đây là {shown} tin đáng chú ý nhất; hệ thống còn "
+                f"{ctx.hidden} tin nữa xếp hạng thấp hơn. Khi cần nói \"Còn N tin khác\", "
+                f"N tính trên tổng {ctx.total_matched} tin."
             )
 
         # Vai trò được hỏi mà KHÔNG tin nào ảnh hưởng tới → nói tất định, đừng trông chờ
@@ -553,20 +664,34 @@ class ChatService:
             )
 
         history_block = _history_block(history)
+        # Cho phép hình dạng đối chiếu khi có ≥2 ô sâu — dưới đó thì "so sánh" vô nghĩa.
+        allow_comparison = ctx.deep_count >= 2
         if focus is not None:
             prompt = build_chat_expanded_prompt(
-                insight_block=focus.insight_block,
+                insight_block=ctx.deep_block,
                 index_block=index_block,
                 history_block=history_block,
                 question=question,
+            )
+        elif refs:
+            prompt = build_chat_focused_prompt(
+                deep_block=ctx.deep_block,
+                index_block=index_block,
+                history_block=history_block,
+                question=question,
+                allow_comparison=allow_comparison,
             )
         else:
             prompt = build_chat_global_prompt(
                 index_block=index_block,
                 history_block=history_block,
                 question=question,
+                deep_block=ctx.deep_block,
+                allow_comparison=allow_comparison,
             )
-        raw_answer = await self._call_model(prompt)
+        # Thay STATUS_COMPOSING chung chung bằng mốc mang số liệu thật — KHÔNG phát thêm
+        # một sự kiện nữa: hai status cách nhau vài chục ms chỉ làm dòng chữ nhấp nháy.
+        raw_answer = await self._call_model(prompt, status=_reading_status(ctx))
 
         answer, citations = resolve_citations(raw_answer, mapping)
         answer, citations = enforce_grounding(answer, citations)
@@ -742,7 +867,9 @@ class ChatService:
             logger.warning("Embed câu hỏi lỗi, xếp hạng bằng lexical: %s", e)
             return None
 
-    async def _call_model(self, prompt: str, hold_sentinel: bool = False) -> str:
+    async def _call_model(
+        self, prompt: str, hold_sentinel: bool = False, status: str | None = None
+    ) -> str:
         """Gọi Gemini NGOÀI event loop — chat nằm trên request path (design D6).
 
         Cộng vào `self._calls_used` NGAY khi model trả về, trước khi caller làm bất cứ
@@ -751,7 +878,7 @@ class ChatService:
         Có `self._emit` thì đi lối streaming — vẫn ĐÚNG MỘT bước, vẫn cùng prompt, vẫn trả
         về toàn văn cho phần grounding phía sau chạy y như cũ.
         """
-        await self._status(STATUS_COMPOSING)
+        await self._status(status or STATUS_COMPOSING)
         if self._steps_used >= MAX_MODEL_CALLS_PER_QUESTION:
             raise RuntimeError(
                 f"Chạm trần {MAX_MODEL_CALLS_PER_QUESTION} bước trả lời cho một câu hỏi"
@@ -814,7 +941,11 @@ class ChatService:
         return state.text
 
     async def answer_stream(
-        self, question: str, history: list, insight_id: uuid.UUID | None
+        self,
+        question: str,
+        history: list,
+        insight_id: uuid.UUID | None,
+        referenced_insight_ids: list[uuid.UUID] | None = None,
     ) -> AsyncIterator[dict]:
         """Lối ra streaming: yield `status`/`token` dọc đường, kết bằng `commit` hoặc `error`.
 
@@ -835,7 +966,10 @@ class ChatService:
 
         async def run() -> None:
             try:
-                result = await self.answer(question, history, insight_id, emit=emit)
+                result = await self.answer(
+                    question, history, insight_id, emit=emit,
+                    referenced_insight_ids=referenced_insight_ids,
+                )
                 await queue.put({"type": "commit", **result})
             except InsightNotFoundError:
                 await queue.put({"type": "error", "code": "not_found"})

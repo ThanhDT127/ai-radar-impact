@@ -140,6 +140,9 @@ class _FakeInsight:
         self.title = title
         self.signal = "tín hiệu"
         self.so_what = ""
+        # Ô sâu (`build_insight_block`) đọc thêm hai field này so với index nén.
+        self.why_it_matters = f"Vì sao {title} quan trọng"
+        self.risks = []
         self.summary_short = ""
         self.summary_medium = "vừa"
         self.affected_roles = ["Security"]

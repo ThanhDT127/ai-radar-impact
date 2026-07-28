@@ -1,10 +1,22 @@
 {
  "meta": {
-  "measured_at": "2026-07-27",
-  "commit": "a00fe2e",
+  "measured_at": "2026-07-28",
+  "commit": "(chat-context-depth, chưa commit)",
   "corpus": "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary; vector từ chat_embeddings.jsonl + chat_query_vectors.jsonl (chat-hybrid-retrieval)",
-  "note": "chốt trên code CHƯA sửa (`_roles_in_question` còn khớp chuỗi con)",
+  "note": "Nhóm `comparison_anaphora` cố ý đỏ — nó là mốc đo cho working set, không phải mục tiêu của `_rank`. Đừng 'chữa' nó bằng cách sửa câu hỏi cho gần chữ trong tin.",
   "revisions": [
+   {
+    "date": "2026-07-28",
+    "recall_at_k": "0,922 → 0,969",
+    "recall_at_answer": "0,821 → 0,876",
+    "reason": "SỬA PHÉP ĐO, không phải cải thiện xếp hạng — `_rank` không đổi một dòng. Hai việc: (a) 4 kịch bản `comparison_expanded` chuyển sang đường THẬT: người dùng đang xem một bài rồi hỏi so sánh thì widget đã đưa bài đó vào working set, nên payload là `referenced_insight_ids`, KHÔNG phải `insight_id`+sentinel. Nhóm đổi tên `comparison_expanded` → `comparison_in_article`. (b) Tin đi qua `referenced_insight_ids` nay bị LOẠI khỏi cả tập ứng viên lẫn `must_have`: chúng vào thẳng ô sâu, **không đi qua xếp hạng**, nên chấm recall cho chúng là chấm một phép tính không tồn tại. \n\n⚠️ Đây là lý do con số TĂNG: nhóm `comparison_anaphora` trước đó bị chấm 0,00 vĩnh viễn cho một việc `_rank` không được giao — nay hiện `—` và ra khỏi trung bình. **Một đại lượng đỏ mãi vì thiết kế sẽ dạy người đọc bỏ qua nó**, đúng thứ harness này sinh ra để chống; nó cũng làm trung bình tổng bớt nhạy với hồi quy thật. Bằng chứng 'xếp hạng thuần KHÔNG giải được câu hồi chỉ' vẫn còn nguyên ở `openspec/changes/chat-context-depth/measurement.md` + `eval/` — chỗ đúng của nó là tài liệu đo một lần, không phải một cổng chạy mãi. `comparison_in_article` r@5 = 1,00 (3 ca có việc để đo; ca thứ tư `cmp-gemma-expanded` có cả hai bài trong working set nên `must_have` rỗng)."
+   },
+   {
+    "date": "2026-07-28",
+    "recall_at_k": "0,970 → 0,922",
+    "recall_at_answer": "0,859 → 0,821",
+    "reason": "`chat-context-depth`: (a) THÊM 19 kịch bản so sánh (4 nhóm mới) và (b) thêm 7 từ khung câu hồi chỉ vào `STOPWORDS`. ⚠️ HAI CON SỐ TỔNG KHÔNG SO ĐƯỢC với dòng dưới — bộ kịch bản đi từ 42 lên 61 câu và nhóm mới `comparison_anaphora` **CỐ Ý đỏ**: 'Hai cái này khác nhau chỗ nào?' không chứa thông tin 'hai bài nào', nên không mức tinh chỉnh `_rank` nào chữa được — đó đúng là phần mà working set (`referenced_insight_ids`) chữa, và nhóm này giữ lại làm MỐC ĐO cho nó, không phải để chữa bằng xếp hạng. KHÔNG kịch bản cũ nào tụt (0 dấu ▼). Nhóm mới: `comparison` r@5=1,00 (8/8 — retrieval vốn đã ổn cho câu gọi tên cả hai; cái thiếu là ĐỘ SÂU, xem `measurement.md`), `comparison_expanded` 1,00, `comparison_partial` 0,67, `comparison_anaphora` 0,00. Riêng phần (b) đo được: r@5 tổng 0,805 → 0,821 và `comparison_expanded` r@5 0,75 → 1,00 (câu 'Bài này khác gì so với bài kia' nay rỗng từ khoá ⇒ tắt tầng vector ⇒ rơi về độ quan trọng thay vì xếp theo nhiễu). Đổi lại `comparison_anaphora` r@60 0,38 → 0,25: thứ hạng cũ là MAY MẮN của nhiễu, không phải tín hiệu — đối chứng bật/tắt vector cho thứ hạng nhảy loạn không theo hướng nào (141↔105, 22↔66, 45↔1)."
+   },
    {
     "date": "2026-07-27",
     "recall_at_k": "0,988 → 0,970",
@@ -282,7 +294,6 @@
    "must_total": 2,
    "misses": [],
    "terms": [
-    "bài",
     "tiếng",
     "việt",
     "hướng",
@@ -486,7 +497,6 @@
    "must_total": 2,
    "misses": [],
    "terms": [
-    "bài",
     "phân",
     "tích",
     "sinh",
@@ -675,7 +685,6 @@
    "must_total": 2,
    "misses": [],
    "terms": [
-    "bài",
     "tiếng",
     "việt",
     "kỹ",
@@ -695,7 +704,6 @@
    "must_total": 1,
    "misses": [],
    "terms": [
-    "bài",
     "typescript"
    ],
    "roles": []
@@ -981,9 +989,416 @@
     "nhớ"
    ],
    "roles": []
+  },
+  {
+   "scenario_id": "cmp-pq-explicit",
+   "group": "comparison",
+   "mode": "global",
+   "question": "So sánh bài hướng dẫn lộ trình post-quantum cho CISO với bài nói vì sao không thể chờ thuật toán chữ ký post-quantum tốt hơn",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "so",
+    "hướng",
+    "dẫn",
+    "lộ",
+    "trình",
+    "post",
+    "quantum",
+    "ciso",
+    "thể",
+    "chờ",
+    "thuật",
+    "toán",
+    "chữ",
+    "ký",
+    "post",
+    "quantum",
+    "tốt",
+    "hơn"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-eu-explicit",
+   "group": "comparison",
+   "mode": "global",
+   "question": "EU AI Act và EU Cyber Resilience Act khác nhau thế nào về nghĩa vụ tuân thủ?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "eu",
+    "act",
+    "eu",
+    "cyber",
+    "resilience",
+    "act",
+    "nghĩa",
+    "vụ",
+    "tuân",
+    "thủ"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-gemma-explicit",
+   "group": "comparison",
+   "mode": "global",
+   "question": "So sánh Gemma 4 12B với DiffusionGemma",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "so",
+    "gemma",
+    "12b",
+    "diffusiongemma"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-lambda-explicit",
+   "group": "comparison",
+   "mode": "global",
+   "question": "So sánh Lambda MicroVMs với Lambda Managed Instances cho bài toán cold start Java",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "so",
+    "lambda",
+    "microvms",
+    "lambda",
+    "managed",
+    "instances",
+    "toán",
+    "cold",
+    "start",
+    "java"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-supply-explicit",
+   "group": "comparison",
+   "mode": "global",
+   "question": "So sánh vụ tấn công chuỗi cung ứng npm AsyncAPI với việc áp dụng SBOM, mỗi cái giải quyết được gì?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "so",
+    "vụ",
+    "tấn",
+    "chuỗi",
+    "cung",
+    "ứng",
+    "npm",
+    "asyncapi",
+    "việc",
+    "áp",
+    "dụng",
+    "sbom",
+    "mỗi",
+    "giải",
+    "quyết"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-0day-explicit",
+   "group": "comparison",
+   "mode": "global",
+   "question": "So sánh zero-day LegacyHive của Windows với 0-day Windows Defender, cái nào nguy hiểm hơn?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "so",
+    "zero",
+    "day",
+    "legacyhive",
+    "windows",
+    "day",
+    "windows",
+    "defender",
+    "nguy",
+    "hiểm",
+    "hơn"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-k8s-explicit",
+   "group": "comparison",
+   "mode": "global",
+   "question": "So bài checklist triển khai Kubernetes với bài về CVE Kubernetes chưa được vá",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "so",
+    "checklist",
+    "triển",
+    "khai",
+    "kubernetes",
+    "cve",
+    "kubernetes",
+    "chưa",
+    "vá"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-openmodel-explicit",
+   "group": "comparison",
+   "mode": "global",
+   "question": "So sánh bài về hệ sinh thái open model cộng hưởng với bài open model thúc đẩy nghiên cứu AI",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "so",
+    "sinh",
+    "thái",
+    "open",
+    "model",
+    "cộng",
+    "hưởng",
+    "open",
+    "model",
+    "thúc",
+    "đẩy",
+    "nghiên",
+    "cứu"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-pq-anaphora",
+   "group": "comparison_anaphora",
+   "mode": "focused",
+   "question": "So sánh hai bài vừa rồi giúp tôi",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "so",
+    "giúp"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-eu-anaphora",
+   "group": "comparison_anaphora",
+   "mode": "focused",
+   "question": "Trong hai tin đó thì tin nào quan trọng hơn với team mình?",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "trọng",
+    "hơn"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-gemma-anaphora",
+   "group": "comparison_anaphora",
+   "mode": "focused",
+   "question": "Hai cái này khác nhau chỗ nào?",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-lambda-anaphora",
+   "group": "comparison_anaphora",
+   "mode": "focused",
+   "question": "Nên chọn cái nào trong hai cái vừa phân tích?",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "chọn",
+    "phân",
+    "tích"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-pq-partial",
+   "group": "comparison_partial",
+   "mode": "global",
+   "question": "Bài post-quantum vừa xem so với bài kia thì cái nào gấp hơn?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "post",
+    "quantum",
+    "so",
+    "hơn"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-eu-partial",
+   "group": "comparison_partial",
+   "mode": "global",
+   "question": "EU AI Act so với tin kia thì bên nào ảnh hưởng tới mình sớm hơn?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "eu",
+    "act",
+    "so",
+    "bên",
+    "ảnh",
+    "hưởng",
+    "sớm",
+    "hơn"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-supply-partial",
+   "group": "comparison_partial",
+   "mode": "global",
+   "question": "Vụ AsyncAPI đó với bài còn lại thì bài nào cần xử lý trước?",
+   "recall": 0.5,
+   "recall_at_answer": 0.0,
+   "worst_rank": 98,
+   "must_total": 2,
+   "misses": [
+    {
+     "insight_id": "9ede2e2f-0d7e-479a-910a-3df4808437c7",
+     "title": "What is an SBOM (and Why Can’t You Ship Without One)?",
+     "rank": 98
+    }
+   ],
+   "terms": [
+    "vụ",
+    "asyncapi",
+    "lại",
+    "xử",
+    "lý",
+    "trước"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-pq-expanded",
+   "group": "comparison_in_article",
+   "mode": "focused",
+   "question": "So sánh bài này với bài hướng dẫn lộ trình post-quantum cho CISO",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "so",
+    "hướng",
+    "dẫn",
+    "lộ",
+    "trình",
+    "post",
+    "quantum",
+    "ciso"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-eu-expanded",
+   "group": "comparison_in_article",
+   "mode": "focused",
+   "question": "So sánh bài này với bài về Cyber Resilience Act",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "so",
+    "cyber",
+    "resilience",
+    "act"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-gemma-expanded",
+   "group": "comparison_in_article",
+   "mode": "focused",
+   "question": "Bài này khác gì so với bài kia vừa đọc?",
+   "recall": null,
+   "recall_at_answer": null,
+   "worst_rank": null,
+   "must_total": 0,
+   "misses": [],
+   "terms": [
+    "so"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "cmp-lambda-expanded",
+   "group": "comparison_in_article",
+   "mode": "focused",
+   "question": "So với bài Lambda về cold start Java thì cái nào phù hợp hơn?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "so",
+    "lambda",
+    "cold",
+    "start",
+    "java",
+    "phù",
+    "hợp",
+    "hơn"
+   ],
+   "roles": []
   }
  ],
- "overall": 0.9702380952380952,
- "overall_at_answer": 0.8591269841269842,
- "questions_scored": 42
+ "overall": 0.96875,
+ "overall_at_answer": 0.8764880952380952,
+ "questions_scored": 56
 }

@@ -123,6 +123,18 @@ class Settings(BaseSettings):
     # −35% thời gian). Cắt theo THỨ HẠNG nên chi phí phẳng khi corpus phình, khác
     # `chat_window_days` cắt theo thời gian. 0 = không giới hạn.
     chat_index_top_k: int = 60
+    # Số Ô SÂU trong context (chat-context-depth D1). Ô sâu mang đủ 7 field phân tích +
+    # bài gốc; phần còn lại vẫn là index nén ~115 token/tin. Lấp TẤT ĐỊNH: insight người
+    # dùng tham chiếu trước, còn chỗ thì lấp bằng tin xếp hạng cao nhất.
+    # Ngân sách xấu nhất đo trên fixture 179 tin: 3 × 3.466 + 57 × 115 ≈ 16,9k token,
+    # dưới mức ~19k production đã chạy. ⚠️ ĐỪNG hạ để tìm tốc độ — cắt ngữ cảnh 76% chỉ
+    # giảm độ trễ 33% (`chat-latency-thinking-budget`), còn 2 ô sâu chỉ tốn thêm 50ms.
+    chat_deep_slots: int = 3
+    # Ô sâu có kèm `raw_documents.normalized_content` không. Tắt → chỉ 7 field phân tích
+    # (641–838 token thay vì 1.527–3.466). Đo 28/07: chỉ 7 field đã đủ cho câu SO SÁNH
+    # (Comparison Adequacy 2,00/2), nhưng KHÔNG đủ cho câu hỏi CHI TIẾT — sự thật loại
+    # "gói npm nào bị chèn mã độc" chỉ nằm trong thân bài.
+    chat_deep_include_content: bool = True
 
     # Admin API
     admin_api_key: str = "changeme"

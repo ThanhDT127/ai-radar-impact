@@ -1,0 +1,161 @@
+[
+  {
+    "id": "cmp-pq-explicit",
+    "family": "C1-explicit",
+    "mode": "global",
+    "question": "So sánh bài hướng dẫn lộ trình post-quantum cho CISO với bài nói vì sao không thể chờ thuật toán chữ ký post-quantum tốt hơn",
+    "must_have": ["817f5220", "b12b1cf4"],
+    "label_reason": "Hai bài post-quantum; câu hỏi gọi tên gần như nguyên văn tiêu đề cả hai."
+  },
+  {
+    "id": "cmp-eu-explicit",
+    "family": "C1-explicit",
+    "mode": "global",
+    "question": "EU AI Act và EU Cyber Resilience Act khác nhau thế nào về nghĩa vụ tuân thủ?",
+    "must_have": ["0882d18a", "872cb403"],
+    "label_reason": "Hai văn bản pháp lý EU riêng biệt, tên gọi xuất hiện tường minh trong câu hỏi."
+  },
+  {
+    "id": "cmp-gemma-explicit",
+    "family": "C1-explicit",
+    "mode": "global",
+    "question": "So sánh Gemma 4 12B với DiffusionGemma",
+    "must_have": ["4a87e96b", "2011d799"],
+    "label_reason": "Hai model Gemma phát hành riêng; tên model là khớp chính xác, đúng thế mạnh lexical."
+  },
+  {
+    "id": "cmp-lambda-explicit",
+    "family": "C1-explicit",
+    "mode": "global",
+    "question": "So sánh Lambda MicroVMs với Lambda Managed Instances cho bài toán cold start Java",
+    "must_have": ["86f8588d", "9cb1a5cf"],
+    "label_reason": "Hai thông báo Lambda khác nhau, cùng chạm cold start/isolation."
+  },
+  {
+    "id": "cmp-supply-explicit",
+    "family": "C1-explicit",
+    "mode": "global",
+    "question": "So sánh vụ tấn công chuỗi cung ứng npm AsyncAPI với việc áp dụng SBOM, mỗi cái giải quyết được gì?",
+    "must_have": ["9e815aec", "9ede2e2f"],
+    "label_reason": "Một sự cố + một biện pháp; người dùng hay đọc riêng rồi hỏi liên hệ."
+  },
+  {
+    "id": "cmp-0day-explicit",
+    "family": "C1-explicit",
+    "mode": "global",
+    "question": "So sánh zero-day LegacyHive của Windows với 0-day Windows Defender, cái nào nguy hiểm hơn?",
+    "must_have": ["32cfd96e", "e24df210"],
+    "label_reason": "Hai lỗ hổng Windows riêng biệt, tên định danh rõ."
+  },
+  {
+    "id": "cmp-k8s-explicit",
+    "family": "C1-explicit",
+    "mode": "global",
+    "question": "So bài checklist triển khai Kubernetes với bài về CVE Kubernetes chưa được vá",
+    "must_have": ["c0435e81", "5ca4023d"],
+    "label_reason": "Hai bài Kubernetes: một vận hành, một bảo mật."
+  },
+  {
+    "id": "cmp-openmodel-explicit",
+    "family": "C1-explicit",
+    "mode": "global",
+    "question": "So sánh bài về hệ sinh thái open model cộng hưởng với bài open model thúc đẩy nghiên cứu AI",
+    "must_have": ["77780764", "345eb60a"],
+    "label_reason": "Hai bài phân tích open model, chủ đề gần nhau — ca khó cho cả lexical lẫn vector."
+  },
+
+  {
+    "id": "cmp-pq-anaphora",
+    "family": "C2-anaphora",
+    "mode": "global",
+    "question": "So sánh hai bài vừa rồi giúp tôi",
+    "must_have": ["817f5220", "b12b1cf4"],
+    "label_reason": "Người dùng vừa mở lần lượt hai bài post-quantum rồi hỏi trong luồng toàn cục. Câu hỏi không mang từ nội dung nào."
+  },
+  {
+    "id": "cmp-eu-anaphora",
+    "family": "C2-anaphora",
+    "mode": "global",
+    "question": "Trong hai tin đó thì tin nào quan trọng hơn với team mình?",
+    "must_have": ["0882d18a", "872cb403"],
+    "label_reason": "Hồi chỉ thuần tuý, hai tin quy định EU vừa đọc riêng."
+  },
+  {
+    "id": "cmp-gemma-anaphora",
+    "family": "C2-anaphora",
+    "mode": "global",
+    "question": "Hai cái này khác nhau chỗ nào?",
+    "must_have": ["4a87e96b", "2011d799"],
+    "label_reason": "Hồi chỉ thuần tuý sau khi đọc riêng hai bài Gemma."
+  },
+  {
+    "id": "cmp-lambda-anaphora",
+    "family": "C2-anaphora",
+    "mode": "global",
+    "question": "Nên chọn cái nào trong hai cái vừa phân tích?",
+    "must_have": ["86f8588d", "9cb1a5cf"],
+    "label_reason": "Hồi chỉ thuần tuý sau khi đọc riêng hai bài Lambda."
+  },
+
+  {
+    "id": "cmp-pq-partial",
+    "family": "C3-partial",
+    "mode": "global",
+    "question": "Bài post-quantum vừa xem so với bài kia thì cái nào gấp hơn?",
+    "must_have": ["817f5220", "b12b1cf4"],
+    "label_reason": "Một vế gọi tên chủ đề, vế kia hồi chỉ — dạng người dùng gõ nhiều nhất."
+  },
+  {
+    "id": "cmp-eu-partial",
+    "family": "C3-partial",
+    "mode": "global",
+    "question": "EU AI Act so với tin kia thì bên nào ảnh hưởng tới mình sớm hơn?",
+    "must_have": ["0882d18a", "872cb403"],
+    "label_reason": "Một vế tường minh, một vế hồi chỉ."
+  },
+  {
+    "id": "cmp-supply-partial",
+    "family": "C3-partial",
+    "mode": "global",
+    "question": "Vụ AsyncAPI đó với bài còn lại thì bài nào cần xử lý trước?",
+    "must_have": ["9e815aec", "9ede2e2f"],
+    "label_reason": "Một vế tường minh, một vế hồi chỉ."
+  },
+
+  {
+    "id": "cmp-pq-expanded",
+    "family": "C4-expanded",
+    "mode": "expanded",
+    "anchor": "b12b1cf4",
+    "question": "So sánh bài này với bài hướng dẫn lộ trình post-quantum cho CISO",
+    "must_have": ["817f5220"],
+    "label_reason": "Hỏi ngay trong luồng bài B: [1] đã là bài đang xem, chỉ còn phải truy hồi bài A."
+  },
+  {
+    "id": "cmp-eu-expanded",
+    "family": "C4-expanded",
+    "mode": "expanded",
+    "anchor": "0882d18a",
+    "question": "So sánh bài này với bài về Cyber Resilience Act",
+    "must_have": ["872cb403"],
+    "label_reason": "Như trên, bài đang xem đi kèm miễn phí ở [1]."
+  },
+  {
+    "id": "cmp-gemma-expanded",
+    "family": "C4-expanded",
+    "mode": "expanded",
+    "anchor": "4a87e96b",
+    "question": "Bài này khác gì so với bài kia vừa đọc?",
+    "must_have": ["2011d799"],
+    "label_reason": "Ca xấu nhất của expanded: vế thứ hai hoàn toàn hồi chỉ."
+  },
+  {
+    "id": "cmp-lambda-expanded",
+    "family": "C4-expanded",
+    "mode": "expanded",
+    "anchor": "86f8588d",
+    "question": "So với bài Lambda về cold start Java thì cái nào phù hợp hơn?",
+    "must_have": ["9cb1a5cf"],
+    "label_reason": "Vế thứ hai gọi tên chủ đề, bài đang xem miễn phí ở [1]."
+  }
+]

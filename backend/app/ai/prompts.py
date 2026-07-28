@@ -378,19 +378,101 @@ def build_chat_insight_prompt(insight_block: str, history_block: str, question: 
     return "\n".join(parts)
 
 
-def build_chat_global_prompt(index_block: str, history_block: str, question: str) -> str:
-    """Prompt chế độ toàn cục — index nén đã được server lọc và xếp hạng sẵn.
+# Cho phép hình dạng ĐỐI CHIẾU khi context có từ 2 ô sâu trở lên (chat-context-depth D6).
+#
+# Vì sao cần: `CHAT_SYSTEM_PROMPT` chốt "Mỗi tin gói trong MỘT gạch đầu dòng, tối đa 2 câu"
+# — nó **cấm đúng hình dạng** của một câu trả lời so sánh. Đo 28/07/2026 trên 8 câu so sánh
+# tường minh: cùng model, cùng retrieval, chỉ khác độ sâu + luật này, điểm đối chiếu đi từ
+# 1,25/2 (hai gạch đầu dòng mô tả song song, KHÔNG một con số nào) lên 2,00/2.
+#
+# Đặt ở prompt NGƯỜI DÙNG chứ không nhét vào `CHAT_SYSTEM_PROMPT` — cùng lý do với
+# `_SCOPE_RULE`: system prompt dùng chung với chế độ per-insight (1 nguồn), mà ở đó "đối
+# chiếu" là vô nghĩa.
+#
+# "ĐƯỢC PHÉP" chứ không "PHẢI": server không đoán câu nào là câu so sánh (mọi heuristic
+# phân loại câu hỏi ở repo này đều đã trả giá). Model đọc câu hỏi và tự quyết.
+_COMPARISON_RULE = """\
+LUẬT TRÌNH BÀY (chỉ cho câu hỏi này, ghi đè phần ĐỘ DÀI ở trên khi cần):
+- Nếu câu hỏi yêu cầu SO SÁNH / ĐỐI CHIẾU / chọn giữa các tin, ĐƯỢC PHÉP trả lời dài hơn
+  và trình bày theo CHIỀU SO SÁNH (mục đích, kiến trúc, yêu cầu tài nguyên, hiệu năng,
+  mức khẩn, đối tượng ảnh hưởng...) thay vì mỗi tin một gạch đầu dòng rời nhau.
+- Ưu tiên nêu con số và chi tiết cụ thể có trong dữ liệu; nói rõ hai bên KHÁC nhau ở đâu,
+  đừng chỉ mô tả song song. Kết bằng một câu chốt nếu câu hỏi yêu cầu chọn.
+- Câu hỏi thường (không phải so sánh) thì giữ nguyên độ dài và hình dạng như luật trên.
+- Luật này CHỈ nới về ĐỘ DÀI và BỐ CỤC. Luật số 3 ở trên vẫn nguyên hiệu lực: MỌI khẳng
+  định vẫn PHẢI kèm marker nguồn [n], kể cả trong đoạn văn xuôi đối chiếu."""
 
-    Index KHÔNG chứa UUID (design D4): model chỉ thấy số thứ tự [n], server giữ bảng
+
+def _context_parts(deep_block: str, index_block: str) -> list[str]:
+    """Hai khối dữ liệu dưới hai tiêu đề, nhưng CÙNG một dãy số và một bảng ánh xạ."""
+    parts: list[str] = []
+    if deep_block:
+        parts += ["DỮ LIỆU — các tin đọc kỹ (đầy đủ phân tích và bài gốc):", deep_block, ""]
+    parts += [
+        "DỮ LIỆU — các tin khác trong hệ thống (dạng rút gọn):",
+        index_block or "(không có tin nào khác)",
+    ]
+    return parts
+
+
+def build_chat_global_prompt(
+    index_block: str,
+    history_block: str,
+    question: str,
+    deep_block: str = "",
+    allow_comparison: bool = False,
+) -> str:
+    """Prompt chế độ toàn cục — vài ô sâu + index nén, server đã lọc và xếp hạng sẵn.
+
+    Context KHÔNG chứa UUID (design D4): model chỉ thấy số thứ tự [n], server giữ bảng
     ánh xạ n → insight_id. Model không có gì để bịa định danh.
+
+    `deep_block` rỗng ⇒ prompt trùng khít bản trước `chat-context-depth`.
     """
-    if index_block:
-        data = index_block
+    if not deep_block and not index_block:
+        parts = [
+            "DỮ LIỆU — các tin hiện có trong hệ thống:",
+            "(không có tin nào trong hệ thống khớp phạm vi tìm kiếm)",
+        ]
     else:
-        data = "(không có tin nào trong hệ thống khớp phạm vi tìm kiếm)"
-    parts = ["DỮ LIỆU — các tin hiện có trong hệ thống:", data]
+        parts = _context_parts(deep_block, index_block)
     if history_block:
         parts += ["", "HỘI THOẠI TRƯỚC ĐÓ:", history_block]
+    if allow_comparison:
+        parts += ["", _COMPARISON_RULE]
+    parts += ["", f"CÂU HỎI: {question}"]
+    return "\n".join(parts)
+
+
+def build_chat_focused_prompt(
+    deep_block: str,
+    index_block: str,
+    history_block: str,
+    question: str,
+    allow_comparison: bool = True,
+) -> str:
+    """Prompt khi người dùng CHỌN sẵn tin để hỏi (`referenced_insight_ids`).
+
+    Khác `build_chat_expanded_prompt` ở chỗ **không** có câu dẫn "bài bạn đang xem không
+    nhắc tới điều này" — ở đây người dùng chủ động đưa tin vào, không có gì "vượt phạm vi"
+    để mà thông báo. (Spike C1 tái dùng nhầm prompt mở rộng và câu trả lời mở đầu sai ngữ
+    cảnh — đó là lý do hàm này tồn tại riêng.)
+
+    Cũng KHÔNG có luật sentinel: context đã mang cả ô sâu lẫn index toàn hệ thống, nên
+    không còn gì để "mở rộng" sang — một lượt gọi là đủ (design D5).
+    """
+    parts = ["Người dùng đang hỏi về những tin được đọc kỹ dưới đây.", ""]
+    parts += _context_parts(deep_block, index_block)
+    if history_block:
+        parts += ["", "HỘI THOẠI TRƯỚC ĐÓ:", history_block]
+    parts += [
+        "",
+        "BỐI CẢNH: các tin ở khối đọc kỹ là tin người dùng đang quan tâm — ưu tiên trả lời "
+        "từ đó. Nếu câu hỏi cần thông tin ngoài chúng, dùng thêm khối rút gọn; nếu cả hai "
+        "đều không có, nói thẳng là không tìm thấy trong hệ thống.",
+    ]
+    if allow_comparison:
+        parts += ["", _COMPARISON_RULE]
     parts += ["", f"CÂU HỎI: {question}"]
     return "\n".join(parts)
 

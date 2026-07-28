@@ -44,7 +44,8 @@ async def chat(
     payload: ChatRequest,
     session: AsyncSession = Depends(get_session),
 ) -> ChatResponse:
-    """Hỏi đáp 2 chế độ: có `insight_id` → per-insight, không có → toàn cục.
+    """Hỏi đáp: có `referenced_insight_ids` → working set (một lượt gọi, `mode="focused"`);
+    chỉ có `insight_id` → per-insight + auto-fallback; không có gì → toàn cục.
 
     `ChatService` khởi tạo mỗi request (rẻ — chỉ giữ session + repo), nhưng
     `GeminiClient` bên trong là singleton (design D6).
@@ -55,6 +56,7 @@ async def chat(
             question=payload.question,
             history=payload.history,
             insight_id=payload.insight_id,
+            referenced_insight_ids=payload.referenced_insight_ids,
         )
     except InsightNotFoundError:
         raise HTTPException(status_code=404, detail="Không tìm thấy insight này")
@@ -90,6 +92,7 @@ async def _sse_stream(service: ChatService, payload: ChatRequest) -> AsyncIterat
         question=payload.question,
         history=payload.history,
         insight_id=payload.insight_id,
+        referenced_insight_ids=payload.referenced_insight_ids,
     ):
         kind = event.pop("type")
         if kind == "error":

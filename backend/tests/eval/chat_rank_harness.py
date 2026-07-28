@@ -73,14 +73,70 @@ from tests.eval.chat_fixture import (
 BASELINE_PATH = FIXTURE_DIR / "chat_rank_baseline.json"
 
 BASELINE_META = {
-    "measured_at": "2026-07-27",
-    "commit": "a00fe2e",
+    "measured_at": "2026-07-28",
+    "commit": "(chat-context-depth, chưa commit)",
     "corpus": (
         "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary; "
         "vector từ chat_embeddings.jsonl + chat_query_vectors.jsonl (chat-hybrid-retrieval)"
     ),
-    "note": "chốt trên code CHƯA sửa (`_roles_in_question` còn khớp chuỗi con)",
+    "note": (
+        "Nhóm `comparison_anaphora` cố ý đỏ — nó là mốc đo cho working set, không phải "
+        "mục tiêu của `_rank`. Đừng 'chữa' nó bằng cách sửa câu hỏi cho gần chữ trong tin."
+    ),
     "revisions": [
+        {
+            "date": "2026-07-28",
+            "recall_at_k": "0,922 → 0,969",
+            "recall_at_answer": "0,821 → 0,876",
+            "reason": (
+                "SỬA PHÉP ĐO, không phải cải thiện xếp hạng — `_rank` không đổi một dòng. "
+                "Hai việc: "
+                "(a) 4 kịch bản `comparison_expanded` chuyển sang đường THẬT: người dùng "
+                "đang xem một bài rồi hỏi so sánh thì widget đã đưa bài đó vào working set, "
+                "nên payload là `referenced_insight_ids`, KHÔNG phải `insight_id`+sentinel. "
+                "Nhóm đổi tên `comparison_expanded` → `comparison_in_article`. "
+                "(b) Tin đi qua `referenced_insight_ids` nay bị LOẠI khỏi cả tập ứng viên "
+                "lẫn `must_have`: chúng vào thẳng ô sâu, **không đi qua xếp hạng**, nên "
+                "chấm recall cho chúng là chấm một phép tính không tồn tại. "
+                "\n\n"
+                "⚠️ Đây là lý do con số TĂNG: nhóm `comparison_anaphora` trước đó bị chấm "
+                "0,00 vĩnh viễn cho một việc `_rank` không được giao — nay hiện `—` và ra "
+                "khỏi trung bình. **Một đại lượng đỏ mãi vì thiết kế sẽ dạy người đọc bỏ "
+                "qua nó**, đúng thứ harness này sinh ra để chống; nó cũng làm trung bình "
+                "tổng bớt nhạy với hồi quy thật. "
+                "Bằng chứng 'xếp hạng thuần KHÔNG giải được câu hồi chỉ' vẫn còn nguyên ở "
+                "`openspec/changes/chat-context-depth/measurement.md` + `eval/` — chỗ đúng "
+                "của nó là tài liệu đo một lần, không phải một cổng chạy mãi. "
+                "`comparison_in_article` r@5 = 1,00 (3 ca có việc để đo; ca thứ tư "
+                "`cmp-gemma-expanded` có cả hai bài trong working set nên `must_have` rỗng)."
+            ),
+        },
+        {
+            "date": "2026-07-28",
+            "recall_at_k": "0,970 → 0,922",
+            "recall_at_answer": "0,859 → 0,821",
+            "reason": (
+                "`chat-context-depth`: (a) THÊM 19 kịch bản so sánh (4 nhóm mới) và "
+                "(b) thêm 7 từ khung câu hồi chỉ vào `STOPWORDS`. "
+                "⚠️ HAI CON SỐ TỔNG KHÔNG SO ĐƯỢC với dòng dưới — bộ kịch bản đi từ 42 lên "
+                "61 câu và nhóm mới `comparison_anaphora` **CỐ Ý đỏ**: 'Hai cái này khác "
+                "nhau chỗ nào?' không chứa thông tin 'hai bài nào', nên không mức tinh chỉnh "
+                "`_rank` nào chữa được — đó đúng là phần mà working set "
+                "(`referenced_insight_ids`) chữa, và nhóm này giữ lại làm MỐC ĐO cho nó, "
+                "không phải để chữa bằng xếp hạng. "
+                "KHÔNG kịch bản cũ nào tụt (0 dấu ▼). "
+                "Nhóm mới: `comparison` r@5=1,00 (8/8 — retrieval vốn đã ổn cho câu gọi tên "
+                "cả hai; cái thiếu là ĐỘ SÂU, xem `measurement.md`), "
+                "`comparison_expanded` 1,00, `comparison_partial` 0,67, "
+                "`comparison_anaphora` 0,00. "
+                "Riêng phần (b) đo được: r@5 tổng 0,805 → 0,821 và `comparison_expanded` "
+                "r@5 0,75 → 1,00 (câu 'Bài này khác gì so với bài kia' nay rỗng từ khoá ⇒ "
+                "tắt tầng vector ⇒ rơi về độ quan trọng thay vì xếp theo nhiễu). "
+                "Đổi lại `comparison_anaphora` r@60 0,38 → 0,25: thứ hạng cũ là MAY MẮN của "
+                "nhiễu, không phải tín hiệu — đối chứng bật/tắt vector cho thứ hạng nhảy "
+                "loạn không theo hướng nào (141↔105, 22↔66, 45↔1)."
+            ),
+        },
         {
             "date": "2026-07-27",
             "recall_at_k": "0,988 → 0,970",
@@ -155,10 +211,17 @@ def _candidates(scenario: dict, corpus: list) -> list:
 
     Chế độ mở rộng loại bài đang xem khỏi index toàn cục (nó đã đi kèm ở `[1]`), nên harness
     phải loại y hệt — không thì đo trên tập ứng viên khác production.
+
+    Chế độ `focused` cũng vậy với `referenced_insight_ids`: tin do người dùng chọn vào thẳng
+    ô sâu, **không đi qua xếp hạng**. Giữ chúng trong tập ứng viên là đo một việc mà
+    production không nhờ `_rank` làm.
     """
     anchor = scenario.get("anchor_insight_id")
     if scenario["mode"] == "expanded" and anchor:
         return [i for i in corpus if str(i.id) != anchor]
+    refs = set(scenario.get("referenced_insight_ids") or [])
+    if refs:
+        return [i for i in corpus if str(i.id) not in refs]
     return list(corpus)
 
 
@@ -192,7 +255,12 @@ def measure(scenarios: list[dict] | None = None, use_vectors: bool = True) -> di
         position = {str(insight.id): n for n, insight in enumerate(ranked, start=1)}
         selected = {str(i.id) for i in (ranked[:top_k] if top_k > 0 else ranked)}
 
-        must = scenario.get("must_have") or []
+        # Tin đi qua `referenced_insight_ids` được BẢO ĐẢM có mặt (ô sâu), nên chấm recall
+        # xếp hạng cho chúng là chấm một phép tính không tồn tại — và cho ra 0,00 vĩnh viễn
+        # ở nhóm mà production trả lời hoàn hảo. Một đại lượng đỏ mãi vì thiết kế sẽ dạy
+        # người đọc bỏ qua nó, đúng thứ harness này sinh ra để chống.
+        refs = set(scenario.get("referenced_insight_ids") or [])
+        must = [i for i in (scenario.get("must_have") or []) if i not in refs]
         # Thứ hạng thật của từng tin bắt buộc. Đây là đại lượng NHẠY: recall@60 trên corpus
         # 179 tin bão hoà ở 1,00 (đo 27/07) nên tự nó không phân biệt được gì — xem
         # `recall_at_answer` và `worst_rank` bên dưới.

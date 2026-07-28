@@ -30,6 +30,7 @@ Change change fixture (thêm kịch bản, mở rộng corpus) thì baseline tro
 import argparse
 import asyncio
 import json
+import uuid
 from pathlib import Path
 
 from sqlalchemy import select
@@ -196,13 +197,105 @@ async def build(corpus_path: Path, anchors_path: Path, scenarios_path: Path) -> 
         print(f"Đã ghi nội dung bài gốc của {written} anchor vào {anchors_path}")
 
 
+async def top_up(anchors_path: Path, scenarios_path: Path) -> None:
+    """Bổ sung anchor + query vector cho các kịch bản MỚI, KHÔNG đụng corpus/embeddings.
+
+    Vì sao cần đường riêng: `build()` ghi đè `chat_corpus.jsonl` bằng nội dung DB **hiện
+    tại**. Thêm vài kịch bản mà chạy `build()` là vô tình đổi luôn corpus, và mọi baseline
+    (RS lẫn answer-eval) mất tính so sánh được — điểm tụt vì corpus đổi sẽ bị đọc nhầm
+    thành hồi quy. Fixture phải đo *hồi quy so với chính nó*, nên phần ảnh chụp chỉ được
+    sinh lại một cách CÓ CHỦ ĐÍCH, không phải như tác dụng phụ của việc thêm kịch bản.
+    """
+    have_vectors = set()
+    if QUERY_VECTORS_PATH.exists():
+        have_vectors = {
+            json.loads(line)["scenario_id"]
+            for line in QUERY_VECTORS_PATH.open(encoding="utf-8")
+            if line.strip()
+        }
+    rows = [json.loads(l) for l in scenarios_path.open(encoding="utf-8") if l.strip()]
+    new = [r for r in rows if r["id"] not in have_vectors]
+
+    if new:
+        vectors = GeminiClient().embed([r["question"] for r in new], EMBED_TASK_QUERY)
+        failed = [r["id"] for r, v in zip(new, vectors) if v is None]
+        if failed:
+            raise SystemExit(f"Embed câu hỏi lỗi cho {len(failed)} kịch bản: {failed[:5]}")
+        with QUERY_VECTORS_PATH.open("a", encoding="utf-8") as fh:
+            for row, vector in zip(new, vectors):
+                fh.write(
+                    json.dumps(
+                        {"scenario_id": row["id"], "embedding": _round(vector)},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        print(f"Đã thêm {len(new)} vector câu hỏi vào {QUERY_VECTORS_PATH.name}")
+    else:
+        print("Mọi kịch bản đã có vector câu hỏi")
+
+    have_anchors = set()
+    if anchors_path.exists():
+        have_anchors = {
+            json.loads(line)["insight_id"]
+            for line in anchors_path.open(encoding="utf-8")
+            if line.strip()
+        }
+    wanted = _wanted_anchor_ids(scenarios_path) - have_anchors
+    if not wanted:
+        print("Mọi anchor đã có nội dung bài gốc")
+        return
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Insight)
+            .where(Insight.id.in_([uuid.UUID(i) for i in wanted]))
+            .options(selectinload(Insight.raw_document))
+        )
+        by_id = {str(i.id): i for i in result.scalars().all()}
+
+    missing = sorted(wanted - set(by_id))
+    if missing:
+        raise SystemExit(f"{len(missing)} anchor không có trong DB:\n" + "\n".join(missing))
+
+    with anchors_path.open("a", encoding="utf-8") as fh:
+        for insight_id in sorted(wanted):
+            doc = by_id[insight_id].raw_document
+            content = (doc.normalized_content or "").strip() if doc else ""
+            if not content:
+                raise SystemExit(
+                    f"{insight_id}: normalized_content rỗng (đã purge?) — chọn anchor khác."
+                )
+            fh.write(
+                json.dumps(
+                    {
+                        "insight_id": insight_id,
+                        "title": by_id[insight_id].title,
+                        "normalized_content": content,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    print(f"Đã thêm nội dung bài gốc của {len(wanted)} anchor vào {anchors_path.name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", type=Path, default=CORPUS_PATH)
     parser.add_argument("--anchors", type=Path, default=ANCHORS_PATH)
     parser.add_argument("--scenarios", type=Path, default=SCENARIOS_PATH)
+    parser.add_argument(
+        "--top-up",
+        action="store_true",
+        help="CHỈ bổ sung anchor + query vector cho kịch bản mới; KHÔNG sinh lại corpus "
+        "(sinh lại corpus làm mọi baseline mất tính so sánh được)",
+    )
     args = parser.parse_args()
-    asyncio.run(build(args.corpus, args.anchors, args.scenarios))
+    if args.top_up:
+        asyncio.run(top_up(args.anchors, args.scenarios))
+    else:
+        asyncio.run(build(args.corpus, args.anchors, args.scenarios))
 
 
 if __name__ == "__main__":

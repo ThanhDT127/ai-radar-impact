@@ -20,29 +20,6 @@ Frontend SHALL hiển thị nút mở chat ở góc phải dưới trên mọi t
 - **WHEN** panel chat đang mở trên desktop
 - **THEN** người dùng vẫn cuộn và thao tác được với danh sách/chi tiết insight phía sau
 
-### Requirement: Context chip theo insight đang mở
-Khi người dùng đang ở trang chi tiết một insight (`/insights/:id`), widget SHALL tự gắn context chip hiển thị title insight đó và gửi `insight_id` kèm câu hỏi (chế độ B). Người dùng SHALL bỏ được chip (✕) để chuyển sang hỏi toàn cục. Khi rời trang chi tiết, widget SHALL trở về chế độ toàn cục.
-
-Việc đổi ngữ cảnh — chuyển sang insight khác, bỏ chip, hoặc rời trang chi tiết — SHALL đổi luôn scope hội thoại đang hoạt động, để chip đang hiển thị và `history` được gửi luôn thuộc cùng một scope.
-
-#### Scenario: Tự gắn context khi xem detail
-- **WHEN** người dùng mở chi tiết insight rồi mở widget và đặt câu hỏi
-- **THEN** request gửi kèm `insight_id` của insight đang xem và chip hiển thị title insight
-
-#### Scenario: Bỏ context chip
-- **WHEN** người dùng bấm ✕ trên context chip
-- **THEN** câu hỏi tiếp theo gửi không kèm `insight_id` (chế độ toàn cục)
-- **AND** câu hỏi đó chạy trên luồng toàn cục, không mang `history` về insight vừa bỏ chip
-
-#### Scenario: Chuyển insight đang xem
-- **WHEN** người dùng chuyển sang xem insight khác trong khi widget mở
-- **THEN** context chip cập nhật theo insight mới
-- **AND** widget chuyển sang luồng hội thoại của insight mới, không hiển thị lượt của insight cũ
-
-#### Scenario: Quay về danh sách
-- **WHEN** người dùng rời trang chi tiết về danh sách trong khi widget mở
-- **THEN** context chip biến mất và câu hỏi tiếp theo chạy chế độ toàn cục trên luồng toàn cục
-
 ### Requirement: Render citation thành link
 Câu trả lời của bot SHALL hiển thị citations dưới dạng link; bấm citation SHALL điều hướng đến chi tiết insight tương ứng trong dashboard.
 
@@ -81,59 +58,30 @@ Widget SHALL hiển thị trạng thái đang xử lý trong khi chờ trả l�
 
 ### Requirement: Cô lập hội thoại theo ngữ cảnh
 
-Widget SHALL cô lập hội thoại theo **ngữ cảnh (scope)**, trong đó một scope là một `insight_id` cụ thể
-(chế độ B) hoặc toàn cục (chế độ A). Mỗi scope SHALL có luồng hội thoại riêng; khi người dùng đổi scope,
-widget SHALL hiển thị luồng của scope mới (rỗng nếu scope đó chưa từng được hỏi) và SHALL KHÔNG kéo theo
-các lượt của scope trước.
+Widget SHALL giữ **một luồng hội thoại** cho cả phiên. `history` gửi kèm mỗi câu hỏi SHALL là các lượt của
+luồng đó.
 
-`history` gửi kèm mỗi câu hỏi SHALL chỉ gồm các lượt thuộc scope hiện tại. Widget SHALL KHÔNG bao giờ gửi
-lượt của một scope khác làm ngữ cảnh cho câu hỏi ở scope hiện tại. Toàn cục SHALL là **một** scope có luồng
-riêng, không phải trạng thái "không có ngữ cảnh" gom chung với mọi lần hỏi toàn cục khác.
+Bất biến chống lẫn ngữ cảnh SHALL được bảo đảm bằng **ngữ cảnh đầy đủ** thay vì bằng sự cô lập: mọi insight
+được nhắc tới trong `history` SHALL còn mặt trong ngữ cảnh của lượt hiện tại — hoặc trong working set, hoặc
+trong phần index toàn hệ thống mà service dựng. Widget SHALL KHÔNG đưa phần câu trả lời đang stream (chưa
+chốt) vào `history` của lượt sau.
 
-Việc cô lập SHALL không làm mất luồng của scope cũ trong cùng phiên: quay lại một scope đã hỏi trước đó
-SHALL thấy lại đúng luồng của nó.
+**Lý do đảo bất biến cũ:** cô lập theo scope chặn được context drift, nhưng chính việc tách đôi làm hai bài
+người dùng đã đọc riêng không bao giờ nằm chung một luồng — câu "so sánh hai bài vừa rồi" trở nên không thể
+trả lời (đo 28/07/2026: recall@5 = 0/4). Drift cũ là một **mâu thuẫn** giữa `history` và ngữ cảnh; khi cả
+hai bài đều nằm trong ngữ cảnh thì mâu thuẫn đó không còn tồn tại để phải chặn.
 
-#### Scenario: Đổi insight rồi hỏi câu nối tiếp
-- **WHEN** người dùng hỏi về insight A, chuyển sang xem insight B, rồi hỏi một câu nối tiếp mập mờ ("rủi ro của nó là gì")
-- **THEN** `history` gửi kèm câu hỏi này SHALL KHÔNG chứa lượt nào của insight A
-- **AND** câu hỏi chạy trên ngữ cảnh insight B với `insight_id` của B
+#### Scenario: Đổi bài rồi hỏi câu nối tiếp mập mờ
+- **WHEN** người dùng xem bài A, hỏi một câu, chuyển sang bài B, rồi hỏi "rủi ro của nó thì sao?"
+- **THEN** cả A và B đều có mặt trong ngữ cảnh gửi lên, và câu trả lời chỉ rõ đang nói về bài nào
 
-#### Scenario: Quay lại scope đã hỏi
-- **WHEN** người dùng đã hỏi ở insight A, sang B, rồi quay lại A
-- **THEN** widget hiển thị lại đúng luồng hội thoại của A, và câu hỏi tiếp theo mang `history` của A
+#### Scenario: Rời trang chi tiết không xoá ngữ cảnh
+- **WHEN** người dùng đã hỏi về một bài rồi rời trang chi tiết về danh sách
+- **THEN** bài đó vẫn nằm trong working set và câu hỏi tiếp theo vẫn tham chiếu được tới nó
 
-#### Scenario: Toàn cục là một scope riêng
-- **WHEN** người dùng bỏ context chip (hoặc rời trang chi tiết) và đặt câu hỏi toàn cục
-- **THEN** `history` gửi kèm SHALL KHÔNG chứa lượt hỏi về bất kỳ insight cụ thể nào đang/đã mở
-
-### Requirement: Chỉ báo phạm vi và chuyển scope hai chiều
-
-Khi người dùng đang ở trang chi tiết một insight, widget SHALL hiển thị **chỉ báo phạm vi (scope)** hiện
-tại — "Bài đang xem" hoặc "Toàn hệ thống" — và SHALL cho phép chuyển đổi **hai chiều** giữa hai phạm vi đó
-bằng một thao tác, **không cần điều hướng trang**. Đây là cơ chế chuyển scope tường minh, thay cho việc bỏ
-context chip một chiều.
-
-Chuyển phạm vi SHALL đổi luồng hội thoại tương ứng theo cơ chế cô lập scope (mỗi scope một luồng riêng);
-widget SHALL KHÔNG mang lượt của scope này sang scope kia.
-
-Câu trả lời được service mở rộng tự động (`mode="expanded"`) SHALL được đánh dấu để người dùng biết nó dựa
-trên tìm kiếm **toàn hệ thống**, không chỉ bài đang xem.
-
-#### Scenario: Hiển thị scope hiện tại
-- **WHEN** người dùng mở widget khi đang ở trang chi tiết một insight
-- **THEN** widget hiển thị chỉ báo phạm vi cho biết đang hỏi trong phạm vi "Bài đang xem"
-
-#### Scenario: Chuyển scope hai chiều
-- **WHEN** người dùng bấm chuyển sang "Toàn hệ thống" rồi bấm chuyển lại "Bài đang xem"
-- **THEN** mỗi lần bấm đổi phạm vi ngay tại chỗ, không rời trang, và câu hỏi tiếp theo chạy đúng phạm vi đang hiển thị
-
-#### Scenario: Chuyển scope đổi luồng hội thoại
-- **WHEN** người dùng chuyển từ "Bài đang xem" sang "Toàn hệ thống"
-- **THEN** widget hiển thị luồng hội thoại của scope toàn cục, không hiển thị lượt hỏi về bài; `history` gửi kèm không chứa lượt của scope bài
-
-#### Scenario: Đánh dấu câu trả lời mở rộng
-- **WHEN** service trả về câu trả lời với `mode="expanded"`
-- **THEN** widget đánh dấu bong bóng trả lời đó là kết quả tìm trên toàn hệ thống, phân biệt với trả lời trong phạm vi bài
+#### Scenario: Câu trả lời chưa chốt không lọt vào lịch sử
+- **WHEN** một câu trả lời đang stream thì người dùng gửi câu hỏi mới sau khi nó chốt
+- **THEN** lịch sử chỉ chứa nội dung đã chốt, không chứa phần dở dang
 
 ### Requirement: Render câu trả lời theo luồng với trạng thái tiến trình
 
@@ -164,3 +112,33 @@ chạy và SHALL KHÔNG nhập phần text dở vào luồng hội thoại của
 - **WHEN** một câu trả lời đang được stream
 - **THEN** nút gửi bị vô hiệu hoá cho tới khi luồng kết thúc
 
+### Requirement: Working set insight hiển thị và sửa được
+
+Widget SHALL duy trì một **working set** các insight đang được đưa vào ngữ cảnh hội thoại, và SHALL gửi
+danh sách này kèm mỗi câu hỏi, **tách biệt** với văn bản câu hỏi.
+
+Insight SHALL được thêm vào working set khi người dùng mở trang chi tiết của nó, và khi người dùng bấm vào
+một trích dẫn trong câu trả lời. Widget SHALL hiển thị working set dưới dạng danh sách nhãn đọc được, mỗi
+mục SHALL bỏ được bằng một thao tác. Khi working set vượt số ô sâu của service, widget SHALL giữ các mục
+mới nhất.
+
+Khi working set không rỗng, widget SHALL KHÔNG gửi kèm định danh bài đang xem theo cơ chế cũ — bài đang
+xem đã nằm trong working set, gửi cả hai sẽ khiến service đi đường per-insight thay vì đường working set.
+
+Actor: người dùng dashboard. Tiền điều kiện: widget đang mở.
+
+#### Scenario: Đọc hai bài rồi so sánh
+- **WHEN** người dùng mở insight A, mở tiếp insight B, rồi hỏi "so sánh hai cái này"
+- **THEN** cả A và B đều nằm trong working set gửi lên, và câu trả lời đối chiếu đúng hai bài đó
+
+#### Scenario: Bấm trích dẫn đưa bài vào ngữ cảnh
+- **WHEN** người dùng bấm một trích dẫn `[n]` trong câu trả lời
+- **THEN** insight tương ứng được thêm vào working set và các câu hỏi tiếp theo có thể nhắc tới nó
+
+#### Scenario: Bỏ một mục khỏi working set
+- **WHEN** người dùng bỏ một mục trong working set rồi hỏi tiếp
+- **THEN** câu hỏi được gửi đi không còn tham chiếu tới insight đó
+
+#### Scenario: Working set thay cho định danh bài đang xem
+- **WHEN** người dùng đang ở trang chi tiết một insight và working set không rỗng
+- **THEN** câu hỏi gửi lên mang working set và KHÔNG mang định danh bài đang xem theo cơ chế cũ

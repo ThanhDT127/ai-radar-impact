@@ -188,3 +188,31 @@ def test_live_pipeline_meets_gate():
     judge_all(records)
     passed, reasons = verdict(score(records), load_baseline())
     assert passed, "; ".join(reasons)
+
+
+def test_cited_context_uses_served_depth_not_reconstructed_index():
+    """Judge phải nhìn ĐÚNG độ sâu đã phục vụ, không phải dòng index dựng lại.
+
+    Hồi quy cho lỗi đo 28/07/2026: `chat-context-depth` rót tới 3 tin ở ô sâu (7 field +
+    `normalized_content`), nhưng `_cited_context` vẫn dựng lại dòng index nén 115 token cho
+    mọi tin không phải anchor. Model trả lời đúng từ thân bài, judge không thấy thân bài,
+    và **mọi khẳng định rút từ đó bị chấm N** — Faithfulness 0,99 → 0,78, một hồi quy GIẢ
+    đủ để chặn merge.
+
+    Đây là lỗi sống ở khe giữa pipeline và bộ đo: cả hai bên đều đúng theo cách hiểu của
+    mình. Chốt bằng test vì không có gì khác bắt được.
+    """
+    from tests.eval.chat_answer_harness import _cited_context
+
+    record = {
+        "citations": [{"insight_id": "abc", "title": "T"}],
+        "served": {"1": "abc"},
+        "deep_blocks": {"1": "[1] T\n    NỘI DUNG BÀI GỐC:\nchi tiết chỉ có trong thân bài"},
+        "anchor_insight_id": None,
+    }
+    context = _cited_context(record, corpus_by_id={}, anchors={})
+
+    assert "chi tiết chỉ có trong thân bài" in context, (
+        "judge đang chấm trên context NGHÈO hơn thứ model thực sự đọc — "
+        "mọi khẳng định rút từ bài gốc sẽ bị chấm là bịa"
+    )

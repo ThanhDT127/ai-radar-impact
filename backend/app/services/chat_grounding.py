@@ -14,6 +14,7 @@ citation ở đây là *cấu trúc*, không phải hậu kiểm lọc id lạ.
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 
 from app.ai.prompts import OUT_OF_SCOPE_SENTINEL
 from app.models.insight import Insight
@@ -72,9 +73,14 @@ def build_index_block(
     return "\n".join(lines), mapping
 
 
-def build_insight_block(insight: Insight, content: str | None) -> str:
-    """Context chế độ per-insight — luôn đánh số [1] vì chỉ có đúng 1 nguồn."""
-    parts = [f"[1] {insight.title}"]
+def build_insight_block(insight: Insight, content: str | None, n: int = 1) -> str:
+    """Một Ô SÂU: đủ 7 field phân tích + bài gốc, đánh số `[n]`.
+
+    `n` mặc định 1 vì chế độ per-insight cũ chỉ có đúng một nguồn. `build_context`
+    (chat-context-depth) truyền 1..k để xếp nhiều ô sâu cạnh nhau — trước đây số `[1]` bị
+    chốt cứng trong chuỗi, nên hai ô sâu sẽ mang cùng một số và bảng ánh xạ mất một tin.
+    """
+    parts = [f"[{n}] {insight.title}"]
 
     def add(label: str, value) -> None:
         if value:
@@ -109,6 +115,109 @@ def build_insight_block(insight: Insight, content: str | None) -> str:
         )
 
     return "\n".join(parts)
+
+
+@dataclass
+class ChatContext:
+    """Context của một lượt trả lời: vài Ô SÂU + phần index nén, MỘT bảng ánh xạ.
+
+    `deep_block` và `index_block` tách nhau vì prompt phải đặt chúng dưới hai tiêu đề khác
+    nhau, nhưng chúng dùng **một dãy số liên tục** và **một `mapping`** — đó là toàn bộ
+    điểm của D4: model chỉ thấy số, server giữ bảng.
+    """
+
+    deep_block: str
+    index_block: str
+    mapping: dict[int, Insight]
+    deep_count: int
+    total_matched: int
+    hidden: int
+    # Block của TỪNG ô sâu, theo số thứ tự. `deep_block` là các block này ghép lại; giữ
+    # riêng vì phần dựng lại context (bộ đo Faithfulness) cần biết mỗi tin được phục vụ ở
+    # độ sâu nào. Tách chuỗi `deep_block` ra lại thì không đáng tin — raw content có dòng
+    # trống, và một bộ đo chấm sai độ sâu sẽ báo hồi quy giả (đo 28/07: Faith 0,99 → 0,78,
+    # toàn bộ là do judge nhìn dòng index nén trong khi model đọc bài gốc).
+    deep_blocks: dict[int, str]
+
+
+def build_context(
+    refs: list[Insight],
+    ranked: list[Insight],
+    k_deep: int,
+    index_limit: int,
+    include_content: bool = True,
+) -> ChatContext:
+    """Dựng context: ô sâu lấp TẤT ĐỊNH (refs trước, xếp hạng sau), rồi index nén.
+
+    Đây là **hàm thuần** (design D1) — không DB, không model, không đọc `settings`. Nhờ vậy
+    RS harness đo được offline và miễn phí, y như `_rank`.
+
+    Lấp ô sâu **không** hỏi ý định câu hỏi. Mọi heuristic phân loại câu hỏi ở repo này đều
+    đã trả giá (`_roles_in_question` khớp chuỗi con, `_CAPABILITY_PHRASES` code chết), nên
+    luật ở đây chỉ có một dòng: refs trước, còn chỗ thì lấp bằng đầu danh sách đã xếp hạng.
+
+    Hệ quả có chủ đích: câu toàn cục **không có ref nào** vẫn được 3 bài sâu nhất. Đó chính
+    là phần chữa "từ chối sai 4/5 câu hỏi chi tiết" — không cần người dùng bấm gì.
+
+    `index_limit` là TỔNG số tin vào prompt (ô sâu tính trong đó), để ngân sách token không
+    phình lên khi thêm ô sâu: 60 tin vẫn là 60 tin, chỉ khác 3 trong số đó được rót sâu.
+    """
+    # Ô sâu KHÔNG được vượt trần tổng: `index_limit` đếm cả ô sâu, nên `k_deep=3` với
+    # `index_limit=1` phải cho đúng 1 tin, không phải 3. Bỏ dòng này thì trần top-K trở
+    # thành lời nói suông đúng ở cấu hình chặt nhất — nơi nó quan trọng nhất.
+    room_total = k_deep if index_limit <= 0 else min(k_deep, index_limit)
+
+    deep: list[Insight] = []
+    seen: set = set()
+
+    def take(insight: Insight) -> None:
+        if insight.id in seen or len(deep) >= room_total:
+            return
+        seen.add(insight.id)
+        deep.append(insight)
+
+    for insight in refs:
+        take(insight)
+    for insight in ranked:
+        take(insight)
+
+    # Tin đã vào ô sâu phải BIẾN MẤT khỏi index — không thì cùng một tin mang hai số và
+    # citation trỏ trùng (đúng lỗi mà `build_index_block(start=2)` của scope-routing tránh).
+    rest = [i for i in ranked if i.id not in seen]
+    room = max(index_limit - len(deep), 0) if index_limit > 0 else len(rest)
+    candidates = rest[:room]
+
+    deep_blocks = {
+        n: build_insight_block(
+            insight,
+            _deep_content(insight) if include_content else None,
+            n=n,
+        )
+        for n, insight in enumerate(deep, start=1)
+    }
+    index_block, mapping = build_index_block(candidates, start=len(deep) + 1)
+    for n, insight in enumerate(deep, start=1):
+        mapping[n] = insight
+
+    # Tin bị cắt = phần đuôi của `ranked` không được rót ở bất kỳ độ sâu nào. Refs đến từ
+    # ngoài `ranked` (ví dụ ngoài cửa sổ thời gian) không tính vào đây.
+    surfaced = sum(1 for i in ranked if i.id in seen) + len(candidates)
+    return ChatContext(
+        deep_block="\n\n".join(deep_blocks[n] for n in sorted(deep_blocks)),
+        deep_blocks=deep_blocks,
+        index_block=index_block,
+        mapping=mapping,
+        deep_count=len(deep),
+        total_matched=len(ranked),
+        hidden=max(len(ranked) - surfaced, 0),
+    )
+
+
+def _deep_content(insight: Insight) -> str | None:
+    """`normalized_content` của bài gốc, hoặc `None` nếu đã bị tombstone-purge."""
+    raw_doc = getattr(insight, "raw_document", None)
+    content = (raw_doc.normalized_content or "").strip() if raw_doc else ""
+    return content or None
 
 
 def resolve_citations(

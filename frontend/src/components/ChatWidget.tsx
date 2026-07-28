@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useMatch } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { streamChat, type ChatTurn, type Citation } from '../api/chat';
@@ -17,119 +17,121 @@ interface Message {
   expanded?: boolean;
 }
 
-// Toàn cục (rời detail hoặc bỏ chip) là MỘT scope thật với luồng riêng, không phải "không có
-// ngữ cảnh" gom chung với mọi lần hỏi toàn cục khác. Xem design D2.
-const GLOBAL_SCOPE = '__global__';
-const EMPTY_THREAD: Message[] = [];
+/** Một tin trong working set — chỉ cần id để gửi lên và title để hiển thị. */
+interface Ref {
+  id: string;
+  title: string;
+}
+
+/**
+ * Số Ô SÂU của server (`settings.chat_deep_slots`). Giữ đồng bộ bằng tay: server vẫn cắt
+ * lại theo cấu hình thật của nó, nên lệch số chỉ làm UI hiện thừa vài chip chứ không sinh
+ * ra hành vi sai.
+ */
+const MAX_REFS = 3;
 
 const QUOTA_MESSAGE =
   'Đã hết lượt hỏi trong ngày hôm nay. Bạn quay lại vào ngày mai nhé, hoặc xem trực tiếp trên dashboard.';
 const NETWORK_MESSAGE = 'Không gửi được câu hỏi. Kiểm tra kết nối rồi thử lại nhé.';
 
 /**
- * Câu trả lời đang chảy về. Nằm NGOÀI `threads` có chủ đích: chỉ câu đã chốt mới được
+ * Câu trả lời đang chảy về. Nằm NGOÀI `messages` có chủ đích: chỉ câu đã chốt mới được
  * nhập luồng. Nhờ vậy phần dở không bao giờ lọt vào `history` gửi lên ở lượt sau, và huỷ
- * giữa chừng (đổi scope) chỉ cần vứt object này đi.
- *
- * `scope` là scope ĐÃ HỎI, không phải scope đang xem — người dùng có thể đổi bài trong lúc
- * chờ, và bong bóng phải ở lại đúng luồng của nó.
+ * giữa chừng chỉ cần vứt object này đi.
  */
 interface Pending {
-  scope: string;
   text: string;
   status: string | null;
 }
 
-/** Marker `[n]` → link tới insight mang đúng `n` đó. Logic giải marker ở `chatAnswer.ts`. */
-function renderAnswer(content: string, citations: Citation[]) {
-  return parseAnswer(content, citations).map((segment, idx) =>
-    segment.citation ? (
-      <Link
-        key={idx}
-        to={`/insights/${segment.citation.insight_id}`}
-        className={styles.marker}
-        title={segment.citation.title}
-      >
-        {segment.text}
-      </Link>
-    ) : (
-      <span key={idx}>{segment.text}</span>
-    ),
-  );
-}
-
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
-  // Mỗi scope (một insight_id cụ thể, hoặc toàn cục) có luồng hội thoại RIÊNG. Không dùng một
-  // mảng gộp cho cả phiên: gộp xuyên scope là context poisoning (Nguy hiểm #3) — history của bài
-  // cũ bám theo khi người dùng đã đổi bài. Xem design D1/D2.
-  const [threads, setThreads] = useState<Record<string, Message[]>>({});
+  /**
+   * MỘT luồng hội thoại cho cả phiên (change `chat-context-depth`).
+   *
+   * Trước đây mỗi scope một luồng (`chat-context-isolation`), để chặn context poisoning:
+   * đổi bài A→B rồi hỏi "nó" thì history nói A còn context là B — một MÂU THUẪN giữa hai
+   * nguồn. Nay cả A lẫn B đều nằm trong `workingSet` và cùng được gửi lên, nên không còn
+   * mâu thuẫn để mà phải chặn; nó thành bài toán khử nhập nhằng bình thường mà model làm
+   * được. Bất biến thay thế: **mọi tin được nhắc trong history đều còn mặt trong ngữ cảnh
+   * của lượt hiện tại** — hoặc trong working set, hoặc trong index toàn hệ thống.
+   *
+   * Chính việc tách đôi mới là thứ làm người dùng không so sánh được hai bài đã đọc riêng
+   * (đo 28/07/2026: recall@5 = 0/4 cho câu so sánh hồi chỉ).
+   */
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [workingSet, setWorkingSet] = useState<Ref[]>([]);
   const [input, setInput] = useState('');
-  const [contextDropped, setContextDropped] = useState(false);
-  const [contextTitle, setContextTitle] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const queryClient = useQueryClient();
 
   // Insight đang mở lấy từ route — widget nằm trong Layout nên không nhận được props
-  // từ trang. Rời trang chi tiết thì match về null → tự quay lại chế độ toàn cục.
+  // từ trang.
   const detailMatch = useMatch('/insights/:id');
   const routeInsightId = detailMatch?.params.id ?? null;
-  const activeInsightId = contextDropped ? null : routeInsightId;
 
-  // Scope hội thoại hiện tại + luồng của nó. Đổi scope (đổi bài, bỏ chip, rời detail) đổi luôn
-  // luồng hiển thị và luồng lấy history khi gửi. `messages` = luồng của scope hiện tại.
-  const scopeKey = activeInsightId ?? GLOBAL_SCOPE;
-  const messages = threads[scopeKey] ?? EMPTY_THREAD;
+  /** Thêm một tin vào working set. Đã có thì giữ nguyên vị trí; tràn thì bỏ mục cũ nhất. */
+  const addRef = useCallback((ref: Ref) => {
+    setWorkingSet((prev) =>
+      prev.some((r) => r.id === ref.id) ? prev : [...prev, ref].slice(-MAX_REFS),
+    );
+  }, []);
 
-  // Chuyển sang insight khác thì context chip phải theo, kể cả khi người dùng đã bỏ
-  // chip của insight trước đó.
+  function removeRef(id: string) {
+    setWorkingSet((prev) => prev.filter((r) => r.id !== id));
+  }
+
+  // Mở trang chi tiết = đưa bài đó vào ngữ cảnh. Đây là thao tác "vừa phân tích bài này"
+  // mà người dùng nhắc tới sau đó bằng "hai bài vừa rồi".
   useEffect(() => {
-    setContextDropped(false);
-  }, [routeInsightId]);
-
-  useEffect(() => {
+    if (!routeInsightId) return;
     let cancelled = false;
-    if (!activeInsightId) {
-      setContextTitle(null);
-      return;
-    }
     queryClient
       .fetchQuery({
-        queryKey: ['insight', activeInsightId],
-        queryFn: () => fetchInsightById(activeInsightId),
+        queryKey: ['insight', routeInsightId],
+        queryFn: () => fetchInsightById(routeInsightId),
         staleTime: 5 * 60 * 1000,
       })
       .then((insight) => {
-        if (!cancelled) setContextTitle(insight?.title ?? null);
+        if (!cancelled && insight?.title) addRef({ id: routeInsightId, title: insight.title });
       })
       .catch(() => {
-        if (!cancelled) setContextTitle(null);
+        /* không lấy được tiêu đề thì thôi — ngữ cảnh thiếu một chip còn hơn chip vô danh */
       });
     return () => {
       cancelled = true;
     };
-  }, [activeInsightId, queryClient]);
+  }, [routeInsightId, queryClient, addRef]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, pending, open]);
 
-  // Đổi scope giữa luồng đang stream → HUỶ (design D6). Không huỷ thì phần dở vẫn chảy về
-  // và người dùng thấy câu trả lời của bài cũ trong khung của bài mới — đúng loại nhầm lẫn
-  // mà `chat-context-isolation` (①) sinh ra để chặn.
-  useEffect(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setPending(null);
-  }, [scopeKey]);
+  // Rời trang / unmount giữa luồng thì huỷ. KHÔNG còn huỷ khi đổi bài như trước: một luồng
+  // duy nhất nghĩa là câu trả lời đang chảy vẫn thuộc đúng cuộc hội thoại này.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
-  // Ghi message vào luồng của scope chỉ định. Dùng `key` cố định thay vì scope hiện tại: câu
-  // trả lời có thể về sau khi người dùng đã đổi bài, và phải rơi vào luồng đã hỏi, không phải
-  // luồng đang xem.
-  function appendToScope(key: string, message: Message) {
-    setThreads((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), message] }));
+  /** Marker `[n]` → link tới insight mang đúng `n` đó, và bấm vào thì tin vào ngữ cảnh. */
+  function renderAnswer(content: string, citations: Citation[]) {
+    return parseAnswer(content, citations).map((segment, idx) =>
+      segment.citation ? (
+        <Link
+          key={idx}
+          to={`/insights/${segment.citation.insight_id}`}
+          className={styles.marker}
+          title={segment.citation.title}
+          onClick={() =>
+            addRef({ id: segment.citation!.insight_id, title: segment.citation!.title })
+          }
+        >
+          {segment.text}
+        </Link>
+      ) : (
+        <span key={idx}>{segment.text}</span>
+      ),
+    );
   }
 
   function send(question: string) {
@@ -138,32 +140,41 @@ export default function ChatWidget() {
     // dùng bấm Gửi nhiều lần vì tưởng treo.
     if (!trimmed || pending) return;
 
-    const targetScope = scopeKey;
-    const insightId = activeInsightId;
-
-    // History gửi đi CHỈ gồm lượt của scope hiện tại (bỏ các bong bóng lỗi) — không bao giờ kéo
-    // theo lượt của scope khác.
-    const history: ChatTurn[] = (threads[targetScope] ?? [])
+    // History mang theo citations của TỪNG lượt: server cần chúng để dịch `[n]` thành tên
+    // bài, vì bảng ánh xạ được dựng lại mỗi lượt nên con số cũ trỏ tin khác.
+    const history: ChatTurn[] = messages
       .filter((m) => !m.isError)
-      .map((m) => ({ role: m.role, content: m.content }));
+      .map((m) => ({
+        role: m.role,
+        content: m.content,
+        citations: m.citations?.map((c) => ({ n: c.n, title: c.title })),
+      }));
+    const refs = workingSet.map((r) => r.id);
 
-    appendToScope(targetScope, { role: 'user', content: trimmed });
+    setMessages((prev) => [...prev, { role: 'user', content: trimmed }]);
     setInput('');
-    setPending({ scope: targetScope, text: '', status: null });
+    setPending({ text: '', status: null });
 
     const controller = new AbortController();
     abortRef.current = controller;
 
-    /** Kết thúc luồng: nhập một message vào luồng đã hỏi rồi dọn trạng thái tạm. */
+    /** Kết thúc luồng: nhập một message vào luồng rồi dọn trạng thái tạm. */
     function settle(message: Message) {
       if (controller.signal.aborted) return;
-      appendToScope(targetScope, message);
+      setMessages((prev) => [...prev, message]);
       setPending(null);
       abortRef.current = null;
     }
 
     streamChat(
-      { question: trimmed, history, insight_id: insightId },
+      {
+        question: trimmed,
+        history,
+        // `insight_id` chỉ dùng khi KHÔNG có working set — giữ đường cũ (mode B + sentinel)
+        // sống cho client cũ và eval harness. Có refs thì server đi đường một-lượt-gọi.
+        insight_id: refs.length ? null : routeInsightId,
+        referenced_insight_ids: refs,
+      },
       {
         onStatus: (text) =>
           setPending((p) => (p && !controller.signal.aborted ? { ...p, status: text } : p)),
@@ -192,13 +203,9 @@ export default function ChatWidget() {
   }
 
   function retryLast() {
-    const scopeMessages = threads[scopeKey] ?? [];
-    const lastUser = [...scopeMessages].reverse().find((m) => m.role === 'user');
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (!lastUser) return;
-    setThreads((prev) => ({
-      ...prev,
-      [scopeKey]: (prev[scopeKey] ?? []).filter((m) => !m.isError),
-    }));
+    setMessages((prev) => prev.filter((m) => !m.isError));
     send(lastUser.content);
   }
 
@@ -229,34 +236,34 @@ export default function ChatWidget() {
         </button>
       </div>
 
-      {/* Badge phạm vi — hiện khi đang ở trang chi tiết, kể cả sau khi đã chuyển sang
-          toàn hệ thống. Chip cũ chỉ có một chiều (bài → toàn cục) nên muốn quay lại bài
-          phải điều hướng; badge này chuyển HAI CHIỀU tại chỗ (design D7). */}
-      {routeInsightId && (
-        <div className={styles.scopeBar}>
-          <span className={styles.scopeText} title={contextTitle ?? undefined}>
-            Phạm vi: <strong>{activeInsightId ? 'Bài đang xem' : 'Toàn hệ thống'}</strong>
-          </span>
-          <button
-            type="button"
-            className={styles.scopeToggle}
-            onClick={() => setContextDropped((dropped) => !dropped)}
-            aria-label={
-              activeInsightId
-                ? 'Chuyển sang hỏi toàn hệ thống'
-                : 'Chuyển sang hỏi trong bài đang xem'
-            }
-          >
-            {activeInsightId ? 'Hỏi toàn hệ thống' : 'Hỏi trong bài này'}
-          </button>
+      {/* Working set — các tin đang được đọc kỹ. Thay badge phạm vi một-lựa-chọn của
+          `chat-scope-routing`: ngữ cảnh nay là một TẬP sửa được, không phải một chế độ. */}
+      {workingSet.length > 0 && (
+        <div className={styles.refBar} aria-label="Tin đang trong ngữ cảnh">
+          <span className={styles.refLabel}>Đang đọc kỹ:</span>
+          {workingSet.map((ref) => (
+            <span key={ref.id} className={styles.refChip}>
+              <span className={styles.refTitle} title={ref.title}>
+                {ref.title}
+              </span>
+              <button
+                type="button"
+                className={styles.refRemove}
+                onClick={() => removeRef(ref.id)}
+                aria-label={`Bỏ ${ref.title} khỏi ngữ cảnh`}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
         </div>
       )}
 
       <div className={styles.messages}>
         {messages.length === 0 && (
           <p className={styles.empty}>
-            {activeInsightId
-              ? 'Hỏi bất cứ điều gì về tin đang mở — kể cả chi tiết trong bài gốc.'
+            {workingSet.length > 0
+              ? 'Hỏi về những tin đang đọc kỹ — kể cả chi tiết trong bài gốc, hoặc so sánh chúng với nhau.'
               : 'Hỏi về các tin trong hệ thống, ví dụ: "tuần này có gì cho Security?"'}
           </p>
         )}
@@ -282,6 +289,9 @@ export default function ChatWidget() {
                       key={citation.insight_id}
                       to={`/insights/${citation.insight_id}`}
                       className={styles.citationLink}
+                      onClick={() =>
+                        addRef({ id: citation.insight_id, title: citation.title })
+                      }
                     >
                       [{citation.n}] {citation.title}
                     </Link>
@@ -300,7 +310,7 @@ export default function ChatWidget() {
         {/* Bong bóng đang chảy. Có token thì hiện token; chưa có thì hiện MỐC TIẾN TRÌNH
             thật do server phát. Khoảng đầu (5–35s đo thật) là lúc model đang thinking, chưa
             sinh token nào — status lấp đúng khoảng đó, thay cho spinner một dòng cố định. */}
-        {pending && pending.scope === scopeKey && (
+        {pending && (
           <div className={styles.bubbleBot}>
             {pending.text ? (
               renderAnswer(pending.text, [])

@@ -78,6 +78,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from tests.eval.chat_fixture import (
+    SCENARIO_MODES,
     FIXTURE_DIR,
     load_anchors,
     load_corpus,
@@ -94,8 +95,8 @@ BASELINE_PATH = FIXTURE_DIR / "chat_answer_baseline.json"
 # LUẬT BASELINE: chốt lại là hành động CÓ CHỦ ĐÍCH, kèm lý do ghi vào change/commit. Chốt
 # lại để test chuyển xanh là tự tháo lưới: lần hồi quy sau sẽ nằm dưới mức mới mà vẫn "pass".
 BASELINE_META = {
-    "measured_at": "2026-07-27",
-    "commit": "a00fe2e",  # HEAD lúc đo (chat-scope-routing đã land)
+    "measured_at": "2026-07-28",
+    "commit": "(chat-context-depth, chưa commit)",
     "model": "gemini-2.5-flash",
     "corpus": "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary",
     "note": (
@@ -106,6 +107,60 @@ BASELINE_META = {
         "sự có nhắc Ethereum/IPFS — model trả lời đúng, nhãn mới là cái sai."
     ),
     "revisions": [
+        {
+            "date": "2026-07-28",
+            "reason": (
+                "SỬA PHÉP ĐO (không đổi code sản phẩm): 4 kịch bản `comparison_expanded` "
+                "chuyển sang đường THẬT. Người dùng đang xem một bài rồi hỏi so sánh thì "
+                "widget đã đưa bài đó vào working set ⇒ payload là "
+                "`referenced_insight_ids`, KHÔNG phải `insight_id`+sentinel. Nhóm đổi tên "
+                "→ `comparison_in_article`, `mode` expanded → focused. "
+                "Kết quả: nhóm đó **AnsRel 0,62 → 1,00**, riêng `cmp-gemma-expanded` "
+                "0,00 → 1,00 (ca từng bị từ chối vì vế thứ hai hoàn toàn hồi chỉ — đúng "
+                "cái mà working set sinh ra để chữa). "
+                "TỔNG: Faith 0,99 → **1,00** · AnsRel 0,93 → **0,96** · CitPrec giữ 1,00. "
+                "\n\n"
+                "⚠️ Con số 0,62 cũ KHÔNG phải chất lượng kém — nó là lời dẫn 'Bài bạn đang "
+                "xem không nhắc tới điều này' của prompt mở rộng, sai ngữ cảnh cho câu SO "
+                "SÁNH (bài đang xem chính là một vế). Đường legacy `insight_id`+sentinel "
+                "vẫn còn trong code (design D5) và vẫn có 13 kịch bản `expanded` canh nó; "
+                "cái bỏ đi chỉ là việc dùng nó để mô tả một luồng người dùng không còn đi."
+            ),
+        },
+        {
+            "date": "2026-07-28",
+            "reason": (
+                "`chat-context-depth`: ô sâu (7 field + bài gốc) cho tới 3 tin, "
+                "`referenced_insight_ids`, prompt `_COMPARISON_RULE`, marker history giải "
+                "thành tiêu đề. Bộ kịch bản 56 → 83 (thêm 19 câu so sánh + 8 câu đã có). "
+                "Faith 0,991 → **0,99** · AnsRel 0,922 → **0,93** · CitPrec giữ **1,00** · "
+                "từ chối đúng 5/5 · lệch mode 0/83. PASS cả hai ngưỡng cứng. "
+                "3 kịch bản cũ tụt AnsRel (đều là judge chấm P cho câu trả lời ĐÚNG: "
+                "`exp-cypress-to-copilot`, `exp-nettacker-to-vnpost`, và `glo-sbom` tụt "
+                "Faith 0,10 nhưng TĂNG AnsRel 0,50), 7 kịch bản cũ TĂNG ⇒ net dương. "
+                "\n\n"
+                "⚠️ HAI ĐIỀU PHẢI ĐỌC TRƯỚC KHI DIỄN GIẢI SỐ NÀY:\n"
+                "(1) Lượt đo ĐẦU cho Faith **0,78** và suýt chặn merge — đó là **hồi quy "
+                "GIẢ của bộ đo**, không phải của code: `_cited_context` dựng lại dòng index "
+                "nén 115 token cho judge trong khi pipeline phục vụ model cả bài gốc ở ô "
+                "sâu, nên mọi khẳng định rút từ thân bài bị chấm N. Luật đó viết từ thời "
+                "chỉ có MỘT tin sâu (mode B). Nay `ChatContext.deep_blocks` mang block đúng "
+                "như đã phục vụ; khoá bằng "
+                "`test_cited_context_uses_served_depth_not_reconstructed_index`.\n"
+                "(2) `_COMPARISON_RULE` bản đầu làm model **quên marker `[n]`** khi viết "
+                "đoạn đối chiếu văn xuôi ⇒ `enforce_grounding` fail-closed xoá sạch câu trả "
+                "lời đúng (`cmp-gemma-anaphora`, chập chờn ~25%). Chữa bằng một dòng nói rõ "
+                "luật chỉ nới ĐỘ DÀI/BỐ CỤC, marker vẫn bắt buộc: nhóm đó 0,00 → 1,00. "
+                "Đây là loại lỗi KHÔNG unit test nào bắt được.\n\n"
+                "Nhóm mới: `comparison` 1,00 (8/8) · `comparison_anaphora` 0,88 · "
+                "`comparison_partial` 1,00 · `comparison_expanded` 0,62. "
+                "⚠️ `comparison_expanded` thấp vì nó đo đường **legacy** `insight_id`+sentinel "
+                "— câu trả lời mở đầu 'Bài bạn đang xem không nhắc tới điều này', sai ngữ "
+                "cảnh cho câu so sánh. Widget nay LUÔN đưa bài đang xem vào working set nên "
+                "không còn gửi payload đó; nhãn giữ nguyên có chủ đích để đường legacy vẫn "
+                "có lưới, chờ quyết định retire."
+            ),
+        },
         {
             "date": "2026-07-27",
             "reason": (
@@ -211,13 +266,19 @@ TUYỆT ĐỐI không in gì khác.
 
 
 class _FixtureResult:
-    """Bắt chước `Result` của SQLAlchemy đủ cho `_answer_insight`."""
+    """Bắt chước `Result` của SQLAlchemy đủ cho `_answer_insight` và `_load_refs`."""
 
-    def __init__(self, insight) -> None:
-        self._insight = insight
+    def __init__(self, insights: list) -> None:
+        self._insights = insights
 
     def scalar_one_or_none(self):
-        return self._insight
+        return self._insights[0] if self._insights else None
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._insights
 
 
 class _FixtureSession:
@@ -232,13 +293,24 @@ class _FixtureSession:
         self._by_id = by_id
 
     async def execute(self, stmt):
-        wanted = [v for v in stmt.compile().params.values() if isinstance(v, uuid.UUID)]
+        # `_load_refs` dùng `IN (...)` nên có thể mang NHIỀU id; `_answer_insight` mang một.
+        # Đọc tất cả rồi trả theo đúng thứ tự tham số — `_load_refs` tự sắp lại theo thứ tự
+        # client gửi, nên thứ tự ở đây không phải hợp đồng, chỉ cần đủ phần tử.
+        # `IN (...)` được SQLAlchemy render thành **expanding bindparam**, nên giá trị ở
+        # đây là một LIST uuid chứ không phải từng uuid rời như `== ...`. Phải trải phẳng,
+        # không thì `_load_refs` trông như "câu lệnh không mang id nào".
+        wanted = []
+        for value in stmt.compile().params.values():
+            for item in value if isinstance(value, (list, tuple)) else [value]:
+                if isinstance(item, uuid.UUID):
+                    wanted.append(item)
         if not wanted:
             raise AssertionError(
                 "Câu lệnh không mang id nào — pipeline đã đổi cách nạp insight, "
                 "sửa _FixtureSession cho khớp trước khi tin vào số đo."
             )
-        return _FixtureResult(self._by_id.get(str(wanted[0])))
+        found = [self._by_id[str(i)] for i in wanted if str(i) in self._by_id]
+        return _FixtureResult(found)
 
 
 @dataclass
@@ -247,6 +319,9 @@ class _Capture:
 
     raw_answer: str = ""
     served: dict[int, str] = field(default_factory=dict)  # n → insight_id
+    # Block ĐÚNG NHƯ ĐÃ PHỤC VỤ cho những tin nằm ở ô sâu (n → text). Không suy lại được từ
+    # corpus: ô sâu mang cả `normalized_content`, mà fixture chỉ lưu content của anchor.
+    deep_blocks: dict[int, str] = field(default_factory=dict)
 
 
 def _make_service(corpus_insights: list, by_id: dict):
@@ -280,18 +355,35 @@ def _install_spy(capture: list[_Capture]):
     from app.services import chat_service as cs
 
     original = cs.resolve_citations
+    original_build = cs.build_context
+    # Ô sâu của lượt gần nhất, ghi lại ngay lúc context được dựng. Phải bắt ở đây chứ không
+    # suy từ `mapping`: mapping chỉ nói tin nào mang số nào, không nói tin nào được rót SÂU.
+    latest_deep: dict = {}
+
+    def spy_build(*args, **kwargs):
+        ctx = original_build(*args, **kwargs)
+        latest_deep.clear()
+        latest_deep.update(ctx.deep_blocks)
+        return ctx
 
     def spy(answer: str, mapping: dict):
         capture.append(
             _Capture(
                 raw_answer=answer,
                 served={n: str(i.id) for n, i in mapping.items()},
+                deep_blocks=dict(latest_deep),
             )
         )
         return original(answer, mapping)
 
     cs.resolve_citations = spy
-    return lambda: setattr(cs, "resolve_citations", original)
+    cs.build_context = spy_build
+
+    def restore():
+        cs.resolve_citations = original
+        cs.build_context = original_build
+
+    return restore
 
 
 async def _run_one(scenario: dict, corpus_insights: list, by_id: dict) -> dict:
@@ -301,10 +393,12 @@ async def _run_one(scenario: dict, corpus_insights: list, by_id: dict) -> dict:
         service = _make_service(corpus_insights, by_id)
         started = time.monotonic()
         anchor = scenario.get("anchor_insight_id")
+        refs = [uuid.UUID(i) for i in scenario.get("referenced_insight_ids", [])]
         result = await service.answer(
             question=scenario["question"],
             history=[],
             insight_id=uuid.UUID(anchor) if anchor else None,
+            referenced_insight_ids=refs,
         )
         latency_ms = int((time.monotonic() - started) * 1000)
     finally:
@@ -317,6 +411,7 @@ async def _run_one(scenario: dict, corpus_insights: list, by_id: dict) -> dict:
         "group": scenario["group"],
         "question": scenario["question"],
         "anchor_insight_id": anchor,
+        "referenced_insight_ids": [str(i) for i in refs],
         "expects_refusal": scenario.get("expects_refusal", False),
         "must_have": scenario.get("must_have", []),
         "mode_actual": result["mode"],
@@ -327,6 +422,7 @@ async def _run_one(scenario: dict, corpus_insights: list, by_id: dict) -> dict:
         ],
         "raw_answer": last.raw_answer,
         "served": last.served,
+        "deep_blocks": {str(n): b for n, b in last.deep_blocks.items()},
         "model_calls": service._calls_used,
         "steps": service._steps_used,
         "latency_ms": latency_ms,
@@ -405,16 +501,26 @@ def _cited_context(record: dict, corpus_by_id: dict, anchors: dict) -> str:
     # của judge đánh số lại từ [1] thì judge phải đoán, và nó đoán sai.
     n_by_id = {v: int(n) for n, v in (record.get("served") or {}).items()}
     anchor_id = record.get("anchor_insight_id")
+    deep_blocks = record.get("deep_blocks") or {}
 
     blocks = []
     for citation in record["citations"]:
         insight_id = citation["insight_id"]
+        n = n_by_id.get(insight_id, 1)
+
+        # ⚠️ Ô SÂU: dùng LẠI ĐÚNG block đã phục vụ. Dựng lại từ corpus không tương đương —
+        # ô sâu mang cả `normalized_content`, mà fixture chỉ lưu content của anchor. Đo
+        # 28/07: cho judge xem dòng index nén trong khi model đọc bài gốc làm Faithfulness
+        # tụt 0,99 → 0,78 và MỌI khẳng định rút từ thân bài bị chấm N. Đó là hồi quy GIẢ —
+        # bộ đo phải nhìn đúng thứ pipeline đã đưa cho model, không hơn không kém.
+        if str(n) in deep_blocks:
+            blocks.append(deep_blocks[str(n)])
+            continue
+
         row = corpus_by_id.get(insight_id)
         if row is None:
             continue
-        n = n_by_id.get(insight_id, 1)
-        # Bài đang xem (luôn là [1] ở mode B/expanded) được phục vụ kèm toàn văn bài gốc;
-        # tin đến từ index toàn cục thì chỉ có dòng nén — dựng lại đúng như vậy.
+        # Mode B (`_answer_insight`) không đi qua `build_context` nên không có deep_blocks.
         if insight_id == anchor_id:
             blocks.append(build_insight_block(rehydrate(row, anchors.get(insight_id)), anchors.get(insight_id)))
         else:
@@ -792,7 +898,7 @@ def main() -> None:
                         help="sinh lại câu trả lời bằng pipeline thật rồi chấm (tốn tiền)")
     parser.add_argument("--rejudge", action="store_true",
                         help="chấm lại bằng judge trên câu trả lời đã lưu (không sinh mới)")
-    parser.add_argument("--mode", choices=("insight", "global", "expanded"),
+    parser.add_argument("--mode", choices=SCENARIO_MODES,
                         help="chỉ chạy/đọc kịch bản của một mode")
     parser.add_argument("--only",
                         help="chỉ chạy/đọc vài kịch bản, ngăn cách bằng dấu phẩy "

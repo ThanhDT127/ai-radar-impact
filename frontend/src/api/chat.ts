@@ -1,8 +1,19 @@
 import { apiClient as api } from './client';
 
+export interface TurnCitation {
+  n: number;
+  title: string;
+}
+
 export interface ChatTurn {
   role: 'user' | 'assistant';
   content: string;
+  /**
+   * Citations của CHÍNH lượt này. Server cần chúng để dịch marker `[n]` trong history
+   * thành tên bài: bảng ánh xạ `n → insight` được dựng LẠI mỗi lượt, nên `[3]` của lượt
+   * trước và `[3]` của lượt này là hai tin khác nhau. Không gửi ⇒ server bỏ marker đi.
+   */
+  citations?: TurnCitation[];
 }
 
 export interface Citation {
@@ -22,6 +33,12 @@ export interface ChatRequest {
   question: string;
   history: ChatTurn[];
   insight_id?: string | null;
+  /**
+   * Working set — insight người dùng đang thao tác (mở trang chi tiết, bấm citation).
+   * Tách khỏi `question` một cách CÓ CHỦ ĐÍCH: nhét URL/UUID vào text câu hỏi vừa phá bất
+   * biến "prompt không chứa định danh", vừa làm nhiễu phép tính từ khoá của server.
+   */
+  referenced_insight_ids?: string[];
 }
 
 export interface ChatResponse {
@@ -29,7 +46,8 @@ export interface ChatResponse {
   citations: Citation[];
   // "expanded" = server tự mở rộng từ scope bài sang toàn hệ thống khi câu hỏi vượt
   // phạm vi bài đang xem (change `chat-scope-routing`).
-  mode: 'insight' | 'global' | 'meta' | 'expanded';
+  // "focused" = có working set do người dùng chọn (change `chat-context-depth`).
+  mode: 'insight' | 'global' | 'meta' | 'expanded' | 'focused';
 }
 
 // Backend cũng cắt còn 10 lượt gần nhất; giữ số ở đây để không gửi thừa qua mạng.

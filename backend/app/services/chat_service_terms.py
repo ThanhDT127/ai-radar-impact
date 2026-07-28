@@ -23,4 +23,14 @@ STOPWORDS = {
     # khỏi đây sẽ đổi recall của nhiều câu khác, đừng gỡ mà không chạy `chat_rank_harness`.
     "ở", "đi", "ta", "họ", "nó", "ai", "ừ", "à", "ạ", "đó", "kia", "ấy", "vì",
     "do", "tuy", "dù", "chỉ", "cả", "còn", "đã", "vẫn", "cũng",
+    # Từ khung của câu HỒI CHỈ — "so sánh hai bài vừa rồi", "hai cái này khác nhau chỗ nào".
+    # Chúng không nói gì về nội dung, nhưng trước 28/07/2026 chúng lọt qua `_question_terms`
+    # nên cổng `if not terms → tắt tầng vector` KHÔNG BAO GIỜ bắn cho loại câu này: hệ thống
+    # đi embed một câu rỗng nghĩa rồi xếp hạng 179 tin theo nhiễu đó. Đo được: cùng câu hỏi,
+    # tắt/bật tầng vector cho thứ hạng nhảy loạn không theo hướng nào (141↔105, 22↔66, 45↔1)
+    # — chữ ký của nhiễu, đúng chế độ hỏng mà `rank-generic` đã phải chặn một lần.
+    #
+    # Không chữa được ca so sánh hồi chỉ (thông tin "hai bài nào" vốn không có trong câu
+    # hỏi — đó là việc của working set), nhưng dừng việc xếp hạng bằng nhiễu.
+    "hai", "cái", "bài", "chỗ", "khác", "sánh", "nhau",
 }

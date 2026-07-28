@@ -208,8 +208,11 @@ describe('ChatWidget — chống gửi trùng khi đang stream', () => {
   });
 });
 
-describe('ChatWidget — huỷ khi đổi scope (design D6)', () => {
-  it('đổi bài giữa luồng: request bị abort và phần dở không sang luồng mới', async () => {
+describe('ChatWidget — điều hướng giữa luồng (bất biến đổi ở chat-context-depth)', () => {
+  it('phần dở KHÔNG BAO GIỜ nhập luồng: chỉ câu đã chốt mới vào history', async () => {
+    // Bất biến này KHÔNG đổi — `pending` vẫn nằm ngoài `messages`. Đổi là ở chỗ nó không
+    // còn bị vứt khi điều hướng: text tạm sống tới khi `commit` thay nó bằng bản đã qua
+    // grounding, và chỉ bản đó vào history của lượt sau.
     const user = userEvent.setup();
     renderWidget();
     await openWidget(user);
@@ -218,58 +221,24 @@ describe('ChatWidget — huỷ khi đổi scope (design D6)', () => {
 
     await emit((l) => l.handlers.onToken?.('phần trả lời dở của A'));
     expect(screen.getByText(/phần trả lời dở của A/)).toBeTruthy();
-    const streamA = last();
 
-    await user.click(screen.getByRole('button', { name: 'go-B' }));
-
-    expect(streamA.signal?.aborted).toBe(true);
-    expect(screen.queryByText(/phần trả lời dở của A/)).toBeNull();
-  });
-
-  it('phần dở KHÔNG nhập luồng cũ: quay lại A không thấy nó, và history sạch', async () => {
-    const user = userEvent.setup();
-    renderWidget();
-    await openWidget(user);
-    await user.click(screen.getByRole('button', { name: 'go-A' }));
-    await ask(user, 'câu hỏi ở A');
-    await emit((l) => l.handlers.onToken?.('phần trả lời dở của A'));
-
-    await user.click(screen.getByRole('button', { name: 'go-B' }));
-    await user.click(screen.getByRole('button', { name: 'go-A' }));
-
-    // Câu hỏi còn (người dùng đã hỏi thật), câu trả lời dở thì không.
-    expect(screen.getByText('câu hỏi ở A')).toBeTruthy();
-    expect(screen.queryByText(/phần trả lời dở của A/)).toBeNull();
-
-    await ask(user, 'hỏi lại ở A');
-    expect(last().payload.history).toEqual([{ role: 'user', content: 'câu hỏi ở A' }]);
-  });
-
-  it('sự kiện đến SAU khi đã huỷ bị bỏ qua, không nhiễm luồng nào', async () => {
-    const user = userEvent.setup();
-    renderWidget();
-    await openWidget(user);
-    await user.click(screen.getByRole('button', { name: 'go-A' }));
-    await ask(user, 'câu hỏi ở A');
-    const streamA = last();
-
-    await user.click(screen.getByRole('button', { name: 'go-B' }));
-
-    // Server chậm chân: commit về sau khi client đã bỏ đi.
-    await emit(() =>
-      streamA.handlers.onCommit?.({
-        answer: 'câu trả lời muộn của A',
-        citations: [],
-        mode: 'insight',
-      }),
+    await emit((l) =>
+      l.handlers.onCommit?.({ answer: 'bản đã chốt', citations: [], mode: 'focused' }),
     );
+    expect(screen.queryByText(/phần trả lời dở của A/)).toBeNull();
 
-    expect(screen.queryByText(/câu trả lời muộn của A/)).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'go-A' }));
-    expect(screen.queryByText(/câu trả lời muộn của A/)).toBeNull();
+    await ask(user, 'hỏi tiếp');
+    expect(last().payload.history).toEqual([
+      { role: 'user', content: 'câu hỏi ở A', citations: undefined },
+      { role: 'assistant', content: 'bản đã chốt', citations: [] },
+    ]);
   });
 
-  it('đổi phạm vi bằng badge cũng huỷ luồng đang chảy', async () => {
+  it('đổi bài giữa luồng KHÔNG còn huỷ — một luồng nghĩa là câu trả lời vẫn đúng chỗ', async () => {
+    // Đảo bất biến của `chat-streaming-sse` D6 một cách có chủ đích: hồi đó đổi scope là
+    // đổi luồng, nên phần dở phải bị vứt kẻo hiện trong khung của bài mới. Nay chỉ có MỘT
+    // luồng, nên câu trả lời đang chảy vẫn thuộc đúng cuộc hội thoại này — huỷ nó đi mới là
+    // mất dữ liệu người dùng đã trả tiền để sinh ra.
     const user = userEvent.setup();
     renderWidget();
     await openWidget(user);
@@ -278,10 +247,15 @@ describe('ChatWidget — huỷ khi đổi scope (design D6)', () => {
     await emit((l) => l.handlers.onToken?.('đang trả lời trong bài'));
     const streamA = last();
 
-    await user.click(screen.getByRole('button', { name: 'Chuyển sang hỏi toàn hệ thống' }));
+    await user.click(screen.getByRole('button', { name: 'go-B' }));
 
-    expect(streamA.signal?.aborted).toBe(true);
-    expect(screen.queryByText(/đang trả lời trong bài/)).toBeNull();
+    expect(streamA.signal?.aborted).toBe(false);
+    expect(screen.getByText(/đang trả lời trong bài/)).toBeTruthy();
+
+    await emit(() =>
+      streamA.handlers.onCommit?.({ answer: 'chốt', citations: [], mode: 'focused' }),
+    );
+    expect(screen.getByText('chốt')).toBeTruthy();
   });
 });
 

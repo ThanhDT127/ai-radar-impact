@@ -76,7 +76,8 @@ _DATETIME_FIELDS = ("published_at", "created_at")
 #   insight   hỏi trong phạm vi bài đang xem  → 1 bước, citation [1]
 #   global    hỏi toàn hệ thống, không mở bài  → 1 bước
 #   expanded  đang mở bài nhưng hỏi ra ngoài  → sentinel → bước 2 (chat-scope-routing)
-SCENARIO_MODES = ("insight", "global", "expanded")
+#   focused   có working set người dùng chọn  → 1 bước, không sentinel (chat-context-depth)
+SCENARIO_MODES = ("insight", "global", "expanded", "focused")
 
 
 def _load_jsonl(path: Path) -> list[dict]:
@@ -166,7 +167,17 @@ def load_scenarios(path: Path = SCENARIOS_PATH) -> list[dict]:
                     "Chạy lại `python -m tests.eval.build_fixture_chat` để lấy content."
                 )
         elif anchor:
-            raise ValueError(f"{sid}: mode global không được có anchor_insight_id")
+            raise ValueError(f"{sid}: mode {row['mode']} không được có anchor_insight_id")
+
+        refs = row.get("referenced_insight_ids", [])
+        unknown_refs = [i for i in refs if i not in corpus_ids]
+        if unknown_refs:
+            raise ValueError(f"{sid}: referenced_insight_ids trỏ ngoài corpus: {unknown_refs}")
+        if row["mode"] == "focused" and not refs:
+            raise ValueError(
+                f"{sid}: mode focused phải có referenced_insight_ids — không có working set "
+                "thì pipeline đi đường global và nhãn mode sai một cách im lặng."
+            )
 
     return rows
 

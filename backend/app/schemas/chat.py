@@ -7,10 +7,29 @@ from pydantic import BaseModel, Field, field_validator
 # History do client giữ (service stateless). Cap ở đây thay vì tin client tự cắt.
 MAX_HISTORY_TURNS = 10
 
+# Trần payload cho working set. KHÁC `settings.chat_deep_slots` (số ô sâu thật, mặc định 3)
+# — cái này chỉ chặn payload vô lý ở biên; service mới là chỗ cắt theo cấu hình.
+MAX_REFERENCED = 20
+
+
+class TurnCitation(BaseModel):
+    """Marker đã dùng ở một lượt TRƯỚC, kèm nhãn đọc được của nguồn.
+
+    Chỉ mang `n` + `title` — không mang `insight_id`/`source_url`: mục đích duy nhất là để
+    server dịch `[n]` trong history thành tên bài, và mọi thứ thừa hơn thế là bề mặt tấn
+    công cho client tự khai định danh.
+    """
+
+    n: int
+    title: str
+
 
 class ChatTurn(BaseModel):
     role: str  # "user" | "assistant"
     content: str
+    # Citations của CHÍNH lượt đó. Cần vì bảng ánh xạ `n → insight` được dựng LẠI mỗi lượt:
+    # `[3]` của lượt trước và `[3]` của lượt này là hai tin khác nhau (xem `_history_block`).
+    citations: list[TurnCitation] = []
 
     @field_validator("role")
     @classmethod
@@ -24,6 +43,11 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     history: list[ChatTurn] = []
     insight_id: uuid.UUID | None = None
+    # Working set: insight người dùng đang thao tác (mở trang chi tiết, bấm citation, ghim
+    # tay). Tách khỏi `question` một cách CÓ CHỦ ĐÍCH — nhét URL/UUID vào text câu hỏi vừa
+    # phá bất biến "prompt không chứa định danh" (D4), vừa làm nhiễu `_question_terms`.
+    # Server cắt ở `chat_deep_slots`; cap ở đây chỉ để chặn payload vô lý.
+    referenced_insight_ids: list[uuid.UUID] = Field(default=[], max_length=MAX_REFERENCED)
 
     @field_validator("history")
     @classmethod
@@ -52,4 +76,4 @@ class Citation(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation] = []
-    mode: str  # "insight" | "global" | "meta" | "expanded"
+    mode: str  # "insight" | "global" | "meta" | "expanded" | "focused"

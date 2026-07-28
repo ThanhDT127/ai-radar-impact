@@ -6,12 +6,24 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ChatRequest } from '../../api/chat';
 import ChatWidget from '../ChatWidget';
 
-// VÌ SAO TEST NÀY TỒN TẠI: history gộp xuyên scope là Nguy hiểm #3 của báo cáo To-Be
-// (Context Drift / History Poisoning). Widget từng giữ MỘT mảng `messages` cho cả phiên và
-// gửi toàn bộ nó làm `history` kèm `insight_id` của scope hiện tại → câu nối tiếp mập mờ ("nó",
-// "rủi ro thì sao") mang ngữ cảnh bài cũ trong khi server đọc bài mới. Bất biến các test này
-// khoá: `history` gửi lên CHỈ được chứa lượt của scope hiện tại (insight_id cụ thể hoặc toàn cục),
-// không bao giờ kéo theo lượt của scope khác. Test khẳng định trên PAYLOAD gửi đi, không trên DOM.
+// VÌ SAO TEST NÀY TỒN TẠI: Nguy hiểm #3 của báo cáo To-Be (Context Drift / History
+// Poisoning) — câu nối tiếp mập mờ ("nó", "rủi ro thì sao") mang ngữ cảnh bài cũ trong khi
+// server đọc bài mới.
+//
+// ⚠️ BẤT BIẾN ĐÃ ĐỔI (change `chat-context-depth`, 28/07/2026). Bản cũ chặn bằng cách CÔ LẬP
+// history theo scope: mỗi bài một luồng riêng. Cách đó chữa được drift nhưng sinh ra một
+// chế độ hỏng khác, đo được: đọc riêng bài A rồi bài B thì KHÔNG luồng nào chứa cả hai, nên
+// "so sánh hai cái này" không thể trả lời (recall@5 = 0/4).
+//
+// Bản mới gộp về MỘT luồng và chặn drift bằng ngữ cảnh thay vì bằng sự cô lập:
+//
+//   BẤT BIẾN: mọi tin được nhắc trong history đều còn mặt trong ngữ cảnh của lượt hiện tại
+//             — hoặc trong `referenced_insight_ids`, hoặc trong index toàn hệ thống.
+//
+// Drift cũ là một MÂU THUẪN giữa hai nguồn (history nói A, context là B). Khi cả A lẫn B
+// cùng nằm trong payload thì mâu thuẫn đó không tồn tại để mà phải chặn.
+//
+// Test vẫn khẳng định trên PAYLOAD gửi đi, không trên DOM.
 
 // Widget nay tiêu thụ `streamChat` (SSE) chứ không `postChat` — bất biến các test này khoá
 // thì không đổi, chỉ đổi đường ống. Mock trả thẳng một `commit`: hình dạng luồng là việc của
@@ -49,6 +61,8 @@ function Harness() {
     <>
       <button onClick={() => navigate('/insights/A')}>go-A</button>
       <button onClick={() => navigate('/insights/B')}>go-B</button>
+      <button onClick={() => navigate('/insights/C')}>go-C</button>
+      <button onClick={() => navigate('/insights/D')}>go-D</button>
       <button onClick={() => navigate('/')}>go-home</button>
       <ChatWidget />
     </>
@@ -82,45 +96,66 @@ async function ask(
   await screen.findByText(`trả lời ${expectCall}`);
 }
 
-describe('ChatWidget — cô lập history theo scope (chống drift)', () => {
-  // Task 3.1
-  it('A→B→A: history ở B không chứa lượt của A; quay lại A thấy lại luồng A', async () => {
+describe('ChatWidget — một luồng + working set (chống drift bằng ngữ cảnh)', () => {
+  it('A→B: một luồng giữ cả hai lượt, VÀ cả hai bài cùng nằm trong ngữ cảnh', async () => {
     const user = userEvent.setup();
     renderWidget();
     await openWidget(user);
 
-    // Scope A: hỏi câu đầu — history rỗng, insight_id = A.
     await user.click(screen.getByRole('button', { name: 'go-A' }));
     await ask(user, 'câu hỏi A', 1);
-    expect(payload(1).insight_id).toBe('A');
+    expect(payload(1).referenced_insight_ids).toEqual(['A']);
     expect(payload(1).history).toEqual([]);
 
-    // Đổi sang scope B, hỏi câu nối tiếp mập mờ.
+    // Đổi sang bài B rồi hỏi câu nối tiếp mập mờ — ca kinh điển của drift.
     await user.click(screen.getByRole('button', { name: 'go-B' }));
     await ask(user, 'rủi ro của nó', 2);
-    expect(payload(2).insight_id).toBe('B');
-    // BẤT BIẾN: history của B tuyệt đối không mang lượt của A.
-    expect(payload(2).history).toEqual([]);
-    expect(payload(2).history.some((t) => t.content.includes('câu hỏi A'))).toBe(false);
-    // Luồng B không hiển thị lượt của A.
-    expect(screen.queryByText('câu hỏi A')).toBeNull();
 
-    // Quay lại A: luồng A còn nguyên, câu tiếp theo mang history của A.
-    await user.click(screen.getByRole('button', { name: 'go-A' }));
-    await screen.findByText('câu hỏi A');
-    expect(screen.queryByText('rủi ro của nó')).toBeNull();
-    await ask(user, 'thêm câu A', 3);
-    expect(payload(3).insight_id).toBe('A');
-    expect(payload(3).history).toEqual([
-      { role: 'user', content: 'câu hỏi A' },
-      { role: 'assistant', content: 'trả lời 1' },
+    // BẤT BIẾN MỚI: history CÓ mang lượt của A, nhưng A cũng có mặt trong ngữ cảnh, nên
+    // "nó" giải được. Đây chính là chỗ bản cũ phải cắt history đi vì A không có trong context.
+    expect(payload(2).referenced_insight_ids).toEqual(['A', 'B']);
+    expect(payload(2).history.map((t) => t.content)).toEqual([
+      'câu hỏi A',
+      'trả lời 1',
     ]);
+
+    // Một luồng ⇒ cả hai lượt cùng hiển thị, không còn chuyện "quay lại mới thấy".
+    expect(screen.getByText('câu hỏi A')).toBeTruthy();
+    expect(screen.getByText('rủi ro của nó')).toBeTruthy();
   });
 
-  // Task 3.2 — "Xung đột Mức 2" của Scope Paradox.
-  // (`chat-scope-routing` thay chip một chiều bằng badge phạm vi hai chiều; bất biến
-  // "history theo scope" không đổi, chỉ đổi control để bấm.)
-  it('chuyển scope sang toàn hệ thống: insight_id vắng VÀ history không chứa lượt về bài', async () => {
+  it('bài nào bị bỏ khỏi ngữ cảnh thì KHÔNG còn trong payload lượt sau', async () => {
+    const user = userEvent.setup();
+    renderWidget();
+    await openWidget(user);
+
+    await user.click(screen.getByRole('button', { name: 'go-A' }));
+    await ask(user, 'câu hỏi A', 1);
+    await user.click(screen.getByRole('button', { name: 'go-B' }));
+
+    await user.click(screen.getByRole('button', { name: 'Bỏ Tin A khỏi ngữ cảnh' }));
+    await ask(user, 'câu tiếp', 2);
+
+    expect(payload(2).referenced_insight_ids).toEqual(['B']);
+  });
+
+  it('working set không vượt trần ô sâu — giữ các mục MỚI NHẤT', async () => {
+    const user = userEvent.setup();
+    renderWidget();
+    await openWidget(user);
+
+    for (const id of ['A', 'B', 'C', 'D']) {
+      await user.click(screen.getByRole('button', { name: `go-${id}` }));
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: `Bỏ Tin ${id} khỏi ngữ cảnh` })).toBeTruthy(),
+      );
+    }
+    await ask(user, 'câu hỏi', 1);
+
+    expect(payload(1).referenced_insight_ids).toEqual(['B', 'C', 'D']);
+  });
+
+  it('rời detail về danh sách: ngữ cảnh GIỮ nguyên các bài đã đọc', async () => {
     const user = userEvent.setup();
     renderWidget();
     await openWidget(user);
@@ -128,36 +163,26 @@ describe('ChatWidget — cô lập history theo scope (chống drift)', () => {
     await user.click(screen.getByRole('button', { name: 'go-A' }));
     await ask(user, 'câu hỏi A', 1);
 
-    await user.click(
-      screen.getByRole('button', { name: 'Chuyển sang hỏi toàn hệ thống' }),
-    );
-    await ask(user, 'tuần này có gì', 2);
-
-    expect(payload(2).insight_id).toBeFalsy();
-    expect(payload(2).history).toEqual([]);
-    expect(payload(2).history.some((t) => t.content.includes('câu hỏi A'))).toBe(false);
-  });
-
-  // Task 3.3 — rời detail về danh sách; khẳng định trên payload, không trên DOM.
-  it('rời detail về danh sách: history là luồng toàn cục, không phải luồng bài', async () => {
-    const user = userEvent.setup();
-    renderWidget();
-    await openWidget(user);
-
-    await user.click(screen.getByRole('button', { name: 'go-A' }));
-    await ask(user, 'câu hỏi A', 1);
-
-    // Điều hướng về '/', hỏi toàn cục.
+    // Rời trang chi tiết KHÔNG còn xoá ngữ cảnh: bài vừa đọc vẫn là thứ người dùng đang
+    // nói tới. Bản cũ nhảy sang một luồng toàn cục rỗng ở đây.
     await user.click(screen.getByRole('button', { name: 'go-home' }));
-    await ask(user, 'tổng quan hệ thống', 2);
+    await ask(user, 'so sánh với các tin khác', 2);
 
-    expect(payload(2).insight_id).toBeFalsy();
-    expect(payload(2).history).toEqual([]);
-    expect(payload(2).history.some((t) => t.content.includes('câu hỏi A'))).toBe(false);
+    expect(payload(2).referenced_insight_ids).toEqual(['A']);
+    expect(payload(2).history.map((t) => t.content)).toEqual(['câu hỏi A', 'trả lời 1']);
   });
 
-  // Task 2.4 — đóng/mở panel không được mất luồng nào.
-  it('đóng rồi mở lại panel: luồng của scope A còn nguyên', async () => {
+  it('không có bài nào trong ngữ cảnh ⇒ câu hỏi toàn cục thuần', async () => {
+    const user = userEvent.setup();
+    renderWidget();
+    await openWidget(user);
+    await ask(user, 'tuần này có gì', 1);
+
+    expect(payload(1).referenced_insight_ids).toEqual([]);
+    expect(payload(1).insight_id).toBeFalsy();
+  });
+
+  it('đóng rồi mở lại panel: luồng và ngữ cảnh còn nguyên', async () => {
     const user = userEvent.setup();
     renderWidget();
     await openWidget(user);
@@ -165,19 +190,34 @@ describe('ChatWidget — cô lập history theo scope (chống drift)', () => {
     await user.click(screen.getByRole('button', { name: 'go-A' }));
     await ask(user, 'câu hỏi A', 1);
 
-    // Đóng panel (nút ✕ có aria-label "Đóng") rồi mở lại.
     await user.click(screen.getByRole('button', { name: 'Đóng' }));
     await openWidget(user);
 
-    // Luồng A còn nguyên.
     await screen.findByText('câu hỏi A');
     await screen.findByText('trả lời 1');
-    // Câu tiếp theo vẫn mang history của A.
     await ask(user, 'thêm câu A', 2);
-    expect(payload(2).insight_id).toBe('A');
-    expect(payload(2).history).toEqual([
-      { role: 'user', content: 'câu hỏi A' },
-      { role: 'assistant', content: 'trả lời 1' },
-    ]);
+    expect(payload(2).referenced_insight_ids).toEqual(['A']);
+    expect(payload(2).history.map((t) => t.content)).toEqual(['câu hỏi A', 'trả lời 1']);
+  });
+
+  it('history mang theo citations của từng lượt (để server giải marker thành tên bài)', async () => {
+    const user = userEvent.setup();
+    renderWidget();
+    await openWidget(user);
+
+    streamChatMock.mockImplementationOnce(async (_p, handlers) => {
+      answerCount += 1;  // giữ đồng bộ với bộ đếm của mock mặc định
+      handlers.onCommit?.({
+        answer: 'trả lời 1 [7]',
+        citations: [
+          { n: 7, insight_id: 'X', title: 'Kubernetes CVE', source_url: 'https://x' },
+        ],
+        mode: 'global',
+      });
+    });
+    await ask(user, 'câu đầu', 1);
+    await ask(user, 'câu sau', 2);
+
+    expect(payload(2).history[1].citations).toEqual([{ n: 7, title: 'Kubernetes CVE' }]);
   });
 });
