@@ -33,12 +33,11 @@ mục nguồn được đánh số riêng, và bảng ánh xạ marker `n → ng
 
 Nội dung bài gốc đưa vào câu trả lời SHALL tiếp tục đến từ cơ chế ô sâu hiện hành, không đến từ tầng đoạn.
 
-> ⚠️ **Hệ quả đã ĐO, không phải suy đoán** (28/07/2026): tầng đoạn chữa **truy hồi**, không chữa
-> **bằng chứng**. Một tin được tầng đoạn kéo lên hạng 4 vẫn chỉ vào prompt dưới dạng dòng index
-> nén của phần *phân tích* — nơi không chứa định danh mà người dùng hỏi — nên câu trả lời đúng
-> vẫn là từ chối. Đo trên 15 kịch bản `detail_discovery`: 13 xếp hạng ≤ `CHAT_DEEP_SLOTS` (3) nên
-> trả lời được, 2 xếp hạng 4 nên vẫn bị từ chối. Đây là ranh giới **có chủ đích** của yêu cầu
-> này; nới nó là việc của một change khác, kèm phép đo riêng.
+> ⚠️ **Ranh giới này nói về NGUỒN của nội dung, không phải về việc tin nào được rót sâu.** Tầng
+> đoạn chữa **truy hồi** nhưng không tự nó mang bằng chứng vào prompt: một tin được kéo lên hạng
+> 4 vẫn chỉ vào dưới dạng dòng index nén của phần *phân tích* — nơi không chứa định danh người
+> dùng hỏi — nên câu trả lời đúng vẫn là từ chối. Cách đóng khoảng này là **đổi tin nào được ô
+> sâu rót** (xem requirement sửa đổi bên dưới), chứ không phải đưa đoạn vào prompt như một nguồn.
 
 #### Scenario: Nhiều đoạn cùng một bài khớp câu hỏi
 - **WHEN** ba đoạn của cùng một bài đều khớp câu hỏi
@@ -69,3 +68,44 @@ Lượt gọi sinh embedding cho đoạn SHALL KHÔNG tính vào ngân sách lư
 #### Scenario: Lỗi sinh đoạn khi publish
 - **WHEN** việc sinh đoạn hoặc embedding thất bại lúc publish một insight
 - **THEN** insight vẫn được tạo, hệ thống ghi cảnh báo, và bài đó backfill được sau
+
+## MODIFIED Requirements
+
+### Requirement: Rót ô sâu tất định cho context
+
+Service SHALL dựng context gồm một số cố định **ô sâu** (cấu hình được) và phần index nén còn lại. Ô sâu
+SHALL được lấp theo thứ tự: các insight được tham chiếu trước; **kế đó là insight giữ đoạn văn bản gốc khớp
+nhất trên toàn kho, nếu có**; sau đó là các insight xếp hạng cao nhất cho tới khi đầy. Insight đã nằm trong
+ô sâu SHALL bị loại khỏi phần index để một insight không mang hai số.
+
+Ô sâu SHALL mang đầy đủ các trường phân tích của insight và nội dung bài gốc khi còn lưu trữ; phần index
+SHALL giữ dạng nén như hiện hành. Toàn bộ context SHALL dùng **một dãy số liên tục** và **một bảng ánh xạ**
+`n → insight`.
+
+Suất dành cho đoạn khớp nhất SHALL chỉ được cấp khi có **đúng một** insight giữ vị trí khớp nhất; nhiều
+insight đồng hạng nhất thì SHALL không cấp cho ai. Suất này SHALL KHÔNG làm tăng tổng số ô sâu, và SHALL
+KHÔNG áp dụng ở chế độ mở rộng (nơi ô sâu duy nhất là bài người dùng đang xem).
+
+Việc lấp ô sâu SHALL KHÔNG phụ thuộc vào bất kỳ phép phân loại ý định hay phán đoán "câu hỏi này có cần
+chi tiết không" nào. Vị trí khớp nhất ở mức đoạn là một đại lượng **đo được từ dữ liệu**, không phải một
+phán đoán về câu hỏi.
+
+#### Scenario: Câu hỏi chi tiết không có tham chiếu
+- **WHEN** người dùng hỏi một chi tiết chỉ có trong thân bài (ví dụ tên gói bị chèn mã độc) mà không ghim bài nào
+- **THEN** các insight xếp hạng cao nhất được rót ở độ sâu đầy đủ và câu trả lời nêu được chi tiết đó thay vì tuyên bố hệ thống không có thông tin
+
+#### Scenario: Ô sâu lấp lẫn tham chiếu và tin xếp hạng
+- **WHEN** người dùng ghim ít insight hơn số ô sâu
+- **THEN** phần ô sâu còn trống được lấp bằng insight xếp hạng cao nhất chưa được ghim
+
+#### Scenario: Không trùng số giữa ô sâu và index
+- **WHEN** một insight vừa được ghim vừa nằm trong nhóm xếp hạng cao
+- **THEN** insight đó xuất hiện đúng một lần, ở ô sâu, và không xuất hiện lại trong phần index
+
+#### Scenario: Bài khớp nhất ở mức đoạn nhưng thứ hạng tổng thấp
+- **WHEN** một insight có đoạn văn bản gốc khớp nhất toàn kho nhưng thứ hạng tổng của nó nằm ngoài số ô sâu
+- **THEN** insight đó vẫn được rót ở độ sâu đầy đủ và câu trả lời nêu được chi tiết nằm trong thân bài của nó
+
+#### Scenario: Người dùng ghim đủ số ô sâu
+- **WHEN** số insight được tham chiếu đã lấp kín ô sâu
+- **THEN** tin khớp nhất ở mức đoạn không chen được vào, và lựa chọn của người dùng được giữ nguyên
