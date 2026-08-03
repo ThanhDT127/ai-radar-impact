@@ -19,13 +19,17 @@ from datetime import datetime
 
 import pytest
 
+from app.ai.gemini_client import _notify_retry
 from app.ai.prompts import OUT_OF_SCOPE_SENTINEL
+from app.config import settings
 from app.routes.chat import _sse, _sse_stream
 from app.schemas.chat import ChatRequest
 from app.services.chat_grounding import INSUFFICIENT_GROUNDS_MESSAGE
 from app.services.chat_service import (
+    MAX_MODEL_CALLS_PER_QUESTION,
     STATUS_COMPOSING,
     STATUS_EXPANDING,
+    STATUS_KEYS,
     STATUS_READING_INSIGHT,
     STATUS_SEARCHING,
     ChatService,
@@ -78,6 +82,19 @@ class _Result:
         return self._value
 
 
+class _ScalarsResult:
+    """Kết quả dạng `.scalars().all()` — đường `_load_refs` (working set + tin ghim) dùng."""
+
+    def __init__(self, values):
+        self._values = list(values)
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._values
+
+
 class _FakeSession:
     def __init__(self, results):
         self._results = list(results)
@@ -127,8 +144,11 @@ class _StreamingGemini:
         return None
 
 
-def _service(gemini, insight=None, global_pool=()):
+def _service(gemini, insight=None, global_pool=(), refs=()):
     results = [_Result(0)]  # quota
+    if refs:
+        # `answer()` nạp refs NGAY sau cửa quota, trước khi chốt mode.
+        results.append(_ScalarsResult(refs))
     if insight is not None:
         results.append(_Result(insight))
     session = _FakeSession(results)
@@ -141,10 +161,12 @@ def _service(gemini, insight=None, global_pool=()):
     return service, session
 
 
-async def _collect(service, question, history=None, insight_id=None):
+async def _collect(service, question, history=None, insight_id=None, refs=None):
     return [
         event
-        async for event in service.answer_stream(question, history or [], insight_id)
+        async for event in service.answer_stream(
+            question, history or [], insight_id, referenced_insight_ids=refs
+        )
     ]
 
 
@@ -168,14 +190,114 @@ async def test_luong_phat_status_roi_token_roi_commit():
     assert kinds[-1] == "commit"
     assert kinds.count("commit") == 1
     statuses = [e["text"] for e in _of(events, "status")]
-    # Mốc thứ hai nay mang SỐ LIỆU THẬT của lượt (tên tin đang đọc kỹ, tổng tin khớp) thay
-    # cho `STATUS_COMPOSING` chung chung — TTFT 2,6–3,8s không cắt được, nên thứ duy nhất
-    # cải thiện được là nói đúng việc đang làm. Vẫn ĐÚNG HAI status: thêm một sự kiện nữa
-    # cách nhau vài chục ms chỉ làm dòng chữ nhấp nháy.
-    assert len(statuses) == 2
+    # Mốc mang SỐ LIỆU THẬT của lượt — TTFT 2,6–3,8s không cắt được, nên thứ duy nhất cải
+    # thiện được là nói đúng việc đang làm (`chat-status-milestones`).
+    assert [e["key"] for e in _of(events, "status")] == ["searching", "ranked", "reading"]
     assert statuses[0] == STATUS_SEARCHING
-    assert statuses[1].startswith("Đang đọc kỹ") and "Tin OpenSSL" in statuses[1]
+    assert "1 tin khớp câu hỏi" in statuses[1], "mốc `ranked` phải mang số thật, không phải chuỗi tĩnh"
+    assert statuses[2].startswith("Đang đọc kỹ") and "Tin OpenSSL" in statuses[2]
     assert [e["text"] for e in _of(events, "token")] == ["Có ", "lỗ hổng ", "OpenSSL [1]."]
+
+
+# --- Tập & thứ tự mốc tiến trình (change `chat-status-milestones`, task 4.1–4.4) ------
+#
+# VÌ SAO CẦN: bốn file test chat cũ bảo vệ *cơ chế* streaming (khung SSE, sentinel, budget)
+# nhưng không file nào khoá *mốc nào được phát*. Bỏ sót một mốc là hồi quy IM LẶNG — luồng
+# vẫn chạy đúng, chỉ là người dùng lại nhìn màn hình đứng như trước.
+
+
+@pytest.mark.asyncio
+async def test_working_set_phat_du_moc_va_dung_thu_tu():
+    tin = _FakeInsight("Tin Kubernetes")
+    gemini = _StreamingGemini(["Bài này nói [1]."])
+    service, _ = _service(gemini, global_pool=[tin], refs=[tin])
+
+    events = await _collect(service, "so sánh hai cái này", refs=[tin.id])
+
+    assert [e["key"] for e in _of(events, "status")] == ["reading", "ranked", "reading"]
+    # `reading` phát hai lần là ĐÚNG và không phải dòng trùng: lần đầu là mốc chung chung ở
+    # ~0s, lần hai mang tên tin thật. Cùng `key` nên widget cập nhật TẠI CHỖ.
+    statuses = [e["text"] for e in _of(events, "status")]
+    assert statuses[0] != statuses[2]
+    assert "Tin Kubernetes" in statuses[2]
+
+
+@pytest.mark.asyncio
+async def test_moi_moc_deu_mang_key_thuoc_tap_dong():
+    tin = _FakeInsight("Tin OpenSSL")
+    gemini = _StreamingGemini(["Có [1]."])
+    service, _ = _service(gemini, global_pool=[tin])
+
+    events = await _collect(service, "có tin gì về OpenSSL")
+
+    for e in _of(events, "status"):
+        assert e["key"] in STATUS_KEYS, f"key ngoài tập đóng: {e['key']!r}"
+        assert e["text"], "mốc không mang chữ nào thì không phải là mốc"
+
+
+@pytest.mark.asyncio
+async def test_khong_bao_gio_phat_hai_moc_cung_key_LIEN_NHAU():
+    """Hai sự kiện cùng `key` liền nhau = widget cập nhật một dòng hai lần trong vài chục ms
+    = dòng chữ nhấp nháy. Đó là thứ change này sinh ra để chữa, không phải để tạo thêm."""
+    other = _FakeInsight("Tin Kubernetes")
+    insight = _FakeInsight("Tin OpenSSL")
+    gemini = _StreamingGemini([OUT_OF_SCOPE_SENTINEL], ["Toàn hệ thống có [2]."])
+    service, _ = _service(gemini, insight=insight, global_pool=[other])
+
+    events = await _collect(service, "có tin gì về Kubernetes", insight_id=insight.id)
+
+    keys = [e["key"] for e in _of(events, "status")]
+    assert all(a != b for a, b in zip(keys, keys[1:])), keys
+
+
+@pytest.mark.asyncio
+async def test_moc_pinned_im_lang_khi_tat_co_che_ghim(monkeypatch):
+    """Đường rollback của `chat-history-pinning` (`chat_history_pin_slots=0`) phải im lặng —
+    nói "nhắc lại tin đã bàn" trong khi không ghim gì là nói sai việc."""
+    monkeypatch.setattr(settings, "chat_history_pin_slots", 0)
+    tin = _FakeInsight("Tin OpenSSL")
+    gemini = _StreamingGemini(["Có [1]."])
+    service, _ = _service(gemini, global_pool=[tin])
+
+    events = await _collect(service, "có tin gì về OpenSSL")
+
+    assert "pinned" not in [e["key"] for e in _of(events, "status")]
+
+
+@pytest.mark.asyncio
+async def test_moc_retrying_di_duoc_tu_thread_cua_model_ra_luong_sse():
+    """Mốc `retrying` sinh ra BÊN TRONG client, ở thread khác (`asyncio.to_thread`).
+
+    Cầu nối `run_coroutine_threadsafe` là chỗ dễ hỏng và hỏng thì im lặng — nên khoá bằng
+    test đi qua đúng đường đó, không phải gọi thẳng `_status`.
+    """
+    tin = _FakeInsight("Tin OpenSSL")
+
+    class _RetryingGemini(_StreamingGemini):
+        def chat_stream(self, system_prompt, user_prompt, state):
+            yield from super().chat_stream(system_prompt, user_prompt, state)
+            _notify_retry(state)  # đúng chỗ client thật gọi khi chạm MAX_TOKENS
+
+    service, _ = _service(_RetryingGemini(["Có [1]."]), global_pool=[tin])
+
+    events = await _collect(service, "có tin gì về OpenSSL")
+
+    assert "retrying" in [e["key"] for e in _of(events, "status")]
+
+
+@pytest.mark.asyncio
+async def test_duong_blocking_khong_phat_su_kien_nao():
+    """`emit=None` ⇒ toàn bộ change này là no-op. `POST /api/v1/chat` không được đổi một ly:
+    eval harness và client cũ đi lối đó."""
+    tin = _FakeInsight("Tin OpenSSL")
+    gemini = _StreamingGemini(["Có lỗ hổng OpenSSL [1]."])
+    service, _ = _service(gemini, global_pool=[tin])
+
+    result = await service.answer("có tin gì về OpenSSL", [], None)
+
+    assert result["mode"] == "global"
+    assert result["answer"] == "Có lỗ hổng OpenSSL [1]."
+    assert [c["insight_id"] for c in result["citations"]] == [tin.id]
 
 
 @pytest.mark.asyncio
@@ -320,9 +442,11 @@ async def test_status_mo_rong_phat_truoc_luot_hai():
     statuses = [e["text"] for e in _of(events, "status")]
     # Bước 1 là mode B (không qua `build_context`) nên giữ mốc chung; bước 2 đi qua
     # `_answer_global` nên mang số liệu thật của lượt mở rộng.
+    assert [e["key"] for e in _of(events, "status")] == [
+        "reading", "composing", "expanding", "ranked", "reading",
+    ]
     assert statuses[:3] == [STATUS_READING_INSIGHT, STATUS_COMPOSING, STATUS_EXPANDING]
-    assert len(statuses) == 4
-    assert statuses[3].startswith("Đang đọc kỹ") and "Tin OpenSSL" in statuses[3]
+    assert statuses[4].startswith("Đang đọc kỹ") and "Tin OpenSSL" in statuses[4]
     commit = _of(events, "commit")[0]
     assert commit["mode"] == "expanded", "nhãn mở rộng phải đi qua được đường streaming"
     assert [c["insight_id"] for c in commit["citations"]] == [other.id]
@@ -559,7 +683,8 @@ async def test_tran_buoc_van_ap_dung_o_loi_streaming():
     tin = _FakeInsight("Tin OpenSSL")
     service, _ = _service(_StreamingGemini(["x"]), global_pool=[tin])
     service._emit = lambda event: asyncio.sleep(0)
-    service._steps_used = 2
+    # Đọc từ hằng số: trần đã đổi 2 → 3 (`chat-web-fallback`), test canh CƠ CHẾ chứ không canh số.
+    service._steps_used = MAX_MODEL_CALLS_PER_QUESTION
 
     with pytest.raises(RuntimeError, match="Chạm trần"):
         await service._call_model("prompt bất kỳ")

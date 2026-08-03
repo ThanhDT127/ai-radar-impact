@@ -32,6 +32,10 @@ class ChatLog(Base):
     # Token SUY LUẬN của lượt trả lời. NULL = nhà cung cấp không báo cáo (bản SDK 0.8.0 cũ
     # luôn giấu số này) — KHÁC `0` = đã ghìm về 0 và model tuân thủ. Đừng gộp hai nghĩa.
     thinking_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Số TRUY VẤN tra cứu ngoài. Đếm riêng khỏi `model_calls` vì đơn giá cách nhau bậc:
+    # grounding $35/1.000 truy vấn so với ~$0,006 cho cả một câu trả lời. NULL = bản ghi có
+    # trước `chat-web-fallback`; 0 = lượt đó thật sự không tra cứu.
+    web_searches: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=func.now()
     )

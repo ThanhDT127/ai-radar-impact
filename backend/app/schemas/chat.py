@@ -4,6 +4,13 @@ import uuid
 
 from pydantic import BaseModel, Field, field_validator
 
+# Nhập NGƯỢC chiều lớp thông thường (schemas ← services) một cách có chủ đích: tập mốc tiến
+# trình là **hợp đồng đường truyền** dùng chung backend↔frontend, nên nó chỉ được có MỘT định
+# nghĩa. Chép lại danh sách vào đây để giữ "lớp cho đẹp" là tạo ra hai nguồn sự thật sẽ lệch
+# nhau trong im lặng — đúng loại lỗi `chat-citation-integrity` đã trả giá. Không có vòng lặp:
+# `chat_service` không nhập gì từ `app.schemas`.
+from app.services.chat_service import STATUS_KEYS  # noqa: E402
+
 # History do client giữ (service stateless). Cap ở đây thay vì tin client tự cắt.
 MAX_HISTORY_TURNS = 10
 
@@ -79,10 +86,18 @@ class Citation(BaseModel):
     từ vị trí mảng (`citations[n-1]`) nên trỏ sai ngay khi model bỏ qua một tin ở giữa; tức
     là lỗi bị che bởi chất lượng xếp hạng và sẽ lộ ra đúng lúc xếp hạng kém đi.
     Đưa `n` thành dữ liệu để ranh giới backend↔frontend tự mô tả, không phải cùng đoán đúng.
+
+    `kind` phân biệt LOẠI nguồn, KHÔNG phải một không gian số thứ hai (`chat-web-fallback` D4):
+    `insight` = tin đã qua phân tích trong hệ thống; `web` = trang tra cứu ngoài, chỉ sống
+    trong đúng lượt hỏi đó. Cả hai dùng CHUNG dãy `n`, nên client vẫn giải marker bằng đúng
+    một phép tra theo `n`. Trộn thêm một cách đánh số nữa là dựng lại đúng cái bẫy ở trên,
+    ở quy mô lớn hơn.
     """
 
     n: int
-    insight_id: uuid.UUID
+    kind: str = "insight"  # "insight" | "web"
+    # `None` KHI VÀ CHỈ KHI `kind == "web"` — nguồn web không phải insight nên không có id.
+    insight_id: uuid.UUID | None = None
     title: str
     source_url: str
 
@@ -91,3 +106,34 @@ class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation] = []
     mode: str  # "insight" | "global" | "meta" | "expanded" | "focused"
+    # HTML Search Suggestions do Google trả về, chỉ có ở lượt CÓ tra cứu ngoài.
+    # Hiển thị nó là YÊU CẦU TUÂN THỦ điều khoản Grounding with Google Search, không phải
+    # hạng mục trang trí có thể cắt khi gấp.
+    search_suggestions: str | None = None
+
+
+class ChatStatusEvent(BaseModel):
+    """Một mốc tiến trình trên luồng SSE (`event: status`).
+
+    CHỈ có ở `POST /api/v1/chat/stream`; đường blocking không phát sự kiện nào.
+
+    `key` là định danh **ổn định** của mốc, thuộc tập đóng `STATUS_KEYS`:
+    `searching` · `ranked` · `pinned` · `reading` · `expanding` · `retrying` · `composing`.
+    `text` là câu tiếng Việt hiển thị, MANG SỐ LIỆU THẬT của lượt đó nên hai lần phát cùng
+    một mốc gần như luôn khác chuỗi.
+
+    Client PHẢI phân biệt mốc bằng `key`, không bằng `text` — nếu không, một mốc phát lại với
+    số liệu mới sẽ thành một dòng trùng, và việc sửa câu chữ tiếng Việt sẽ âm thầm đổi hành vi
+    render. Gặp `key` lạ thì hiện như một mốc mới, KHÔNG bỏ qua: server mới + client cũ không
+    được làm mất thông tin của nhau.
+    """
+
+    key: str
+    text: str
+
+    @field_validator("key")
+    @classmethod
+    def check_key(cls, v: str) -> str:
+        if v not in STATUS_KEYS:
+            raise ValueError(f"Mốc tiến trình không hợp lệ: {v!r}")
+        return v

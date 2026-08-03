@@ -92,22 +92,85 @@ describe('ChatWidget — render tăng dần + trạng thái tiến trình', () =
     await ask(user, 'tuần này có gì');
 
     // Chưa có token nào: chỗ này trước đây là spinner "Đang tìm trong hệ thống…" cứng.
-    await emit((l) => l.handlers.onStatus?.('Đang tìm trong hệ thống…'));
-    expect(screen.getByText('Đang tìm trong hệ thống…')).toBeTruthy();
+    await emit((l) => l.handlers.onStatus?.('searching', 'Đang tìm trong hệ thống…'));
+    expect(screen.getByText(/Đang tìm trong hệ thống…/)).toBeTruthy();
 
-    await emit((l) => l.handlers.onStatus?.('Đang soạn câu trả lời…'));
-    expect(screen.getByText('Đang soạn câu trả lời…')).toBeTruthy();
+    await emit((l) => l.handlers.onStatus?.('composing', 'Đang soạn câu trả lời…'));
+    expect(screen.getByText(/Đang soạn câu trả lời…/)).toBeTruthy();
+    // XẾP CHỒNG: mốc trước KHÔNG biến mất khi mốc sau tới (`chat-status-milestones`).
+    expect(screen.getByText(/Đang tìm trong hệ thống…/)).toBeTruthy();
 
     // Token đầu tiên chiếm chỗ status.
     await emit((l) => l.handlers.onToken?.('Có ba tin '));
     expect(screen.getByText(/Có ba tin/)).toBeTruthy();
-    expect(screen.queryByText('Đang soạn câu trả lời…')).toBeNull();
+    expect(screen.queryByText(/Đang soạn câu trả lời…/)).toBeNull();
 
     // Marker `[n]` được tách ra thành đoạn riêng ngay khi đang stream, nên khẳng định trên
     // text đã ráp của bong bóng chứ không trên một node lá.
     await emit((l) => l.handlers.onToken?.('đáng chú ý [1].'));
     const bubble = screen.getByText(/Có ba tin/).closest('div');
     expect(bubble?.textContent).toBe('Có ba tin đáng chú ý [1].');
+  });
+
+  // --- Mốc tiến trình xếp chồng (change `chat-status-milestones`, task 4.5/4.6) ----------
+  //
+  // VÌ SAO CẦN: bản trước ghi đè MỘT dòng, nên chuỗi việc server làm là vô hình và người
+  // dùng chỉ thấy một dòng nhấp nháy. Bất biến mới là *mốc phân biệt bằng `key`, không bằng
+  // `text`* — `text` mang số liệu của lượt nên hai lần phát cùng một mốc luôn khác chuỗi.
+
+  it('mốc cùng `key` CẬP NHẬT TẠI CHỖ, không đẻ dòng trùng', async () => {
+    const user = userEvent.setup();
+    renderWidget();
+    await openWidget(user);
+    await ask(user, 'tuần này có gì');
+
+    await emit((l) => l.handlers.onStatus?.('reading', 'Đang đọc bài đang xem…'));
+    await emit((l) => l.handlers.onStatus?.('reading', 'Đang đọc kỹ 3 tin: «Tin A»…'));
+
+    expect(screen.queryByText(/Đang đọc bài đang xem…/)).toBeNull();
+    expect(screen.getAllByText(/Đang đọc kỹ 3 tin/)).toHaveLength(1);
+  });
+
+  it('`key` lạ (server mới hơn client) vẫn hiện, không bị nuốt', async () => {
+    const user = userEvent.setup();
+    renderWidget();
+    await openWidget(user);
+    await ask(user, 'tuần này có gì');
+
+    await emit((l) => l.handlers.onStatus?.('mot_moc_chua_biet', 'Đang làm việc gì đó mới…'));
+
+    expect(screen.getByText(/Đang làm việc gì đó mới…/)).toBeTruthy();
+  });
+
+  it('vượt trần 4 dòng thì bỏ dòng CŨ NHẤT', async () => {
+    const user = userEvent.setup();
+    renderWidget();
+    await openWidget(user);
+    await ask(user, 'tuần này có gì');
+
+    for (const k of ['searching', 'ranked', 'pinned', 'reading', 'composing']) {
+      await emit((l) => l.handlers.onStatus?.(k, `mốc ${k}`));
+    }
+
+    expect(screen.queryByText(/mốc searching/)).toBeNull();
+    for (const k of ['ranked', 'pinned', 'reading', 'composing']) {
+      expect(screen.getByText(new RegExp(`mốc ${k}`))).toBeTruthy();
+    }
+  });
+
+  it('khối mốc biến mất hẳn khi câu trả lời được chốt', async () => {
+    const user = userEvent.setup();
+    renderWidget();
+    await openWidget(user);
+    await ask(user, 'tuần này có gì');
+
+    await emit((l) => l.handlers.onStatus?.('searching', 'Đang tìm trong hệ thống…'));
+    await emit((l) =>
+      l.handlers.onCommit?.({ answer: 'Xong rồi.', citations: [], mode: 'global' }),
+    );
+
+    expect(screen.queryByText(/Đang tìm trong hệ thống…/)).toBeNull();
+    expect(screen.getByText(/Xong rồi./)).toBeTruthy();
   });
 
   it('sự kiện chốt gắn citations với ĐÚNG số marker của nó', async () => {

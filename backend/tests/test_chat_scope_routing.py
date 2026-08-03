@@ -20,7 +20,7 @@ from app.services.chat_grounding import (
     INSUFFICIENT_GROUNDS_MESSAGE,
     is_out_of_scope_answer,
 )
-from app.services.chat_service import ChatService
+from app.services.chat_service import MAX_MODEL_CALLS_PER_QUESTION, ChatService
 
 
 class _FakeSource:
@@ -307,10 +307,15 @@ async def test_luot_B_bi_cat_roi_phat_sentinel_van_mo_rong_duoc():
 
 @pytest.mark.asyncio
 async def test_tran_buoc_van_chan_buoc_thu_ba():
-    """Trần vẫn phải là trần: bước thứ 3 bị chặn dù mới tốn ít lượt."""
+    """Trần vẫn phải là trần: bước vượt trần bị chặn dù mới tốn ít lượt.
+
+    Đọc trần từ hằng số chứ KHÔNG chép số: nó đã đổi 2 → 3 cho đường tra cứu ngoài
+    (`chat-web-fallback`), và một test chép cứng số sẽ đỏ mỗi lần trần đổi mà không nói được
+    điều gì về *cơ chế* — thứ nó thật sự canh.
+    """
     insight = _FakeInsight()
     service, _ = _service(insight, [], _CostedGemini())
-    service._steps_used = 2
+    service._steps_used = MAX_MODEL_CALLS_PER_QUESTION
 
     with pytest.raises(RuntimeError, match="Chạm trần"):
         await service._call_model("prompt bất kỳ")

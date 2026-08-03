@@ -321,6 +321,9 @@ Bạn là giám khảo kiểm chứng, không phải trợ lý. Nhiệm vụ: x�
 Cách làm:
 1. Tách CÂU TRẢ LỜI thành các khẳng định độc lập (tối đa 10). Bỏ qua câu dẫn nhập, câu
    hỏi lại, lời mời hỏi tiếp — chúng không phải khẳng định về sự việc.
+   ĐẶC BIỆT bỏ qua câu nói về PHẠM VI DỮ LIỆU của hệ thống ("không tìm thấy X trong hệ
+   thống", "hệ thống chưa có tin nào về Y"): đó là phát biểu về việc DỮ LIỆU thiếu gì,
+   không phải khẳng định về thế giới, nên không có gì trong DỮ LIỆU để bảo chứng nó.
 2. Với MỖI khẳng định, in đúng một dòng theo định dạng:
    <số thứ tự>|<S hoặc P hoặc N>|<lý do, tối đa 12 từ>
    S = DỮ LIỆU bảo chứng trọn vẹn khẳng định này
@@ -336,9 +339,11 @@ Bạn là giám khảo, không phải trợ lý. Nhiệm vụ: xét CÂU TRẢ L
 Chỉ xét mức độ đúng-trọng-tâm, KHÔNG xét đúng/sai sự thật, KHÔNG xét văn phong.
 
 In đúng MỘT dòng: <S hoặc P hoặc N>|<lý do, tối đa 15 từ>
-  S = trả lời thẳng vào điều được hỏi
-  P = có chạm tới nhưng lệch trọng tâm, thiếu vế chính, hoặc lan man sang chuyện khác
-  N = lạc đề, hoặc né không trả lời (nói không biết / không có dữ liệu) dù được hỏi thẳng
+  S = trả lời thẳng vào điều được hỏi. TÍNH CẢ ca câu hỏi nhắc nhiều đối tượng mà hệ
+      thống chỉ có một số: trả lời đầy đủ phần CÓ dữ liệu rồi nói rõ phần nào không có
+      là câu trả lời ĐÚNG cho dạng câu hỏi đó — đừng trừ điểm vì phần không có.
+  P = có chạm tới nhưng lệch trọng tâm, hoặc bỏ sót cả phần hệ thống CÓ dữ liệu
+  N = lạc đề, hoặc né TOÀN BỘ (không trả lời được vế nào) dù được hỏi thẳng
 
 TUYỆT ĐỐI không in gì khác.
 """
@@ -814,6 +819,12 @@ def score(records: list[dict]) -> dict:
         ],
         "refusal_correct": sum(1 for r in refusal_rows if r["refusal"]),
         "refusal_total": len(refusal_rows),
+        # TỪ CHỐI SAI — từ chối một câu vốn trả lời được. Đo tường minh chứ không để nó chìm
+        # vào trung bình AnsRel: đây là chế độ hỏng mà `chat-web-fallback` sinh ra để chữa
+        # (câu ghép hai vế, corpus có một vế, cách cũ vứt cả câu), và một con số trung bình
+        # tụt vài phần trăm không nói được là *đã từ chối nhầm bao nhiêu câu*.
+        "refusal_wrong": [r["scenario_id"] for r in rows
+                          if not r["expects_refusal"] and r["refusal"]],
         "must_have_hit": sum(r["must_have_hit"] for r in rows),
         "must_have_total": sum(r["must_have_total"] for r in rows),
         "model_calls": sum(r["model_calls"] for r in rows),
@@ -923,6 +934,8 @@ def format_report(scored: dict, baseline: dict | None, live: bool) -> str:
             flag = f"  ❌ marker bịa {row['bogus_markers']}"
         elif row["expects_refusal"]:
             flag = "  từ chối đúng ✅" if row["refusal"] else "  ❌ đáng lẽ phải từ chối"
+        elif row["refusal"]:
+            flag = "  ❌ TỪ CHỐI SAI (câu này trả lời được)"
         lines.append(
             f"{row['scenario_id']:<28}{mode:<20}"
             f"{_fmt(row['faithfulness']):>7}{_delta(row['faithfulness'], base.get('faithfulness')):<5}"
@@ -959,6 +972,11 @@ def format_report(scored: dict, baseline: dict | None, live: bool) -> str:
         f"   must_have (phụ trợ, không gate) {scored['must_have_hit']}/{scored['must_have_total']}"
         f"   lượt gọi sinh câu trả lời: {scored['model_calls']}"
     )
+    if scored.get("refusal_wrong"):
+        lines.append(
+            f"      ❌ TỪ CHỐI SAI ({len(scored['refusal_wrong'])}): "
+            + ", ".join(scored["refusal_wrong"])
+        )
     if scored["mode_mismatch"]:
         lines.append(
             f"      ⚠️ lệch mode ({len(scored['mode_mismatch'])}): "
@@ -1014,6 +1032,12 @@ def save_snapshot(records: list[dict], path: Path = SNAPSHOT_PATH) -> None:
                 "model": settings.gemini_model_id,
                 "chat_index_top_k": settings.chat_index_top_k,
                 "chat_window_days": settings.chat_window_days,
+                # ⚠️ Baseline được chốt ở trạng thái nào của cờ này thì CHỈ so sánh được với
+                # lượt chạy ở cùng trạng thái. Bật cờ làm `_WEB_LOOKUP_RULE` xuất hiện trong
+                # prompt của MỌI câu toàn cục ⇒ model trả lời khác đi, và không có gì trong
+                # bảng điểm nói cho bạn biết vì sao. Ghi nó vào snapshot để chỗ lệch nhìn thấy
+                # được thay vì phải đoán.
+                "chat_web_fallback_enabled": settings.chat_web_fallback_enabled,
                 "records": records,
             },
             ensure_ascii=False,

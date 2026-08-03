@@ -185,6 +185,34 @@
   font-style: italic;
 }
 
+/* Danh sách mốc TÍCH LUỸ (change `chat-status-milestones`). Mốc đã qua ở lại dạng mờ để
+   người dùng thấy chuỗi việc đã làm — trước đây một dòng bị ghi đè nên chuỗi đó vô hình. */
+.statusList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.statusList li {
+  font-style: italic;
+  font-size: 0.92em;
+  /* Dòng dài hơn bề ngang panel là chuyện thường (mốc mang tên tin). Cho xuống dòng thay vì
+     tràn ngang — cùng lý do với `.citations`. */
+  overflow-wrap: anywhere;
+}
+
+.statusDone {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+}
+
+.statusCurrent {
+  color: var(--color-text-secondary);
+}
+
 .citations {
   margin-top: 10px;
   padding-top: 8px;
@@ -295,4 +323,26 @@
     right: 88px;
     bottom: 24px;
   }
+}
+
+/* Nguồn TRA CỨU NGOÀI (change `chat-web-fallback`). Cố ý khác hẳn `.citationLink`: tin trong
+   hệ thống đã qua phân tích và chấm tin cậy, trang web thì chưa — trộn chung một kiểu hiển
+   thị là để người dùng gán nhầm mức tin cậy cho nó. */
+.citationWeb {
+  composes: citationLink;
+  border-left: 2px dashed var(--color-border);
+  padding-left: 6px;
+}
+
+.citationDomain {
+  margin-left: 6px;
+  opacity: 0.65;
+  font-size: 0.85em;
+}
+
+/* Khối Search Suggestions do Google cấp — BẮT BUỘC hiển thị theo điều khoản Grounding with
+   Google Search. HTML đến từ Google, không tự soạn lại. */
+.searchSuggestions {
+  margin-top: 10px;
+  overflow-x: auto;
 }

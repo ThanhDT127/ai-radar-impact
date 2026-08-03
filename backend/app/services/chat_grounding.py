@@ -73,6 +73,50 @@ def build_index_block(
     return "\n".join(lines), mapping
 
 
+@dataclass
+class WebSource:
+    """Một nguồn tra cứu ngoài, đã tải được nội dung (`chat-web-fallback`).
+
+    KHÔNG phải model DB và KHÔNG bao giờ được ghi xuống — nó sống đúng một lượt hỏi.
+
+    `uri` là URL **THẬT** đã giải chuyển hướng, không phải link
+    `vertexaisearch.cloud.google.com/grounding-api-redirect/…` mà grounding trả về (design
+    D10). `title` lấy từ metadata của chính trang đã tải, KHÔNG lấy từ
+    `grounding_chunks[].web.title` — đo 03/08/2026, trường đó chỉ chứa **tên miền**
+    (`'google.com'`), dùng làm nhãn trích dẫn thì vô nghĩa.
+
+    `verbatim=False` = nội dung là bản tóm tắt do model bước tra cứu viết, KHÔNG phải nguyên
+    văn trang (ca mọi uri đều tải hỏng — design D5). Prompt phải nói rõ mức chắc chắn khác
+    nhau, vì citation lúc đó trỏ tới một trang mà ta chưa đối chiếu.
+    """
+
+    uri: str
+    title: str
+    text: str
+    verbatim: bool = True
+
+    # Để `resolve_citations` dùng chung một đường với `Insight` mà không phải rẽ nhánh kiểu.
+    @property
+    def source_url(self) -> str:
+        return self.uri
+
+
+def build_web_block(sources: list[WebSource], start: int) -> tuple[str, dict[int, WebSource]]:
+    """Khối nguồn web đã đánh số, nối tiếp dãy `[n]` của insight.
+
+    `start` là số kế tiếp sau insight cuối cùng — MỘT dãy liên tục, MỘT bảng ánh xạ. Đây
+    chính là điều kiện để không dựng lại bẫy "hai hệ quy chiếu cho `n`" của
+    `chat-citation-integrity`, chỉ khác là lần này hai *loại* nguồn thay vì hai *cách đánh số*.
+    """
+    lines: list[str] = []
+    mapping: dict[int, WebSource] = {}
+    for n, src in enumerate(sources, start=start):
+        mapping[n] = src
+        nhan = "" if src.verbatim else " (TÓM TẮT — chưa đối chiếu nguyên văn trang)"
+        lines.append(f"[{n}] {src.title}{nhan}\n    Nguồn: {src.uri}\n    Nội dung:\n{src.text}")
+    return "\n\n".join(lines), mapping
+
+
 def build_insight_block(insight: Insight, content: str | None, n: int = 1) -> str:
     """Một Ô SÂU: đủ 7 field phân tích + bài gốc, đánh số `[n]`.
 
@@ -128,7 +172,8 @@ class ChatContext:
 
     deep_block: str
     index_block: str
-    mapping: dict[int, Insight]
+    # `Insight` HOẶC `WebSource` — cùng một bảng, cùng một dãy số (chat-web-fallback D4).
+    mapping: dict[int, "Insight | WebSource"]
     deep_count: int
     total_matched: int
     hidden: int
@@ -138,6 +183,9 @@ class ChatContext:
     # trống, và một bộ đo chấm sai độ sâu sẽ báo hồi quy giả (đo 28/07: Faith 0,99 → 0,78,
     # toàn bộ là do judge nhìn dòng index nén trong khi model đọc bài gốc).
     deep_blocks: dict[int, str]
+    # Khối nguồn tra cứu ngoài, đánh số nối tiếp sau insight. Rỗng ở mọi lượt không tra cứu
+    # — tức là gần như mọi lượt.
+    web_block: str = ""
 
 
 def build_context(
@@ -148,6 +196,7 @@ def build_context(
     include_content: bool = True,
     best_chunk_match: uuid.UUID | None = None,
     pinned: list[Insight] | None = None,
+    web_sources: list[WebSource] | None = None,
 ) -> ChatContext:
     """Dựng context: ô sâu lấp TẤT ĐỊNH (refs trước, xếp hạng sau), rồi index nén.
 
@@ -255,6 +304,16 @@ def build_context(
     for n, insight in enumerate(deep, start=1):
         mapping[n] = insight
 
+    # Nguồn web nối tiếp dãy số, và CỐ Ý không tính vào `index_limit`.
+    #
+    # Ô sâu và tin ghim đều nằm TRONG trần vì chúng thay chỗ của tin xếp hạng thấp hơn — cùng
+    # một loại nguồn, cạnh tranh cùng một chỗ. Nguồn web thì khác loại: nó có mặt vì corpus
+    # KHÔNG có dữ kiện, nên đánh đổi nó với một tin trong corpus là đổi sai chiều — bỏ đúng
+    # thứ người dùng đang hỏi để giữ một tin không liên quan. Trần của nó là
+    # `chat_web_max_sources` (2–3), áp ở tầng service.
+    web_block, web_mapping = build_web_block(web_sources or [], start=len(mapping) + 1)
+    mapping.update(web_mapping)
+
     # Tin bị cắt = phần đuôi của `ranked` không được rót ở bất kỳ độ sâu nào. Refs và tin
     # ghim đến từ ngoài `ranked` (ví dụ ngoài cửa sổ thời gian) không tính vào đây — nên đếm
     # theo TẬP id đã lên mặt rồi giao với `ranked`, chứ không cộng `len(candidates)`: từ khi
@@ -270,6 +329,7 @@ def build_context(
         deep_count=len(deep),
         total_matched=len(ranked),
         hidden=max(len(ranked) - surfaced, 0),
+        web_block=web_block,
     )
 
 
@@ -281,7 +341,7 @@ def _deep_content(insight: Insight) -> str | None:
 
 
 def resolve_citations(
-    answer: str, mapping: dict[int, Insight]
+    answer: str, mapping: dict[int, "Insight | WebSource"]
 ) -> tuple[str, list[dict]]:
     """Giải marker [n] → citations; bỏ marker ngoài phạm vi, GIỮ nội dung answer.
 
@@ -303,10 +363,14 @@ def resolve_citations(
     # `n` đi kèm citation, và marker trong answer GIỮ NGUYÊN — không đánh số lại (design D2).
     # Đánh số lại nghe gọn hơn nhưng là *viết lại* nội dung model trả về (hiện chỉ *xoá* marker
     # ngoài phạm vi), và sẽ đá nhau khi câu trả lời tự nhắc "tin số 3 ở trên".
+    # `kind` phân biệt LOẠI nguồn, không phải cách đánh số — `n` vẫn là một dãy duy nhất cho
+    # cả hai. Nguồn web không có `insight_id` (nó không phải insight); frontend rẽ theo `kind`
+    # để hiển thị khác nhau, nhưng vẫn giải marker bằng đúng một phép `find(c => c.n === n)`.
     citations = [
         {
             "n": n,
-            "insight_id": mapping[n].id,
+            "kind": "web" if isinstance(mapping[n], WebSource) else "insight",
+            "insight_id": getattr(mapping[n], "id", None),
             "title": mapping[n].title,
             "source_url": mapping[n].source_url,
         }

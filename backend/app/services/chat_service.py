@@ -36,6 +36,8 @@ from app.ai.prompts import (
     build_chat_focused_prompt,
     build_chat_global_prompt,
     build_chat_insight_prompt,
+    extract_web_lookup_query,
+    strip_web_lookup_sentinel,
 )
 from app.config import settings
 from app.models.insight import Insight
@@ -44,6 +46,7 @@ from app.repositories.chat_log_repo import ChatLogRepository
 from app.repositories.document_chunk_repo import DocumentChunkRepository
 from app.repositories.insight_repo import InsightRepository
 from app.services.chat_grounding import (
+    WebSource,
     build_context,
     build_insight_block,
     enforce_grounding,
@@ -51,6 +54,7 @@ from app.services.chat_grounding import (
     resolve_citations,
 )
 from app.services.chat_intent import AMBIGUOUS, INTENT_PRESETS, route_intent
+from app.services.web_lookup import collect_web_sources
 from app.services.chat_service_terms import STOPWORDS
 from app.services.delivery_engine import score_for_role
 
@@ -67,9 +71,17 @@ logger = logging.getLogger(__name__)
 #   (B) lượt B bị cắt → hỏi lại → bản hỏi lại phát sentinel → mở rộng bị trần chặn →
 #       RuntimeError → HTTP 500 cho người dùng.
 # Nên: trần áp lên `_steps_used` (bước), còn `_calls_used` (tiền) chỉ dùng để ghi log và
-# tính budget. Trần bước 2 × trần 2 lượt/bước ⇒ tối đa 4 lượt tính tiền cho một câu hỏi,
-# vẫn có biên, vẫn không thành vòng lặp.
-MAX_MODEL_CALLS_PER_QUESTION = 2
+# tính budget.
+#
+# **2 → 3 (chat-web-fallback, 03/08/2026)** cho đường tra cứu ngoài:
+#   bước 1 trả lời từ corpus + phát sentinel → bước 2 tra cứu → bước 3 trả lời lại có nguồn web.
+# Bước **tải trang** (`trafilatura`) KHÔNG tính — nó là I/O, không phải một lượt lập luận, cùng
+# luật với lượt embed.
+#
+# Trần tiền tối đa/câu: 3 bước × 2 lượt/bước (retry chống-cắt) = **6 lượt tính tiền**, cộng tối
+# đa `chat_web_max_sources` lượt tải trang không tốn tiền model. Vẫn có biên, vẫn không thành
+# vòng lặp — và hai sentinel LOẠI TRỪ NHAU (design D3) nên không có đường nào cần bước thứ 4.
+MAX_MODEL_CALLS_PER_QUESTION = 3
 
 # Hằng số làm phẳng của Reciprocal Rank Fusion: `1/(RRF_K + rank)`. 60 là giá trị chuẩn
 # trong tài liệu gốc và điều nó mua là **chống nhiễu ở đỉnh** — chênh lệch giữa hạng 1 và
@@ -88,6 +100,41 @@ STATUS_READING_INSIGHT = "Đang đọc bài đang xem…"
 STATUS_SEARCHING = "Đang tìm trong hệ thống…"
 STATUS_EXPANDING = "Bài đang xem không đề cập — đang tìm trên toàn hệ thống…"
 STATUS_COMPOSING = "Đang soạn câu trả lời…"
+STATUS_RETRYING = "Câu trả lời hơi dài — đang rút gọn lại…"
+
+# `key` là định danh ỔN ĐỊNH của mốc, TÁCH khỏi chuỗi hiển thị ở trên. Widget dùng nó để
+# quyết định *thêm dòng mới* hay *cập nhật dòng đang có*.
+#
+# Vì sao không để widget so chuỗi `text`: chuỗi mang số liệu của lượt nên hai lần phát cùng
+# một mốc gần như luôn khác nhau ⇒ so chuỗi sẽ đẻ ra dòng trùng. Và sửa câu chữ tiếng Việt
+# sẽ âm thầm đổi hành vi render — đúng loại lỗi "sống ở khe giữa hai tầng" mà
+# `chat-citation-integrity` đã trả giá.
+#
+# TẬP ĐÓNG, khai báo đúng một chỗ: `_status()` từ chối key ngoài tập, nên một key viết sai
+# chính tả nổ ngay ở test chứ không lặng lẽ đi ra tới giao diện.
+STATUS_KEY_SEARCHING = "searching"
+STATUS_KEY_RANKED = "ranked"
+STATUS_KEY_PINNED = "pinned"
+STATUS_KEY_READING = "reading"
+STATUS_KEY_EXPANDING = "expanding"
+STATUS_KEY_RETRYING = "retrying"
+STATUS_KEY_COMPOSING = "composing"
+STATUS_KEY_WEB_SEARCH = "web_search"
+STATUS_KEY_WEB_FETCH = "web_fetch"
+
+STATUS_KEYS: frozenset[str] = frozenset(
+    {
+        STATUS_KEY_SEARCHING,
+        STATUS_KEY_RANKED,
+        STATUS_KEY_PINNED,
+        STATUS_KEY_READING,
+        STATUS_KEY_EXPANDING,
+        STATUS_KEY_RETRYING,
+        STATUS_KEY_COMPOSING,
+        STATUS_KEY_WEB_SEARCH,
+        STATUS_KEY_WEB_FETCH,
+    }
+)
 
 # Số tin nêu tên trong status. Hai là đủ để người dùng nhận ra hệ thống đang đọc ĐÚNG bài
 # mình quan tâm; nhiều hơn thì dòng status dài quá và bị cắt trên panel hẹp.
@@ -95,7 +142,34 @@ _STATUS_TITLES = 2
 _STATUS_TITLE_LEN = 38
 
 
-def _reading_status(ctx) -> str:
+def _short_title(title: str) -> str:
+    """Rút gọn tiêu đề cho một dòng status trên panel hẹp."""
+    title = (title or "").strip()
+    if len(title) <= _STATUS_TITLE_LEN:
+        return title
+    return title[: _STATUS_TITLE_LEN - 1] + "…"
+
+
+def _ranked_status(matched_count: int | None, total: int) -> str:
+    """Mốc ĐẦU TIÊN mang số thật, lấp khoảng im lặng dài nhất (embed + DB + `_rank`).
+
+    `matched_count=None` = câu hỏi rỗng từ khoá: ở đó `_rank` cố ý tắt cả tầng vector lẫn
+    tầng đoạn và rơi về độ quan trọng, nên **không có phép khớp nào diễn ra** — nói "N tin
+    khớp" là nói sai việc. Đây đúng là luật *nói sai còn tệ hơn nói chung chung*.
+    """
+    if matched_count is None:
+        return f"Đang xếp {total} tin theo mức quan trọng…"
+    return f"Đã lọc {total} tin, {matched_count} tin khớp câu hỏi…"
+
+
+def _pinned_status(pinned: list[Insight]) -> str:
+    """Mốc giải thích vì sao bot "nhớ" chuyện đã bàn — hiện hoàn toàn vô hình."""
+    head = f"«{_short_title(pinned[0].title)}»"
+    rest = f" và {len(pinned) - 1} tin nữa" if len(pinned) > 1 else ""
+    return f"Nhắc lại {head}{rest} đã bàn ở trên…"
+
+
+def _reading_status(ctx) -> tuple[str, str]:
     """Mốc "đang đọc kỹ" mang SỐ LIỆU THẬT của lượt này.
 
     Vì sao đáng làm: đo 28/07/2026 trên đường SSE (client singleton, kết nối ấm) — TTFT
@@ -107,20 +181,20 @@ def _reading_status(ctx) -> str:
 
     Số liệu lấy từ `ctx`, không phải chuỗi trang trí chạy theo đồng hồ: nói sai việc còn tệ
     hơn nói chung chung.
+
+    Trả `(key, text)` chứ không chỉ `text`: mốc này có hai trạng thái thật khác nhau — "đang
+    đọc kỹ N tin" và "đang soạn" — nên nó phải nói đúng mình là mốc nào, không thể để call
+    site đoán.
     """
     if not ctx.deep_count:
-        return STATUS_COMPOSING
+        return STATUS_KEY_COMPOSING, STATUS_COMPOSING
 
-    def short(title: str) -> str:
-        title = (title or "").strip()
-        return title if len(title) <= _STATUS_TITLE_LEN else title[: _STATUS_TITLE_LEN - 1] + "…"
-
-    titles = [f"«{short(ctx.mapping[n].title)}»" for n in range(1, ctx.deep_count + 1)]
+    titles = [f"«{_short_title(ctx.mapping[n].title)}»" for n in range(1, ctx.deep_count + 1)]
     named = ", ".join(titles[:_STATUS_TITLES])
     if len(titles) > _STATUS_TITLES:
         named += f" và {len(titles) - _STATUS_TITLES} tin nữa"
     scope = f" trong {ctx.total_matched} tin khớp" if ctx.total_matched else ""
-    return f"Đang đọc kỹ {ctx.deep_count} tin: {named}{scope}…"
+    return STATUS_KEY_READING, f"Đang đọc kỹ {ctx.deep_count} tin: {named}{scope}…"
 
 # Kênh phát sự kiện. `None` = chế độ blocking: cùng một pipeline, chỉ khác lối ra.
 Emitter = Callable[[dict], Awaitable[None]]
@@ -458,11 +532,48 @@ class ChatService:
         self._emit: Emitter | None = None
         # Client đã bỏ đi — token sinh thêm không còn ai đọc, nên dừng sớm. Không phải lỗi.
         self._aborted = False
+        # Số TRUY VẤN tra cứu ngoài đã chạy trong lượt này. Thuộc tính instance vì cùng lý do
+        # với `_calls_used`: tiền đã tiêu thì phải được ghi kể cả khi bước sau vỡ.
+        self._web_searches_used = 0
+        # HTML Search Suggestions của lượt (nếu có tra cứu) — hiển thị là yêu cầu tuân thủ
+        # điều khoản Google, không phải hạng mục trang trí.
+        self._search_suggestions: str | None = None
 
-    async def _status(self, text: str) -> None:
-        """Phát một mốc tiến trình. No-op ở chế độ blocking."""
+    async def _status(self, key: str, text: str) -> None:
+        """Phát một mốc tiến trình. No-op ở chế độ blocking.
+
+        `key` phải thuộc `STATUS_KEYS`. Nổ chứ không phát bừa: tập đóng chỉ có giá trị nếu
+        nó được thực thi, và một key sai chính tả cần lộ ra ở test chứ không phải ở giao
+        diện người dùng vài tuần sau.
+        """
+        if key not in STATUS_KEYS:
+            raise ValueError(f"Mốc tiến trình không hợp lệ: {key!r}")
         if self._emit is not None:
-            await self._emit({"type": "status", "text": text})
+            await self._emit({"type": "status", "key": key, "text": text})
+
+    def _retry_notifier(self) -> Callable[[], None] | None:
+        """Cầu nối cho mốc `retrying`, vốn sinh ra ở TRONG client (thread khác).
+
+        Lượt hỏi lại chống-cắt nằm bên trong `GeminiClient.chat`/`chat_stream`, mà cả hai
+        đều chạy qua `asyncio.to_thread`. Service chỉ giành lại quyền điều khiển **sau** khi
+        lượt hỏi lại xong — quá muộn, vì cái cần lấp chính là khoảng chờ của lượt đó.
+
+        Nên client gọi ngược lại bằng một callback đồng bộ, và ta bắc cầu về event loop bằng
+        `run_coroutine_threadsafe`. Không chờ future trả về: mốc tiến trình tới muộn vài ms
+        không sao, còn chặn thread của model thì có.
+
+        `None` ở chế độ blocking — không có gì để phát thì không dựng cầu.
+        """
+        if self._emit is None:
+            return None
+        loop = asyncio.get_running_loop()
+
+        def notify() -> None:
+            asyncio.run_coroutine_threadsafe(
+                self._status(STATUS_KEY_RETRYING, STATUS_RETRYING), loop
+            )
+
+        return notify
 
     async def _route_intent(self, question: str) -> str | None:
         """Bộ lọc ý định HAI TẦNG (25/07/2026). Trả nhóm preset, hoặc `None` = đi pipeline.
@@ -560,7 +671,7 @@ class ChatService:
                     # Người dùng vừa thấy vài token của lượt B (nếu model có sinh gì trước
                     # sentinel) rồi phải chờ thêm 5–20s nữa. Nói thẳng đang làm gì, không
                     # để khoảng lặng thứ hai (design D4).
-                    await self._status(STATUS_EXPANDING)
+                    await self._status(STATUS_KEY_EXPANDING, STATUS_EXPANDING)
                     answer, citations = await self._answer_global(
                         question, history, focus=attempt
                     )
@@ -568,7 +679,12 @@ class ChatService:
                     answer, citations = attempt.answer, attempt.citations
             else:
                 answer, citations = await self._answer_global(question, history)
-            return {"answer": answer, "citations": citations, "mode": mode}
+            return {
+                "answer": answer,
+                "citations": citations,
+                "mode": mode,
+                "search_suggestions": self._search_suggestions,
+            }
         finally:
             # Lượt gọi ĐÃ trả về rồi vỡ ở bước sau vẫn tốn tiền → vẫn phải tính.
             # (Retry 429 không có response nên client không đếm.)
@@ -579,6 +695,7 @@ class ChatService:
                     citations_count=len(citations),
                     latency_ms=int((time.monotonic() - started) * 1000),
                     thinking_tokens=self._thinking_tokens,
+                    web_searches=self._web_searches_used,
                 )
 
     async def _load_refs(
@@ -619,7 +736,7 @@ class ChatService:
     async def _answer_insight(
         self, question: str, history: list, insight_id: uuid.UUID
     ) -> _InsightAttempt:
-        await self._status(STATUS_READING_INSIGHT)
+        await self._status(STATUS_KEY_READING, STATUS_READING_INSIGHT)
         result = await self.session.execute(
             select(Insight)
             .where(Insight.id == insight_id)
@@ -673,9 +790,9 @@ class ChatService:
         if focus is None and not refs:
             # Ở chế độ mở rộng, `answer()` đã phát STATUS_EXPANDING — nói lại "đang tìm
             # trong hệ thống" chỉ là nhiễu.
-            await self._status(STATUS_SEARCHING)
+            await self._status(STATUS_KEY_SEARCHING, STATUS_SEARCHING)
         elif refs:
-            await self._status(STATUS_READING_INSIGHT)
+            await self._status(STATUS_KEY_READING, STATUS_READING_INSIGHT)
         since = None
         if settings.chat_window_days > 0:
             since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
@@ -701,7 +818,24 @@ class ChatService:
             self.insight_repo.list_for_chat(published_since=since),
             _vector_then_chunks(),
         )
+        total_candidates = len(matched)
         matched = self._rank(matched, question, query_vector, chunk_ranks)
+
+        # Mốc ĐẦU TIÊN mang số thật. Cố ý đặt SAU `_rank`, không phải sau `list_for_chat`:
+        # ở đó mới chỉ có "tin đã nạp", mà nói "đã nạp 179 tin" là nói một con số không mang
+        # thông tin gì về câu hỏi. Thà im thêm ~0,2s (design D4).
+        #
+        # Đếm lại `_relevance` thay vì đòi `_rank` trả thêm số: `_rank` phải giữ nguyên chữ ký
+        # hàm THUẦN cho RS harness. Hai bên dùng chung `_question_terms`/`_relevance` nên
+        # không thể trôi khỏi nhau, và một lượt quét ~179 tin là vài ms so với 85% TTFT nằm ở
+        # lượt gọi model.
+        rank_terms = _question_terms(question)
+        matched_count = (
+            sum(1 for i in matched if _relevance(i, rank_terms)) if rank_terms else None
+        )
+        await self._status(
+            STATUS_KEY_RANKED, _ranked_status(matched_count, total_candidates)
+        )
 
         # Tin ghim vì lịch sử nạp NỐI TIẾP, cố ý KHÔNG nhét vào cụm `gather` trên.
         # `AsyncSession` không an toàn khi hai truy vấn chạy đồng thời; cụm trên chỉ sống
@@ -714,6 +848,11 @@ class ChatService:
             _history_pin_ids(history, settings.chat_history_pin_slots),
             limit=settings.chat_history_pin_slots,
         )
+        # Chỉ phát khi THẬT SỰ có tin được ghim. `chat_history_pin_slots=0`, history rỗng,
+        # hay id ghim đã chết (`_load_refs` bỏ lặng lẽ) đều cho danh sách rỗng ⇒ im lặng.
+        # Dùng lại đúng kết quả vừa nạp — không thêm truy vấn DB nào.
+        if pinned:
+            await self._status(STATUS_KEY_PINNED, _pinned_status(pinned))
 
         # ⚠️ Tính "vai trò không có tin" trên TOÀN BỘ tập khớp, TRƯỚC khi cắt top-K.
         # Nếu tính sau khi cắt, một vai trò có tin nhưng xếp hạng dưới ngưỡng sẽ bị
@@ -788,36 +927,173 @@ class ChatService:
         history_block = _history_block(history)
         # Cho phép hình dạng đối chiếu khi có ≥2 ô sâu — dưới đó thì "so sánh" vô nghĩa.
         allow_comparison = ctx.deep_count >= 2
-        if focus is not None:
-            prompt = build_chat_expanded_prompt(
-                insight_block=ctx.deep_block,
+
+        def make_prompt(
+            context, allow_web_lookup: bool = False, web_block: str = ""
+        ) -> str:
+            """Dựng prompt cho MỘT context. Dùng chung cho lượt đầu và lượt sau tra cứu.
+
+            Closure chứ không phải method: nó cần đúng bộ tham số của lượt này (mode, history,
+            index). Nhấc ra ngoài thì phải bơm 8 tham số qua — hoặc tệ hơn, nhét snapshot vào
+            `ChatContext` và làm hỏng tính THUẦN của nó, thứ RS harness đang dựa vào.
+            """
+            if focus is not None:
+                return build_chat_expanded_prompt(
+                    insight_block=context.deep_block,
+                    index_block=index_block,
+                    history_block=history_block,
+                    question=question,
+                    allow_web_lookup=allow_web_lookup,
+                    web_block=web_block,
+                )
+            if refs:
+                return build_chat_focused_prompt(
+                    deep_block=context.deep_block,
+                    index_block=index_block,
+                    history_block=history_block,
+                    question=question,
+                    allow_comparison=allow_comparison,
+                    allow_web_lookup=allow_web_lookup,
+                    web_block=web_block,
+                )
+            return build_chat_global_prompt(
                 index_block=index_block,
                 history_block=history_block,
                 question=question,
-            )
-        elif refs:
-            prompt = build_chat_focused_prompt(
-                deep_block=ctx.deep_block,
-                index_block=index_block,
-                history_block=history_block,
-                question=question,
+                deep_block=context.deep_block,
                 allow_comparison=allow_comparison,
+                allow_web_lookup=allow_web_lookup,
+                web_block=web_block,
             )
-        else:
-            prompt = build_chat_global_prompt(
-                index_block=index_block,
-                history_block=history_block,
-                question=question,
-                deep_block=ctx.deep_block,
-                allow_comparison=allow_comparison,
+
+        def rebuild_with_web(sources) -> "ChatContext":
+            """Dựng lại context với nguồn web rót thêm — cùng tham số, chỉ thêm `web_sources`.
+
+            ⚠️ Bất biến ngầm mà `make_prompt` đang dựa vào: gọi `build_context` với **đúng bộ
+            tham số cũ** cộng `web_sources` cho ra dãy `[n]` TRÙNG KHÍT ở phần insight, vì
+            `web_sources` chỉ nối vào ĐUÔI bảng ánh xạ (xem `build_context`). Nhờ vậy lượt sau
+            dùng lại được `index_block` của lượt đầu — bản đã kèm phụ chú "còn N tin khác" và
+            "vai trò không có tin", thứ mà `web_ctx.index_block` không có.
+
+            Nếu ai đó sau này cho `web_sources` chen vào GIỮA (ví dụ trộn theo thứ hạng), bất
+            biến này gãy và citation sẽ trỏ lệch **trong im lặng**. Khi đó phải chuyển sang
+            dùng `web_ctx.index_block` và dựng lại phụ chú, đừng vá bằng cách bù chỉ số.
+            """
+            return build_context(
+                refs=[focus.insight] if focus is not None else refs,
+                ranked=matched,
+                k_deep=1 if focus is not None else settings.chat_deep_slots,
+                index_limit=settings.chat_index_top_k,
+                include_content=(
+                    True if focus is not None else settings.chat_deep_include_content
+                ),
+                best_chunk_match=(
+                    None if focus is not None else _best_chunk_match(chunk_ranks)
+                ),
+                pinned=pinned,
+                web_sources=sources,
             )
-        # Thay STATUS_COMPOSING chung chung bằng mốc mang số liệu thật — KHÔNG phát thêm
-        # một sự kiện nữa: hai status cách nhau vài chục ms chỉ làm dòng chữ nhấp nháy.
+
+        allow_web = await self._web_lookup_allowed()
+        prompt = make_prompt(ctx, allow_web_lookup=allow_web)
+        # Thay STATUS_COMPOSING chung chung bằng mốc mang số liệu thật.
+        #
+        # ⚠️ Ghi chú cũ ở đây nói "KHÔNG phát thêm một sự kiện nữa: hai status cách nhau vài
+        # chục ms chỉ làm dòng chữ nhấp nháy" — **không còn đúng** từ `chat-status-milestones`.
+        # Nhấp nháy là hệ quả của mô hình widget **ghi đè một dòng**; nay các mốc **xếp
+        # chồng**, nên hai dòng tới cùng lúc chỉ là hai dòng tới cùng lúc. Đo thật 03/08/2026:
+        # `ranked` và `reading` cùng ở 2,29s, và đó là hành vi ĐÚNG — `ranked` mang con số
+        # (58/179) mà `reading` không có, và nó ở lại trên màn hình chứ không bị thay.
         raw_answer = await self._call_model(prompt, status=_reading_status(ctx))
+
+        # Dò sentinel TRƯỚC `enforce_grounding` — cùng lý do với sentinel ngoài-phạm-vi: câu
+        # xin tra cứu có thể chưa mang marker nào cho phần nó chưa trả lời được, nên grounding
+        # fail-closed sẽ thay sạch nó và tín hiệu mất hẳn.
+        lookup_query = extract_web_lookup_query(raw_answer) if allow_web else None
+        if lookup_query:
+            raw_answer, mapping = await self._web_lookup_turn(
+                lookup_query=lookup_query,
+                partial_answer=strip_web_lookup_sentinel(raw_answer),
+                make_prompt=make_prompt,
+                rebuild_with_web=rebuild_with_web,
+                fallback_mapping=mapping,
+            )
 
         answer, citations = resolve_citations(raw_answer, mapping)
         answer, citations = enforce_grounding(answer, citations)
         return answer, citations
+
+    async def _web_lookup_allowed(self) -> bool:
+        """Có được phép xin tra cứu ngoài ở lượt này không.
+
+        Cạn quota ⇒ **không** 429 và không báo lỗi: tra cứu là tính năng bổ trợ, không phải
+        điều kiện để trả lời. Ta chỉ lặng lẽ không mời model xin — nhờ vậy nó trả lời bằng
+        corpus và nói thẳng phần thiếu, thay vì xin một thứ server sẽ từ chối.
+        """
+        if not settings.chat_web_fallback_enabled:
+            return False
+        used = await self.chat_log_repo.sum_web_searches_today()
+        if used >= settings.max_daily_web_searches:
+            logger.warning(
+                "Cạn quota tra cứu ngoài (%d/%d) — trả lời bằng corpus",
+                used, settings.max_daily_web_searches,
+            )
+            return False
+        return True
+
+    async def _web_lookup_turn(
+        self, *, lookup_query, partial_answer, make_prompt, rebuild_with_web, fallback_mapping
+    ) -> tuple[str, dict]:
+        """Bước 2 (tra cứu) + bước 3 (trả lời lại có nguồn web).
+
+        Trả `(raw_answer, mapping)` — **mapping phải đi kèm**: dãy `[n]` của lượt cuối khác
+        dãy của bước 1 (có thêm nguồn web ở đuôi), nên giải citation bằng bảng cũ sẽ trỏ sai.
+        Đây đúng là bẫy "hai hệ quy chiếu" của `chat-citation-integrity`, chỉ khác là lần này
+        hai hệ tách nhau theo *thời gian* trong cùng một request.
+
+        Mọi ngả hỏng đều rơi về `partial_answer` — phần model ĐÃ trả lời được từ corpus ở
+        bước 1, kèm bảng ánh xạ gốc. Đó chính là thứ change này sinh ra để cứu: cách cũ vứt
+        cả câu chỉ vì thiếu một vế.
+        """
+        await self._status(
+            STATUS_KEY_WEB_SEARCH, f"Đang tra Google: «{_short_title(lookup_query)}»…"
+        )
+        result = await asyncio.to_thread(self.gemini.search_web, lookup_query)
+        # Cộng NGAY khi lượt gọi trả về — thời điểm tiền đã tiêu, mọi lỗi sau đó vẫn phải tính.
+        self._web_searches_used += 1
+        self._search_suggestions = result.search_entry_point
+
+        if not result.uris:
+            logger.info("Tra cứu không ra nguồn nào cho: %r", lookup_query[:80])
+            return partial_answer, fallback_mapping
+
+        await self._status(
+            STATUS_KEY_WEB_FETCH,
+            f"Đang đọc {min(len(result.uris), settings.chat_web_max_sources)} trang từ web…",
+        )
+        sources = await collect_web_sources(
+            result.uris,
+            limit=settings.chat_web_max_sources,
+            timeout=settings.chat_web_fetch_timeout_seconds,
+        )
+        if not sources and result.summary:
+            # Mọi trang đều tải hỏng (design D5). Bản tóm tắt của bước 2 vẫn hơn không có gì,
+            # NHƯNG phải mang nhãn "chưa đối chiếu nguyên văn": text lúc này do model viết mà
+            # uri trỏ trang gốc — đúng cấu hình sinh ra "lời bịa có kèm nguồn".
+            sources = [
+                WebSource(
+                    uri=result.uris[0],
+                    title=lookup_query,
+                    text=result.summary,
+                    verbatim=False,
+                )
+            ]
+        if not sources:
+            return partial_answer, fallback_mapping
+
+        web_ctx = rebuild_with_web(sources)
+        prompt = make_prompt(web_ctx, web_block=web_ctx.web_block)
+        return await self._call_model(prompt, status=_reading_status(web_ctx)), web_ctx.mapping
 
     def _rank(
         self,
@@ -1059,7 +1335,10 @@ class ChatService:
             return None
 
     async def _call_model(
-        self, prompt: str, hold_sentinel: bool = False, status: str | None = None
+        self,
+        prompt: str,
+        hold_sentinel: bool = False,
+        status: tuple[str, str] | None = None,
     ) -> str:
         """Gọi Gemini NGOÀI event loop — chat nằm trên request path (design D6).
 
@@ -1069,7 +1348,7 @@ class ChatService:
         Có `self._emit` thì đi lối streaming — vẫn ĐÚNG MỘT bước, vẫn cùng prompt, vẫn trả
         về toàn văn cho phần grounding phía sau chạy y như cũ.
         """
-        await self._status(status or STATUS_COMPOSING)
+        await self._status(*(status or (STATUS_KEY_COMPOSING, STATUS_COMPOSING)))
         if self._steps_used >= MAX_MODEL_CALLS_PER_QUESTION:
             raise RuntimeError(
                 f"Chạm trần {MAX_MODEL_CALLS_PER_QUESTION} bước trả lời cho một câu hỏi"
@@ -1081,7 +1360,7 @@ class ChatService:
 
         # `state` là sổ ghi dùng chung với lối streaming — nhờ nó số token suy luận đọc được
         # ở CẢ hai lối ra, không phải chỉ ở lối stream.
-        state = ChatStreamState()
+        state = ChatStreamState(on_retry=self._retry_notifier())
         text, calls = await asyncio.to_thread(
             self.gemini.chat, CHAT_SYSTEM_PROMPT, prompt, state
         )
@@ -1109,7 +1388,7 @@ class ChatService:
 
         `hold_sentinel` bật cổng chặn sentinel cho lượt mode B — xem `_SentinelGate`.
         """
-        state = ChatStreamState()
+        state = ChatStreamState(on_retry=self._retry_notifier())
         gate = _SentinelGate(OUT_OF_SCOPE_SENTINEL) if hold_sentinel else None
         iterator = self.gemini.chat_stream(CHAT_SYSTEM_PROMPT, prompt, state)
         try:

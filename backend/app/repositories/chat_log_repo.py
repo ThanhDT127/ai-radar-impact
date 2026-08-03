@@ -31,6 +31,7 @@ class ChatLogRepository:
         citations_count: int,
         latency_ms: int,
         thinking_tokens: int | None = None,
+        web_searches: int | None = None,
     ) -> None:
         """Ghi một bản ghi log. Gọi trong khối `finally` của service.
 
@@ -44,6 +45,7 @@ class ChatLogRepository:
                 citations_count=citations_count,
                 latency_ms=latency_ms,
                 thinking_tokens=thinking_tokens,
+                web_searches=web_searches,
             )
         )
         await self.session.commit()
@@ -53,6 +55,21 @@ class ChatLogRepository:
         start, end = utc_day_bounds(now)
         result = await self.session.execute(
             select(func.coalesce(func.sum(ChatLog.model_calls), 0)).where(
+                ChatLog.created_at >= start, ChatLog.created_at < end
+            )
+        )
+        return int(result.scalar_one())
+
+    async def sum_web_searches_today(self, now: datetime | None = None) -> int:
+        """Tổng TRUY VẤN tra cứu ngoài trong ngày (UTC) — trần tiền riêng, xem `ChatLog`.
+
+        Cố ý là truy vấn thứ hai chứ không gộp vào `sum_model_calls_today`: hai bộ đếm canh
+        hai loại chi phí khác nhau, và chúng phải cạn độc lập. Chỉ chạy trên đường tra cứu
+        (hiếm), nên chi phí một truy vấn thêm không nằm trên đường phục vụ thông thường.
+        """
+        start, end = utc_day_bounds(now)
+        result = await self.session.execute(
+            select(func.coalesce(func.sum(ChatLog.web_searches), 0)).where(
                 ChatLog.created_at >= start, ChatLog.created_at < end
             )
         )

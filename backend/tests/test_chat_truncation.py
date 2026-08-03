@@ -10,6 +10,7 @@ import pytest
 
 from app.ai.gemini_client import (
     _CONCISE_RETRY_DIRECTIVE,
+    ChatStreamState,
     GeminiClient,
     _trim_to_last_sentence,
 )
@@ -57,6 +58,51 @@ def test_khong_cat_thi_tra_nguyen_van_mot_luot():
     assert text == "Trả lời trọn vẹn [1]."
     assert calls == 1
     assert len(models.calls) == 1, "không được hỏi lại khi chưa bị cắt"
+
+
+# --- Mốc `retrying` (change `chat-status-milestones`, task 4.3) ------------------
+#
+# Lượt hỏi lại là khoảng chờ IM LẶNG đắt nhất của chat: người dùng chờ thêm nguyên một lượt
+# gọi model mà màn hình không nói gì. Client phải gọi ngược lên trước khi hỏi lại.
+
+def test_bao_moc_hoi_lai_TRUOC_khi_goi_lai():
+    client, models = _client([
+        _FakeResponse("Tin thứ nhất nói về lỗ hổng ngh", truncated=True),
+        _FakeResponse("Gộp lại cho ngắn.", truncated=False),
+    ])
+    # Ghi lại SỐ LƯỢT GỌI tại thời điểm được báo — đó là cách duy nhất chứng minh mốc tới
+    # *trước* lượt hỏi lại chứ không phải sau nó.
+    seen: list[int] = []
+    state = ChatStreamState(on_retry=lambda: seen.append(len(models.calls)))
+
+    client.chat("SYS", "liệt kê tin bảo mật", state)
+
+    assert seen == [1], "phải báo đúng một lần, khi mới có lượt đầu"
+
+
+def test_khong_bao_gi_khi_khong_bi_cat():
+    client, _ = _client([_FakeResponse("Trọn vẹn.", truncated=False)])
+    seen: list[int] = []
+    state = ChatStreamState(on_retry=lambda: seen.append(1))
+
+    client.chat("SYS", "câu hỏi", state)
+
+    assert seen == [], "câu không bị cắt thì người dùng không bao giờ thấy mốc này"
+
+
+def test_kenh_bao_hong_khong_duoc_lam_hong_cau_tra_loi():
+    """Mốc tiến trình là thứ trang trí; câu trả lời đã trả tiền để sinh ra thì không."""
+    client, _ = _client([
+        _FakeResponse("bị cắt giữa ch", truncated=True),
+        _FakeResponse("Bản gộp lại.", truncated=False),
+    ])
+
+    def no(): raise RuntimeError("event loop đã đóng")
+
+    text, calls = client.chat("SYS", "câu hỏi", ChatStreamState(on_retry=no))
+
+    assert text == "Bản gộp lại."
+    assert calls == 2
 
 
 # --- Cắt lần đầu → hỏi lại ------------------------------------------------------

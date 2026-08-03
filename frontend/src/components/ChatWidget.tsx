@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useMatch } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { streamChat, type ChatTurn, type Citation } from '../api/chat';
+import { streamChat, type ChatStatusKey, type ChatTurn, type Citation } from '../api/chat';
 import { fetchInsightById } from '../api/insights';
 import { parseAnswer } from './chatAnswer';
 import styles from './ChatWidget.module.css';
@@ -15,6 +15,11 @@ interface Message {
   // nhãn, vì người dùng đang ở scope "Bài đang xem" mà câu trả lời lại đến từ tin khác —
   // không nói ra thì trông như bot bịa từ bài đang mở.
   expanded?: boolean;
+  /**
+   * HTML Search Suggestions của Google, chỉ có khi lượt đó CÓ tra cứu ngoài. Hiển thị là
+   * yêu cầu tuân thủ điều khoản Grounding with Google Search, không phải tuỳ chọn.
+   */
+  searchSuggestions?: string | null;
 }
 
 /** Một tin trong working set — chỉ cần id để gửi lên và title để hiển thị. */
@@ -41,7 +46,46 @@ const NETWORK_MESSAGE = 'Không gửi được câu hỏi. Kiểm tra kết nố
  */
 interface Pending {
   text: string;
-  status: string | null;
+  /** Các mốc tiến trình đã nhận, theo thứ tự đến. Mốc CUỐI là mốc đang chạy. */
+  steps: Step[];
+}
+
+/** Một mốc tiến trình đã hiện trên khối chờ. */
+interface Step {
+  key: ChatStatusKey;
+  text: string;
+}
+
+/**
+ * Trần số dòng mốc hiện cùng lúc. Vượt thì bỏ dòng CŨ NHẤT — panel chat hẹp, và mốc cũ nhất
+ * là mốc ít liên quan nhất tới việc người dùng đang chờ.
+ */
+const MAX_STEPS = 4;
+
+/** Tên miền của một URL, để nhãn nguồn web nói rõ nó đến từ đâu. URL hỏng thì trả rỗng. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Gộp một mốc mới vào danh sách: cùng `key` thì CẬP NHẬT TẠI CHỖ, khác thì thêm dòng.
+ *
+ * Phân biệt bằng `key` chứ không bằng `text` vì `text` mang số liệu của lượt — mốc `reading`
+ * phát lần đầu là câu chung chung, phát lần hai là tên tin thật, và đó vẫn là MỘT mốc.
+ * `key` lạ (server mới hơn client) vẫn được thêm như dòng mới, không bao giờ bị nuốt.
+ */
+function mergeStep(steps: Step[], key: ChatStatusKey, text: string): Step[] {
+  const at = steps.findIndex((s) => s.key === key);
+  if (at !== -1) {
+    const next = [...steps];
+    next[at] = { key, text };
+    return next;
+  }
+  return [...steps, { key, text }].slice(-MAX_STEPS);
 }
 
 export default function ChatWidget() {
@@ -115,23 +159,37 @@ export default function ChatWidget() {
 
   /** Marker `[n]` → link tới insight mang đúng `n` đó, và bấm vào thì tin vào ngữ cảnh. */
   function renderAnswer(content: string, citations: Citation[]) {
-    return parseAnswer(content, citations).map((segment, idx) =>
-      segment.citation ? (
+    return parseAnswer(content, citations).map((segment, idx) => {
+      const cite = segment.citation;
+      if (!cite) return <span key={idx}>{segment.text}</span>;
+      // Marker trỏ nguồn WEB mở ra ngoài: nó không có trang chi tiết, và nó KHÔNG vào
+      // working set (working set là tập insight để rót vào ô sâu — một URL không rót được).
+      if (cite.kind === 'web' || !cite.insight_id) {
+        return (
+          <a
+            key={idx}
+            href={cite.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.marker}
+            title={cite.title}
+          >
+            {segment.text}
+          </a>
+        );
+      }
+      return (
         <Link
           key={idx}
-          to={`/insights/${segment.citation.insight_id}`}
+          to={`/insights/${cite.insight_id}`}
           className={styles.marker}
-          title={segment.citation.title}
-          onClick={() =>
-            addRef({ id: segment.citation!.insight_id, title: segment.citation!.title })
-          }
+          title={cite.title}
+          onClick={() => addRef({ id: cite.insight_id!, title: cite.title })}
         >
           {segment.text}
         </Link>
-      ) : (
-        <span key={idx}>{segment.text}</span>
-      ),
-    );
+      );
+    });
   }
 
   function send(question: string) {
@@ -151,17 +209,22 @@ export default function ChatWidget() {
       .map((m) => ({
         role: m.role,
         content: m.content,
-        citations: m.citations?.map((c) => ({
-          n: c.n,
-          title: c.title,
-          insight_id: c.insight_id,
-        })),
+        // Chỉ gửi lại nguồn INSIGHT: `insight_id` ở đây tồn tại để server ghim tin đã bàn vào
+        // ngữ cảnh lượt sau, mà nguồn web thì không ghim được (ô sâu nhận insight, không nhận
+        // URL) và nó cũng đã hết vòng đời cùng lượt hỏi sinh ra nó.
+        citations: m.citations
+          ?.filter((c) => c.kind !== 'web' && c.insight_id)
+          .map((c) => ({
+            n: c.n,
+            title: c.title,
+            insight_id: c.insight_id as string,
+          })),
       }));
     const refs = workingSet.map((r) => r.id);
 
     setMessages((prev) => [...prev, { role: 'user', content: trimmed }]);
     setInput('');
-    setPending({ text: '', status: null });
+    setPending({ text: '', steps: [] });
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -184,8 +247,12 @@ export default function ChatWidget() {
         referenced_insight_ids: refs,
       },
       {
-        onStatus: (text) =>
-          setPending((p) => (p && !controller.signal.aborted ? { ...p, status: text } : p)),
+        onStatus: (key, text) =>
+          setPending((p) =>
+            p && !controller.signal.aborted
+              ? { ...p, steps: mergeStep(p.steps, key, text) }
+              : p,
+          ),
         onToken: (text) =>
           setPending((p) =>
             p && !controller.signal.aborted ? { ...p, text: p.text + text } : p,
@@ -198,6 +265,7 @@ export default function ChatWidget() {
             content: data.answer,
             citations: data.citations,
             expanded: data.mode === 'expanded',
+            searchSuggestions: data.search_suggestions,
           }),
         onError: (code, message) =>
           settle({
@@ -292,19 +360,47 @@ export default function ChatWidget() {
                   {/* Số ở đây phải KHỚP marker trong câu (`citation.n`), không tự đánh lại
                       thành [1..N]: đánh lại tạo hệ quy chiếu thứ hai cho `n` — đúng thứ vừa
                       gây ra lỗi trỏ sai. Inline nói [12] thì list cũng phải nói [12]. */}
-                  {message.citations.map((citation) => (
-                    <Link
-                      key={citation.insight_id}
-                      to={`/insights/${citation.insight_id}`}
-                      className={styles.citationLink}
-                      onClick={() =>
-                        addRef({ id: citation.insight_id, title: citation.title })
-                      }
-                    >
-                      [{citation.n}] {citation.title}
-                    </Link>
-                  ))}
+                  {message.citations.map((citation) =>
+                    /* Nguồn WEB hiển thị khác hẳn nguồn hệ thống: tin trong hệ thống đã qua
+                       phân tích và chấm tin cậy, trang web thì chưa. Trộn chung một kiểu là
+                       để người dùng gán nhầm mức tin cậy. Nó cũng không có trang chi tiết để
+                       điều hướng tới, và KHÔNG vào working set — working set là tập insight. */
+                    citation.kind === 'web' ? (
+                      <a
+                        key={`web-${citation.n}`}
+                        href={citation.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={styles.citationWeb}
+                      >
+                        [{citation.n}] 🌐 {citation.title}
+                        <span className={styles.citationDomain}>
+                          {hostOf(citation.source_url)}
+                        </span>
+                      </a>
+                    ) : (
+                      <Link
+                        key={citation.insight_id ?? `n-${citation.n}`}
+                        to={`/insights/${citation.insight_id}`}
+                        className={styles.citationLink}
+                        onClick={() =>
+                          citation.insight_id &&
+                          addRef({ id: citation.insight_id, title: citation.title })
+                        }
+                      >
+                        [{citation.n}] {citation.title}
+                      </Link>
+                    ),
+                  )}
                 </div>
+              )}
+              {/* Bắt buộc theo điều khoản Google khi câu trả lời dùng Grounding with
+                  Google Search. HTML do Google cấp, render nguyên trạng. */}
+              {message.searchSuggestions && (
+                <div
+                  className={styles.searchSuggestions}
+                  dangerouslySetInnerHTML={{ __html: message.searchSuggestions }}
+                />
               )}
               {message.isError && (
                 <button type="button" className={styles.retryBtn} onClick={retryLast}>
@@ -322,8 +418,26 @@ export default function ChatWidget() {
           <div className={styles.bubbleBot}>
             {pending.text ? (
               renderAnswer(pending.text, [])
+            ) : pending.steps.length === 0 ? (
+              <span className={styles.status}>Đang gửi câu hỏi…</span>
             ) : (
-              <span className={styles.status}>{pending.status ?? 'Đang gửi câu hỏi…'}</span>
+              /* XẾP CHỒNG, không ghi đè: mốc đã qua ở lại (mờ + ✓) để người dùng thấy CHUỖI
+                 việc server đã làm, thay vì một dòng nhấp nháy rồi biến mất. Không có thanh
+                 tiến trình % — ta không biết còn bao lâu (85% thời gian nằm ở lượt gọi
+                 model), mà một thanh chạy sai là một lời hứa sai. */
+              <ul className={styles.statusList}>
+                {pending.steps.map((step, i) => {
+                  const current = i === pending.steps.length - 1;
+                  return (
+                    <li
+                      key={step.key}
+                      className={current ? styles.statusCurrent : styles.statusDone}
+                    >
+                      <span aria-hidden="true">{current ? '⟳' : '✓'}</span> {step.text}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
         )}

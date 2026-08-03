@@ -282,42 +282,37 @@ thực sự tốn tiền.
 mở rộng phạm vi sang toàn hệ thống thay vì trả lời cụt. Cơ chế: lượt gọi model ở chế độ per‑insight SHALL
 được hướng dẫn phát một **sentinel văn bản thuần đã định nghĩa** khi (và chỉ khi) câu hỏi nằm ngoài phạm vi
 bài; service phát hiện sentinel SHALL dựng **context mở rộng** gồm insight của bài đang xem **cộng** index
-toàn cục đã xếp hạng (tái dùng đúng retrieval do server điều khiển của chế độ toàn cục), rồi gọi model **lần
-thứ hai** để trả lời.
+toàn cục đã xếp hạng, rồi gọi model **lần thứ hai** để trả lời.
 
-Câu trả lời mở rộng SHALL nêu rõ rằng đã tìm trên toàn hệ thống (không chỉ bài đang xem), citation SHALL lấy
-từ bảng ánh xạ `[n]` của index toàn cục, và `mode` SHALL là `"expanded"`. Tổng số **bước trả lời** cho một câu hỏi
-SHALL KHÔNG vượt quá 2. Một bước MAY tiêu nhiều hơn một lượt gọi tính tiền khi câu trả lời bị
-cắt và phải hỏi lại; trần áp lên số bước, còn bộ đếm budget SHALL ghi số lượt thực đã tốn tiền. Service SHALL KHÔNG dùng `response_schema` để phát/đọc sentinel. Sentinel SHALL
-được phát **dè dặt**: câu hỏi còn trả lời được dù chỉ một phần từ nội dung bài SHALL KHÔNG kích hoạt mở rộng.
+Câu trả lời mở rộng SHALL nêu rõ rằng đã tìm trên toàn hệ thống, citation SHALL lấy từ bảng ánh xạ `[n]` của
+index toàn cục, và `mode` SHALL là `"expanded"`. Service SHALL KHÔNG dùng `response_schema` để phát/đọc
+sentinel. Sentinel SHALL được phát **dè dặt**: câu hỏi còn trả lời được dù chỉ một phần từ nội dung bài
+SHALL KHÔNG kích hoạt mở rộng.
 
 Service SHALL KHÔNG dùng một lượt gọi model riêng chỉ để phân loại phạm vi; tín hiệu ngoài‑phạm‑vi SHALL là
 kết quả của chính lượt gọi trả lời per‑insight.
 
-#### Scenario: Câu hỏi nằm trong phạm vi bài
-- **WHEN** người dùng đang mở một insight và hỏi một câu trả lời được từ nội dung bài
-- **THEN** service trả lời ở chế độ per‑insight với đúng 1 lượt gọi model, `mode="insight"`, không mở rộng
+Tổng số **bước trả lời** cho một câu hỏi SHALL KHÔNG vượt quá **3** (trước đây là 2; bước thứ ba dành cho
+đường tra cứu ngoài). Một bước MAY tiêu nhiều hơn một lượt gọi tính tiền khi câu trả lời bị cắt và phải hỏi
+lại; trần áp lên số bước, còn bộ đếm budget SHALL ghi số lượt thực đã tốn tiền. Bước **tải nội dung trang
+web** SHALL KHÔNG tính là một bước trả lời.
 
-#### Scenario: Câu hỏi vượt phạm vi bài
-- **WHEN** người dùng đang mở insight B và hỏi về một chủ đề chỉ có ở insight khác trong hệ thống
-- **THEN** lượt gọi per‑insight phát sentinel, service dựng context mở rộng (insight B + index toàn cục) và gọi model lần hai
-- **AND** câu trả lời nêu rõ đã tìm toàn hệ thống, `citations` lấy từ index toàn cục, `mode="expanded"`, tổng 2 lượt gọi
+Đường mở rộng phạm vi và đường tra cứu ngoài SHALL loại trừ nhau trong cùng một lượt: chế độ per‑insight
+SHALL KHÔNG phát sentinel tra cứu ngoài.
 
-#### Scenario: Mở rộng nhưng toàn hệ thống cũng không có
-- **WHEN** câu hỏi vượt phạm vi bài và index toàn cục cũng không có tin nào khớp
-- **THEN** service trả lời trung thực rằng không tìm thấy trong toàn hệ thống, `citations` rỗng, không bịa từ bài đang xem
+Chạm trần SHALL KHÔNG bao giờ thoát ra thành lỗi HTTP 500.
 
-#### Scenario: Trần hai bước trả lời
-- **WHEN** một câu hỏi kích hoạt mở rộng
-- **THEN** service dùng đúng 2 bước (per‑insight + toàn cục) và SHALL KHÔNG thực hiện bước thứ ba; khi không bước nào bị cắt, `chat_logs` ghi `model_calls=2`
+#### Scenario: Câu hỏi cần mở rộng rồi cần tra cứu
+- **WHEN** câu hỏi ở chế độ per-insight không trả lời được và sau khi mở rộng vẫn thiếu dữ kiện
+- **THEN** lượt mở rộng là nơi phát sentinel tra cứu, và tổng số bước không vượt 3
 
-#### Scenario: Một bước phải hỏi lại vì câu trả lời bị cắt
-- **WHEN** một câu hỏi kích hoạt mở rộng và một trong hai bước bị cắt nên phải hỏi lại
-- **THEN** service vẫn hoàn tất đủ hai bước (KHÔNG lỗi vì chạm trần) và `chat_logs` ghi đúng số lượt đã tốn tiền, lớn hơn 2
+#### Scenario: Chế độ per-insight
+- **WHEN** người dùng hỏi trong phạm vi một bài
+- **THEN** chỉ sentinel ngoài-phạm-vi được phép phát, sentinel tra cứu ngoài SHALL KHÔNG phát
 
-#### Scenario: Sentinel phát dè dặt
-- **WHEN** câu hỏi trả lời được một phần từ nội dung bài
-- **THEN** lượt gọi per‑insight SHALL trả lời trực tiếp và SHALL KHÔNG phát sentinel, không phát sinh lượt gọi mở rộng
+#### Scenario: Chạm trần
+- **WHEN** một lượt chạm trần số bước
+- **THEN** người dùng nhận được câu trả lời hoặc câu từ chối hợp lệ, không phải lỗi máy chủ
 
 ### Requirement: Trục xếp hạng theo vai trò nhận diện vai trò theo biên từ
 
@@ -761,4 +756,95 @@ Ranh giới tin cậy không đổi so với `referenced_insight_ids`: client c�
 #### Scenario: Định danh trỏ insight chưa publish
 - **WHEN** định danh trỏ một insight chưa `published`
 - **THEN** insight đó SHALL KHÔNG được ghim vào ngữ cảnh
+
+### Requirement: Sự kiện tiến trình mang định danh mốc ổn định
+
+Mỗi sự kiện `status` trên luồng SSE SHALL mang một trường `key` thuộc **tập đóng** các mốc
+pipeline, tách bạch khỏi chuỗi hiển thị `text`.
+
+Tập đóng SHALL được khai báo tại **một chỗ duy nhất** và dùng chung giữa backend và frontend.
+Sửa câu chữ tiếng Việt của `text` SHALL KHÔNG làm đổi hành vi render của client.
+
+Đường blocking (`POST /api/v1/chat`, không có `emit`) SHALL không đổi hành vi: không sự kiện
+nào được phát, payload trả về giữ nguyên.
+
+#### Scenario: Hai mốc khác nhau trong cùng một lượt
+- **WHEN** pipeline đi qua hai mốc khác nhau
+- **THEN** hai sự kiện `status` được phát với hai giá trị `key` khác nhau
+
+#### Scenario: Cùng một mốc phát lại với số liệu mới
+- **WHEN** cùng một mốc được phát lại trong một lượt
+- **THEN** sự kiện mang cùng `key` và client cập nhật tại chỗ thay vì thêm dòng mới
+
+#### Scenario: Đường blocking
+- **WHEN** client gọi `POST /api/v1/chat`
+- **THEN** không sự kiện `status` nào được phát và câu trả lời giống hệt trước change này
+
+### Requirement: Status phát từ mốc thật và mang số liệu của lượt
+
+Service SHALL phát status tại các mốc **thực sự xảy ra** trong pipeline, và mỗi mốc SHALL mang
+dữ liệu chỉ đúng cho lượt đó khi dữ liệu đó tồn tại.
+
+Service SHALL KHÔNG phát status theo bộ đếm thời gian, SHALL KHÔNG xoay vòng các cách diễn đạt
+đồng nghĩa cho cùng một mốc, và SHALL KHÔNG phát tiến trình dạng phần trăm.
+
+Ngoài các mốc đã có, service SHALL phát thêm:
+
+- **`ranked`** — sau khi xếp hạng xong, mang số tin khớp và tổng số tin được xét.
+- **`pinned`** — khi tập tin ghim từ lịch sử hội thoại khác rỗng, mang tiêu đề tin ghim.
+- **`retrying`** — trước khi thực hiện lượt hỏi lại do câu trả lời bị cắt.
+
+#### Scenario: Câu hỏi toàn cục
+- **WHEN** người dùng hỏi một câu tra cứu toàn cục
+- **THEN** mốc `ranked` được phát sau khi xếp hạng xong, mang số tin khớp thật của lượt đó
+
+#### Scenario: Chưa có số liệu thì chưa phát
+- **WHEN** ứng viên đã nạp từ DB nhưng chưa xếp hạng
+- **THEN** mốc `ranked` SHALL chưa được phát
+
+#### Scenario: Lượt có tin ghim từ lịch sử
+- **WHEN** lịch sử hội thoại làm ít nhất một tin được ghim vào ngữ cảnh lượt hiện tại
+- **THEN** mốc `pinned` được phát kèm tiêu đề tin ghim
+
+#### Scenario: Cơ chế ghim bị tắt
+- **WHEN** `chat_history_pin_slots = 0` hoặc lịch sử rỗng
+- **THEN** mốc `pinned` SHALL KHÔNG được phát
+
+#### Scenario: Câu trả lời bị cắt và phải hỏi lại
+- **WHEN** lượt gọi model kết thúc vì chạm trần token và service thực hiện lượt hỏi lại
+- **THEN** mốc `retrying` được phát **trước** lượt hỏi lại
+
+#### Scenario: Câu trả lời không bị cắt
+- **WHEN** lượt gọi model kết thúc bình thường
+- **THEN** mốc `retrying` SHALL KHÔNG được phát
+
+### Requirement: Phát status không làm thay đổi nội dung câu trả lời
+
+Việc phát status SHALL KHÔNG đụng tới xếp hạng, dựng ngữ cảnh, grounding, hay bất kỳ thành
+phần nào quyết định nội dung câu trả lời. `build_context()` SHALL vẫn là **hàm thuần**: không
+I/O, không phát sự kiện.
+
+#### Scenario: Bộ đo xếp hạng không đổi
+- **WHEN** chạy lại RS harness sau change này
+- **THEN** kết quả trùng khít baseline trước change, không cần chốt lại
+
+### Requirement: Trả lời phần có căn cứ thay vì từ chối toàn bộ
+
+Khi câu hỏi gồm nhiều vế và ngữ cảnh chỉ đủ căn cứ cho một phần, service SHALL trả lời phần có
+căn cứ và SHALL nêu rõ phần còn thiếu, thay vì từ chối toàn bộ câu hỏi.
+
+Trước change này, một câu hỏi so sánh mà thiếu một vế sẽ mất luôn cả vế đã có đủ dữ liệu trong
+hệ thống.
+
+Yêu cầu này SHALL độc lập với việc tra cứu ngoài có bật hay không: khi tra cứu tắt, service vẫn
+phải trả lời phần có căn cứ.
+
+#### Scenario: Câu hỏi so sánh, thiếu một vế
+- **WHEN** người dùng hỏi so sánh giữa một chủ thể có dữ liệu và một chủ thể không có
+- **THEN** câu trả lời trình bày dữ liệu của chủ thể có, kèm marker nguồn, và nói rõ vế còn lại
+  không có trong hệ thống
+
+#### Scenario: Không vế nào có căn cứ
+- **WHEN** không phần nào của câu hỏi có căn cứ trong ngữ cảnh
+- **THEN** service SHALL từ chối như hiện nay, không bịa
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { streamChat, type ChatStreamHandlers } from '../chat';
+import { streamChat, LEGACY_STATUS_KEY, type ChatStreamHandlers } from '../chat';
 
 // VÌ SAO TEST NÀY TỒN TẠI: ranh giới khung SSE và ranh giới chunk mạng là HAI thứ khác nhau.
 // TCP cắt ở đâu là chuyện của TCP — một khung có thể đến làm ba mảnh, và ba khung có thể đến
@@ -30,7 +30,7 @@ function mockFetch(chunks: string[], init: Partial<Response> = {}) {
 function collector() {
   const events: string[] = [];
   const handlers: ChatStreamHandlers = {
-    onStatus: (t) => events.push(`status:${t}`),
+    onStatus: (k, t) => events.push(`status:${k}:${t}`),
     onToken: (t) => events.push(`token:${t}`),
     onCommit: (d) => events.push(`commit:${d.answer}|${d.mode}|${d.citations.length}`),
     onError: (c, m) => events.push(`error:${c}:${m}`),
@@ -39,7 +39,7 @@ function collector() {
 }
 
 const FRAMES = [
-  'event: status\ndata: {"text":"Đang tìm trong hệ thống…"}\n\n',
+  'event: status\ndata: {"key":"searching","text":"Đang tìm trong hệ thống…"}\n\n',
   'event: token\ndata: {"text":"Có lỗ hổng "}\n\n',
   'event: token\ndata: {"text":"OpenSSL [1]."}\n\n',
   'event: commit\ndata: {"answer":"Có lỗ hổng OpenSSL [1].","citations":[{"n":1,"insight_id":"x","title":"t","source_url":"u"}],"mode":"global"}\n\n',
@@ -61,11 +61,22 @@ describe('streamChat — tách khung SSE', () => {
     await streamChat({ question: 'q', history: [] }, handlers);
 
     expect(events).toEqual([
-      'status:Đang tìm trong hệ thống…',
+      'status:searching:Đang tìm trong hệ thống…',
       'token:Có lỗ hổng ',
       'token:OpenSSL [1].',
       'commit:Có lỗ hổng OpenSSL [1].|global|1',
     ]);
+  });
+
+  it('status của server CŨ (không có `key`) vẫn tới được handler', async () => {
+    // Triển khai thuận: server chưa cập nhật thì `key` vắng mặt. Gộp về một key sentinel để
+    // mọi mốc như vậy cập nhật tại chỗ — đúng hành vi một-dòng-bị-ghi-đè trước change.
+    mockFetch(['event: status\ndata: {"text":"Đang tìm…"}\n\n']);
+    const { events, handlers } = collector();
+
+    await streamChat({ question: 'q', history: [] }, handlers);
+
+    expect(events).toEqual([`status:${LEGACY_STATUS_KEY}:Đang tìm…`]);
   });
 
   it('một khung đến làm nhiều mảnh vẫn ráp lại đúng', async () => {
@@ -78,7 +89,7 @@ describe('streamChat — tách khung SSE', () => {
     await streamChat({ question: 'q', history: [] }, handlers);
 
     expect(events).toEqual([
-      'status:Đang tìm trong hệ thống…',
+      'status:searching:Đang tìm trong hệ thống…',
       'token:Có lỗ hổng ',
       'token:OpenSSL [1].',
       'commit:Có lỗ hổng OpenSSL [1].|global|1',

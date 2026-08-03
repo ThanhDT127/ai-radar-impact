@@ -1987,9 +1987,122 @@
     "mở"
    ],
    "roles": []
+  },
+  {
+   "scenario_id": "glo-partial-nemotron-gemini",
+   "group": "partial_ground",
+   "mode": "global",
+   "question": "Thông số của NVIDIA Nemotron 3 Embed so với Gemini Embedding 2 thì khác nhau như nào?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "thông",
+    "số",
+    "nvidia",
+    "nemotron",
+    "embed",
+    "so",
+    "gemini",
+    "embedding",
+    "như"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-partial-nemotron-cohere",
+   "group": "partial_ground",
+   "mode": "global",
+   "question": "Nên chọn Nemotron 3 Embed hay Cohere Embed cho hệ thống RAG của team?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "chọn",
+    "nemotron",
+    "embed",
+    "cohere",
+    "embed",
+    "rag"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-partial-turbovec-pinecone",
+   "group": "partial_ground",
+   "mode": "global",
+   "question": "turbovec khác gì Pinecone về cách lưu vector?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "turbovec",
+    "pinecone",
+    "cách",
+    "lưu",
+    "vector"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-partial-euact-nd13",
+   "group": "partial_ground",
+   "mode": "global",
+   "question": "EU AI Act đặt ra yêu cầu gì, còn Nghị định 13 của Việt Nam thì quy định thế nào?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 3,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "eu",
+    "act",
+    "đặt",
+    "yêu",
+    "cầu",
+    "nghị",
+    "định",
+    "13",
+    "việt",
+    "nam",
+    "quy",
+    "định"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "glo-partial-embed-pricing",
+   "group": "partial_ground",
+   "mode": "global",
+   "question": "Nemotron 3 Embed có mấy biến thể, và giá API của text-embedding-3 là bao nhiêu?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "nemotron",
+    "embed",
+    "mấy",
+    "biến",
+    "thể",
+    "giá",
+    "api",
+    "text",
+    "embedding",
+    "bao",
+    "nhiêu"
+   ],
+   "roles": []
   }
  ],
- "overall": 0.9735294117647059,
- "overall_at_answer": 0.8813725490196079,
- "questions_scored": 85
+ "overall": 0.975,
+ "overall_at_answer": 0.8879629629629631,
+ "questions_scored": 90
 }

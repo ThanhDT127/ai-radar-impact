@@ -85,32 +85,51 @@ hai bài đều nằm trong ngữ cảnh thì mâu thuẫn đó không còn tồ
 
 ### Requirement: Render câu trả lời theo luồng với trạng thái tiến trình
 
-Widget SHALL tiêu thụ endpoint streaming và render câu trả lời **tăng dần** khi token đến, thay cho việc chờ
-trọn câu rồi hiện một lần. Trong lúc chờ, widget SHALL hiển thị **trạng thái tiến trình** do server phát (ví
-dụ đang tìm trong hệ thống, đang tìm toàn hệ thống) thay cho một spinner đơn.
+Widget SHALL tiêu thụ endpoint streaming và render câu trả lời **tăng dần** khi token đến.
+Khi nhận sự kiện chốt, widget SHALL gắn danh sách citation vào câu trả lời; nếu sự kiện chốt là
+fail‑closed, widget SHALL **thay** phần text đã stream bằng nội dung không‑đủ‑căn‑cứ. Widget
+SHALL vô hiệu hoá nút gửi trong khi một câu trả lời đang stream.
 
-Khi nhận sự kiện chốt, widget SHALL gắn danh sách citation vào câu trả lời; nếu sự kiện chốt là fail‑closed,
-widget SHALL **thay** phần text đã stream bằng nội dung không‑đủ‑căn‑cứ, KHÔNG giữ lại text ungrounded. Widget
-SHALL vô hiệu hoá nút gửi trong khi một câu trả lời đang stream để tránh gửi trùng.
+Trong lúc chờ, widget SHALL hiển thị các mốc tiến trình dưới dạng **danh sách tích luỹ**: mốc
+đã qua giữ lại ở dạng mờ kèm dấu hoàn thành, mốc hiện tại hiển thị nổi bật.
 
-Nếu người dùng đổi scope hoặc rời ngữ cảnh trong khi một câu trả lời đang stream, widget SHALL huỷ luồng đang
-chạy và SHALL KHÔNG nhập phần text dở vào luồng hội thoại của scope mới.
+Trước đây widget hiển thị **một dòng duy nhất bị ghi đè** mỗi khi có mốc mới, nên người dùng
+không thấy được chuỗi việc đã diễn ra.
 
-#### Scenario: Câu trả lời chảy dần kèm trạng thái
-- **WHEN** người dùng gửi câu hỏi và server đang xử lý
-- **THEN** widget hiện trạng thái tiến trình rồi các phần câu trả lời xuất hiện dần, và citations gắn vào khi luồng chốt
+Widget SHALL phân biệt mốc bằng trường `key` của sự kiện, KHÔNG bằng cách so sánh chuỗi hiển
+thị — chuỗi mang số liệu nên hai lần phát cùng một mốc luôn khác nhau.
 
-#### Scenario: Fail‑closed hoán text
-- **WHEN** sự kiện chốt báo câu trả lời không đủ căn cứ
-- **THEN** widget thay phần đã stream bằng thông báo không‑đủ‑căn‑cứ, không để lại nội dung ungrounded
+Widget SHALL hiển thị tối đa **4** dòng; vượt quá thì bỏ dòng cũ nhất.
 
-#### Scenario: Đổi scope khi đang stream
-- **WHEN** người dùng đổi insight hoặc chuyển scope trong khi câu trả lời đang stream
-- **THEN** widget huỷ luồng đang chạy và luồng hội thoại của scope mới không chứa phần text dở
+Widget SHALL KHÔNG hiển thị thanh tiến trình dạng phần trăm hay ước lượng thời gian còn lại.
 
-#### Scenario: Chống gửi trùng khi đang stream
-- **WHEN** một câu trả lời đang được stream
-- **THEN** nút gửi bị vô hiệu hoá cho tới khi luồng kết thúc
+#### Scenario: Nhiều mốc khác nhau đến trong một lượt
+- **WHEN** luồng SSE phát nhiều sự kiện `status` với `key` khác nhau
+- **THEN** mỗi mốc hiện thành một dòng riêng, các dòng trước vẫn thấy được ở dạng mờ
+
+#### Scenario: Cùng một mốc được phát lại
+- **WHEN** hai sự kiện `status` có cùng `key`
+- **THEN** dòng tương ứng được cập nhật tại chỗ, không sinh dòng trùng
+
+#### Scenario: Vượt trần số dòng
+- **WHEN** số mốc trong một lượt vượt quá 4
+- **THEN** widget hiện 4 mốc gần nhất và bỏ dòng cũ nhất
+
+#### Scenario: Câu trả lời được chốt
+- **WHEN** sự kiện `commit` tới
+- **THEN** toàn bộ khối tiến trình biến mất, chỉ còn câu trả lời cuối
+
+#### Scenario: Chưa có mốc nào
+- **WHEN** người dùng vừa bấm Gửi và chưa có sự kiện `status` nào
+- **THEN** widget hiển thị dòng chờ mặc định
+
+#### Scenario: Server cũ không gửi `key`
+- **WHEN** sự kiện `status` không mang `key`
+- **THEN** widget vẫn hiển thị `text` và không báo lỗi
+
+#### Scenario: `key` không nằm trong tập widget biết
+- **WHEN** sự kiện `status` mang một `key` widget chưa biết
+- **THEN** widget vẫn hiện nó như một dòng mới, KHÔNG bỏ qua
 
 ### Requirement: Working set insight hiển thị và sửa được
 
@@ -142,3 +161,36 @@ Actor: người dùng dashboard. Tiền điều kiện: widget đang mở.
 #### Scenario: Working set thay cho định danh bài đang xem
 - **WHEN** người dùng đang ở trang chi tiết một insight và working set không rỗng
 - **THEN** câu hỏi gửi lên mang working set và KHÔNG mang định danh bài đang xem theo cơ chế cũ
+
+### Requirement: Nguồn web hiển thị phân biệt được với nguồn hệ thống
+
+Widget SHALL hiển thị citation trỏ tới nguồn web khác biệt rõ với citation trỏ tới tin trong
+hệ thống, tối thiểu bằng tên miền và một liên kết mở ra ngoài.
+
+Lý do: tin trong hệ thống đã qua phân tích và chấm điểm tin cậy; nguồn web thì chưa. Trộn hai
+loại vào cùng một kiểu hiển thị là để người dùng gán nhầm mức tin cậy.
+
+Widget SHALL giải marker `[n]` bằng cách **tra theo trường `n`** trong danh sách citation, áp
+dụng cho cả hai loại nguồn — KHÔNG dùng vị trí trong mảng.
+
+#### Scenario: Câu trả lời trích cả hai loại nguồn
+- **WHEN** câu trả lời chứa marker trỏ tới cả tin hệ thống và nguồn web
+- **THEN** mỗi marker giải đúng nguồn của nó, và hai loại hiển thị phân biệt được
+
+#### Scenario: Marker không liền mạch
+- **WHEN** các marker trong câu trả lời không bắt đầu từ 1 hoặc bị ngắt quãng
+- **THEN** mọi marker vẫn giải đúng nguồn theo `n`
+
+### Requirement: Khối Search Suggestions
+
+Khi câu trả lời có dùng tra cứu ngoài, widget SHALL hiển thị khối Search Suggestions do nhà
+cung cấp trả về, kèm câu trả lời.
+
+#### Scenario: Có tra cứu
+- **WHEN** phản hồi mang dữ liệu Search Suggestions
+- **THEN** widget hiển thị khối đó
+
+#### Scenario: Không tra cứu
+- **WHEN** phản hồi không mang dữ liệu Search Suggestions
+- **THEN** widget không hiển thị khối nào và bố cục không đổi
+

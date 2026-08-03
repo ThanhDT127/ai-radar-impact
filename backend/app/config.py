@@ -149,6 +149,30 @@ class Settings(BaseSettings):
     # MỘT điểm dữ liệu trên corpus 179 tin, không phải hằng số của hệ thống.
     chat_history_pin_slots: int = 3
 
+    # --- Tra cứu ngoài khi corpus thiếu dữ kiện (chat-web-fallback) --------------------
+    # Mặc định TẮT: đây là đường duy nhất trong chat tiêu tiền theo một đơn giá khác hẳn, và
+    # nó mở nội dung web lạ vào prompt. Bật lên chỉ sau khi có số tỉ lệ sentinel giả (task 9.2).
+    # Tắt ⇒ prompt không mang luật sentinel web, pipeline y hệt trước change.
+    chat_web_fallback_enabled: bool = False
+    # Đơn vị: TRUY VẤN tra cứu. Cố ý TÁCH khỏi `max_daily_chat_calls` (đơn vị: lượt gọi model)
+    # — cùng lập luận đã dùng cho lượt embed và bộ phân loại ý định tầng 2: hai thứ có đơn giá
+    # cách nhau bậc thì trộn chung bộ đếm là để loại rẻ bào mòn budget của loại đắt.
+    # Đo 03/08/2026: grounding $35/1.000 truy vấn (Gemini 2.x) so với ~$0,006 cho cả một câu
+    # trả lời ⇒ một lần tra cứu ≈ 6× toàn bộ câu trả lời.
+    max_daily_web_searches: int = 50
+    # Số nguồn web tối đa rót vào context một lượt. Đây là CẮT BẮT BUỘC, không phải phòng xa:
+    # đo 03/08, grounding trả về 9–10 `grounding_chunks` cho một truy vấn kỹ thuật thường.
+    chat_web_max_sources: int = 3
+    # Model cho BƯỚC TRA CỨU (bước 2). Spike 0.2 xác nhận flash-lite lái được `google_search`
+    # và cho `grounding_chunks` + `search_entry_point` không kém flash — mà bước đó chỉ cần
+    # tìm nguồn, không cần viết văn. Giá grounding tính theo TRUY VẤN nên không đổi; phần
+    # token thì rẻ hơn một bậc.
+    chat_web_search_model_id: str = "gemini-2.5-flash-lite"
+    # Trần thời gian cho MỘT uri (giải chuyển hướng + tải + trích xuất). Đo 03/08: giải
+    # chuyển hướng 0,5–2,1s, tải + trích xuất thêm 0,2–1,6s. Chạy song song nên trần này là
+    # cho từng nguồn, không phải cho cả cụm.
+    chat_web_fetch_timeout_seconds: float = 8.0
+
     # Admin API
     admin_api_key: str = "changeme"
 

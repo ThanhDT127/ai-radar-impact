@@ -4,13 +4,18 @@ import json
 import logging
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 
 from google import genai
 from google.genai import types
 
-from app.ai.prompts import ALLOWED_CONTENT_TYPES, build_gate_prompt, build_prompt
+from app.ai.prompts import (
+    ALLOWED_CONTENT_TYPES,
+    WEB_SEARCH_PROMPT,
+    build_gate_prompt,
+    build_prompt,
+)
 from app.ai.schemas import build_gate_schema
 from app.config import settings
 from app.models.insight import EMBEDDING_DIM
@@ -131,6 +136,67 @@ def _chat_generation_config(system_prompt: str) -> types.GenerateContentConfig:
     return config
 
 
+# Sàn `thinking_budget` của model bước tra cứu. KHÔNG phải con số tuỳ chọn: Vertex từ chối
+# thẳng (400) mọi giá trị dưới 512 cho `gemini-2.5-flash-lite`. Xem `_web_search_generation_config`.
+WEB_SEARCH_MIN_THINKING = 512
+
+
+def _web_search_generation_config() -> types.GenerateContentConfig:
+    """Cấu hình BƯỚC TRA CỨU (`chat-web-fallback` bước 2) — dựng cạnh `_chat_generation_config`.
+
+    Đặt ở đây, ngay cạnh cấu hình chat, là có chủ đích: hai lượt gọi cùng thuộc đường phục vụ
+    người dùng và cùng chịu luật ghìm `thinking_budget`. Để cấu hình này lạc sang module khác
+    là cách chắc chắn để một hôm nào đó chỉ một trong hai được chỉnh.
+
+    KHÁC `_chat_generation_config` đúng hai điểm, cả hai đều bắt buộc:
+    - có `tools=[google_search]` — không có nó thì không có grounding, và đó là toàn bộ lý do
+      bước này tồn tại;
+    - **không** `system_instruction` — bước này KHÔNG trả lời người dùng, nên nó không được
+      mang luật trích dẫn/độ dài của trợ lý. Output của nó chỉ là tư liệu nội bộ.
+
+    Vẫn KHÔNG `response_schema` (bài học `gemini-structured-output`).
+
+    ⚠️ **SÀN 512 — `chat_thinking_budget` KHÔNG chuyển thẳng sang được.** Đo 03/08/2026:
+    `gemini-2.5-flash-lite` chỉ nhận `thinking_budget` trong khoảng **512–24576**, nên mức ghìm
+    256 của đường chat làm Vertex trả `400 INVALID_ARGUMENT`. Mà `search_web()` nuốt lỗi (đúng
+    thiết kế — tra cứu là tính năng bổ trợ), nên hậu quả là tính năng **chết hoàn toàn trong
+    im lặng**: mọi câu đều "không tra cứu được", không có gì đỏ ở đâu cả.
+
+    Đừng đọc bài học này thành "bỏ ghìm cho xong": luật ghìm vẫn áp (bước này nằm trên đường
+    phục vụ người dùng), chỉ là **ngưỡng hợp lệ của mỗi họ model là khác nhau** và không được
+    giả định nó chuyển được.
+    """
+    config = types.GenerateContentConfig(
+        tools=[types.Tool(google_search=types.GoogleSearch())],
+        temperature=0.2,
+        max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
+    )
+    if settings.chat_thinking_budget >= 0:
+        config.thinking_config = types.ThinkingConfig(
+            thinking_budget=max(settings.chat_thinking_budget, WEB_SEARCH_MIN_THINKING)
+        )
+    return config
+
+
+@dataclass
+class WebSearchResult:
+    """Kết quả THÔ của bước tra cứu — chưa phải nguồn dùng được.
+
+    `uris` là link CHUYỂN HƯỚNG của Vertex, chưa giải; `summary` là bản model tự viết, chỉ
+    dùng làm phương án chót khi mọi trang đều tải hỏng (design D5). Việc biến những thứ này
+    thành `WebSource` là của tầng service — ở đó mới có `trafilatura`.
+    """
+
+    uris: list[str]
+    summary: str = ""
+    search_entry_point: str | None = None
+    queries: list[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.queries is None:
+            self.queries = []
+
+
 def _thinking_tokens(response) -> int | None:
     """Số token SUY LUẬN của một lượt gọi. `None` khi nhà cung cấp không báo cáo.
 
@@ -185,6 +251,11 @@ class ChatStreamState:
     # nhà cung cấp không báo cáo — xem `_thinking_tokens`. Dùng chung cho CẢ hai lối ra:
     # `chat()` cũng nhận `state` để bản blocking và bản streaming ghi cùng một loại sổ.
     thinking_tokens: int | None = None
+    # Gọi NGAY TRƯỚC lượt hỏi lại chống-cắt, để caller kịp báo cho người dùng biết vì sao
+    # phải chờ thêm một lượt gọi model nữa. Đồng bộ và phải KHÔNG NÉM: nó chạy giữa đường
+    # sinh câu trả lời, một lỗi ở kênh thông báo không được phép làm hỏng câu trả lời.
+    # `None` = không ai quan tâm (chế độ blocking, test cũ) ⇒ không gọi.
+    on_retry: Callable[[], None] | None = None
 
     def add_thinking(self, tokens: int | None) -> None:
         """Cộng dồn, giữ `None` nếu chưa từng có số nào — `None` và `0` KHÁC nhau ở đây:
@@ -192,6 +263,21 @@ class ChatStreamState:
         if tokens is None:
             return
         self.thinking_tokens = (self.thinking_tokens or 0) + tokens
+
+
+def _notify_retry(state: "ChatStreamState | None") -> None:
+    """Báo caller rằng sắp có một lượt hỏi lại. Nuốt mọi lỗi — có chủ đích.
+
+    Kênh này chỉ để thắp một dòng chữ trên giao diện. Nếu nó hỏng (event loop đã đóng vì
+    client ngắt, callback lỗi lập trình) thì việc đúng là ghi log rồi đi tiếp: người dùng
+    thà mất một mốc tiến trình còn hơn mất câu trả lời đã trả tiền để sinh ra.
+    """
+    if state is None or state.on_retry is None:
+        return
+    try:
+        state.on_retry()
+    except Exception as e:  # noqa: BLE001 — xem docstring
+        logger.debug("Không báo được mốc hỏi lại: %s", e)
 
 
 @dataclass
@@ -393,6 +479,7 @@ class GeminiClient:
             return text, calls
 
         logger.warning("Chat response truncated (MAX_TOKENS) — hỏi lại với ràng buộc độ dài")
+        _notify_retry(state)
         retry_text, retry_truncated, retry_calls = self._chat_once(
             system_prompt + _CONCISE_RETRY_DIRECTIVE, user_prompt, state
         )
@@ -409,6 +496,54 @@ class GeminiClient:
             return _trim_to_last_sentence(retry_text), calls
 
         return retry_text, calls
+
+    def search_web(self, query: str) -> WebSearchResult:
+        """Bước TRA CỨU: chạy Google Search qua grounding, lấy về **định danh nguồn**.
+
+        Trả `uris` (link chuyển hướng, chưa giải) + `summary` (bản model tự viết) +
+        `search_entry_point` (HTML bắt buộc hiển thị theo điều khoản Google).
+
+        ⚠️ Hàm này CỐ Ý không trả nội dung trang: `grounding_chunks[].web` chỉ có
+        `domain`/`title`/`uri`, **không có snippet** (xác minh trên SDK 1.75.0, spike 0.3).
+        Dùng `summary` làm nội dung là để citation trỏ tới một trang mà văn bản cạnh nó do
+        model viết — đúng chế độ hỏng "lời bịa có kèm nguồn" mà cả hệ thống này chống. Nội
+        dung thật do tầng service tải bằng trafilatura (design D1).
+
+        Lỗi Vertex KHÔNG nổ ra ngoài: tra cứu là tính năng bổ trợ, hỏng thì câu hỏi vẫn phải
+        được trả lời từ corpus. Trả kết quả rỗng để caller bỏ qua bước này.
+
+        SYNC như phần còn lại của client — caller phải bọc `asyncio.to_thread`.
+        """
+        try:
+            response = self._client.models.generate_content(
+                model=settings.chat_web_search_model_id,
+                contents=WEB_SEARCH_PROMPT.format(query=query),
+                config=_web_search_generation_config(),
+            )
+        except Exception as e:
+            logger.warning("Tra cứu ngoài lỗi, bỏ qua bước này: %s", e)
+            return WebSearchResult(uris=[])
+
+        candidates = getattr(response, "candidates", None) or []
+        meta = getattr(candidates[0], "grounding_metadata", None) if candidates else None
+        if meta is None:
+            # Model quyết định không cần tìm. Đo 03/08 (spike 0.1): không có lượt tìm nào
+            # chạy ⇒ nhiều khả năng cũng không bị tính tiền grounding.
+            logger.info("Model không chạy lượt tìm kiếm nào cho: %r", query[:80])
+            return WebSearchResult(uris=[], summary=(response.text or "").strip())
+
+        uris = [
+            c.web.uri
+            for c in (meta.grounding_chunks or [])
+            if getattr(c, "web", None) and c.web.uri
+        ]
+        entry = getattr(meta, "search_entry_point", None)
+        return WebSearchResult(
+            uris=uris,
+            summary=(response.text or "").strip(),
+            search_entry_point=getattr(entry, "rendered_content", None) if entry else None,
+            queries=list(meta.web_search_queries or []),
+        )
 
     def chat_stream(
         self, system_prompt: str, user_prompt: str, state: ChatStreamState
@@ -435,6 +570,7 @@ class GeminiClient:
             return
 
         logger.warning("Chat stream bị cắt (MAX_TOKENS) — hỏi lại với ràng buộc độ dài")
+        _notify_retry(state)
         retry_text, retry_truncated, retry_calls = self._chat_once(
             system_prompt + _CONCISE_RETRY_DIRECTIVE, user_prompt, state
         )

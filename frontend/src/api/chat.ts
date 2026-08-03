@@ -34,7 +34,14 @@ export interface Citation {
    * `citations.find(c => c.n === n)`, tuyệt đối không bằng `citations[n - 1]`.
    */
   n: number;
-  insight_id: string;
+  /**
+   * LOẠI nguồn, KHÔNG phải một không gian số thứ hai: `insight` và `web` dùng chung dãy `n`,
+   * nên phép giải marker vẫn là đúng một `find(c => c.n === n)`. Vắng mặt (server cũ) ⇒ coi
+   * như `insight`.
+   */
+  kind?: 'insight' | 'web';
+  /** `null`/vắng KHI VÀ CHỈ KHI `kind === 'web'` — nguồn web không phải insight. */
+  insight_id?: string | null;
   title: string;
   source_url: string;
 }
@@ -58,6 +65,11 @@ export interface ChatResponse {
   // phạm vi bài đang xem (change `chat-scope-routing`).
   // "focused" = có working set do người dùng chọn (change `chat-context-depth`).
   mode: 'insight' | 'global' | 'meta' | 'expanded' | 'focused';
+  /**
+   * HTML Search Suggestions của Google, chỉ có ở lượt CÓ tra cứu ngoài. Hiển thị nó là
+   * YÊU CẦU TUÂN THỦ điều khoản Grounding with Google Search — không phải trang trí.
+   */
+  search_suggestions?: string | null;
 }
 
 // Backend cũng cắt còn 10 lượt gần nhất; giữ số ở đây để không gửi thừa qua mạng.
@@ -74,9 +86,29 @@ export async function postChat(payload: ChatRequest): Promise<ChatResponse> {
 /** Mã lỗi do server phát trong sự kiện `error` của luồng SSE. */
 export type ChatErrorCode = 'quota' | 'not_found' | 'server';
 
+/**
+ * `key` của một mốc tiến trình — tập ĐÓNG do backend cấp (`STATUS_KEYS`).
+ *
+ * Kiểu để rộng (`string`) chứ không phải union đóng là có chủ đích: server mới thêm mốc mà
+ * client cũ chưa biết vẫn phải hiện được, không được nuốt. Union đóng ở đây sẽ biến một
+ * thông tin hợp lệ thành lỗi kiểu.
+ */
+export type ChatStatusKey = string;
+
+/**
+ * Mốc chưa mang `key` (server cũ). Gộp mọi mốc như vậy vào MỘT dòng cập nhật tại chỗ —
+ * tức là đúng hành vi một-dòng-bị-ghi-đè trước `chat-status-milestones`.
+ */
+export const LEGACY_STATUS_KEY = '_legacy';
+
 export interface ChatStreamHandlers {
-  /** Mốc tiến trình thật của pipeline — thay spinner đơn. */
-  onStatus?: (text: string) => void;
+  /**
+   * Mốc tiến trình thật của pipeline — thay spinner đơn.
+   *
+   * Phân biệt mốc bằng `key`, KHÔNG bằng `text`: `text` mang số liệu của lượt nên hai lần
+   * phát cùng một mốc gần như luôn khác chuỗi, so chuỗi sẽ đẻ ra dòng trùng.
+   */
+  onStatus?: (key: ChatStatusKey, text: string) => void;
   /** Một mẩu câu trả lời. Nội dung TẠM: `onCommit` mới là bản chốt. */
   onToken?: (text: string) => void;
   /**
@@ -158,7 +190,7 @@ function dispatchFrame(frame: string, handlers: ChatStreamHandlers): void {
   if (!data) return;
 
   const parsed = JSON.parse(data);
-  if (event === 'status') handlers.onStatus?.(parsed.text);
+  if (event === 'status') handlers.onStatus?.(parsed.key ?? LEGACY_STATUS_KEY, parsed.text);
   else if (event === 'token') handlers.onToken?.(parsed.text);
   else if (event === 'commit') handlers.onCommit?.(parsed as ChatResponse);
   else if (event === 'error') handlers.onError?.(parsed.code, parsed.message);
