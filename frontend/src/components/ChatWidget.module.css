@@ -59,6 +59,14 @@
   color: var(--color-text-primary);
 }
 
+/* Nhóm nút điều khiển panel. "Cuộc trò chuyện mới" đứng cạnh nút đóng — cùng cỡ, cùng kiểu:
+   nó là một thao tác điều khiển panel, không phải một hành động trong luồng hội thoại. */
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .iconBtn {
   border: none;
   background: transparent;

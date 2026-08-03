@@ -4,29 +4,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { streamChat, type ChatStatusKey, type ChatTurn, type Citation } from '../api/chat';
 import { fetchInsightById } from '../api/insights';
 import { parseAnswer } from './chatAnswer';
+import {
+  clearSession,
+  loadSession,
+  saveSession,
+  type Message,
+  type Ref,
+} from './chatSession';
 import styles from './ChatWidget.module.css';
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  citations?: Citation[];
-  isError?: boolean;
-  // Server tự mở rộng sang toàn hệ thống khi câu hỏi vượt phạm vi bài đang xem. Phải gắn
-  // nhãn, vì người dùng đang ở scope "Bài đang xem" mà câu trả lời lại đến từ tin khác —
-  // không nói ra thì trông như bot bịa từ bài đang mở.
-  expanded?: boolean;
-  /**
-   * HTML Search Suggestions của Google, chỉ có khi lượt đó CÓ tra cứu ngoài. Hiển thị là
-   * yêu cầu tuân thủ điều khoản Grounding with Google Search, không phải tuỳ chọn.
-   */
-  searchSuggestions?: string | null;
-}
-
-/** Một tin trong working set — chỉ cần id để gửi lên và title để hiển thị. */
-interface Ref {
-  id: string;
-  title: string;
-}
 
 /**
  * Số Ô SÂU của server (`settings.chat_deep_slots`). Giữ đồng bộ bằng tay: server vẫn cắt
@@ -89,7 +74,16 @@ function mergeStep(steps: Step[], key: ChatStatusKey, text: string): Step[] {
 }
 
 export default function ChatWidget() {
-  const [open, setOpen] = useState(false);
+  /**
+   * Luồng đã lưu của TAB này, đọc đúng MỘT lần lúc mount.
+   *
+   * Đọc trong initializer của `useState` chứ không trong `useEffect` là có chủ đích: nó chạy
+   * TRƯỚC mọi effect, nên effect route ở dưới thấy working set đã khôi phục và hành xử như
+   * một lần điều hướng bình thường (bài đang mở đã có ⇒ giữ nguyên; chưa có ⇒ thêm vào và
+   * đẩy mục cũ nhất ra). Đọc trong effect thì working set sẽ nhấp nháy qua trạng thái rỗng.
+   */
+  const [restored] = useState(() => loadSession());
+  const [open, setOpen] = useState(() => restored?.open ?? false);
   /**
    * MỘT luồng hội thoại cho cả phiên (change `chat-context-depth`).
    *
@@ -103,8 +97,8 @@ export default function ChatWidget() {
    * Chính việc tách đôi mới là thứ làm người dùng không so sánh được hai bài đã đọc riêng
    * (đo 28/07/2026: recall@5 = 0/4 cho câu so sánh hồi chỉ).
    */
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [workingSet, setWorkingSet] = useState<Ref[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => restored?.messages ?? []);
+  const [workingSet, setWorkingSet] = useState<Ref[]>(() => restored?.workingSet ?? []);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState<Pending | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -149,6 +143,18 @@ export default function ChatWidget() {
     };
   }, [routeInsightId, queryClient, addRef]);
 
+  /**
+   * Ghi luồng xuống bộ nhớ của tab sau mỗi thay đổi đã chốt.
+   *
+   * ⚠️ `pending` KHÔNG có trong deps, và đó là một BẤT BIẾN chứ không phải tối ưu: text đang
+   * stream là nội dung TẠM — ở ca fail-closed nó là một câu hoàn toàn khác câu cuối. Cho nó
+   * vào đây vừa ghi storage mỗi token, vừa dựng lại đúng cái bẫy mà `chat-streaming-sse` đã
+   * chặn ở phía `history`.
+   */
+  useEffect(() => {
+    saveSession({ messages, workingSet, open });
+  }, [messages, workingSet, open]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, pending, open]);
@@ -192,11 +198,21 @@ export default function ChatWidget() {
     });
   }
 
-  function send(question: string) {
+  /**
+   * Gửi một câu hỏi.
+   *
+   * `base` = luồng mà câu hỏi này nối tiếp; mặc định là luồng hiện tại. Tham số này tồn tại
+   * cho đường HỎI LẠI: ở đó luồng phải bị cắt về trước lượt hỏi cũ, mà `messages` trong
+   * closure thì vẫn là bản chưa cắt — dùng nó sẽ vừa đẻ bong bóng câu hỏi thứ hai trên màn
+   * hình, vừa nhét một lượt trùng vào `history` gửi lên.
+   */
+  function send(question: string, base?: Message[]) {
     const trimmed = question.trim();
     // Chặn gửi trùng khi luồng chưa xong — thundering herd của Nguy hiểm #1 chính là người
     // dùng bấm Gửi nhiều lần vì tưởng treo.
     if (!trimmed || pending) return;
+
+    const baseMessages = base ?? messages;
 
     // History mang theo citations của TỪNG lượt: server cần chúng để dịch `[n]` thành tên
     // bài, vì bảng ánh xạ được dựng lại mỗi lượt nên con số cũ trỏ tin khác.
@@ -204,7 +220,7 @@ export default function ChatWidget() {
     // `insight_id` đi kèm để server GHIM tin đã bàn vào ngữ cảnh lượt sau
     // (`chat-history-pinning`). Dữ liệu vốn đã có sẵn trong `Citation`, trước đây bị lược
     // đi ở đúng chỗ này.
-    const history: ChatTurn[] = messages
+    const history: ChatTurn[] = baseMessages
       .filter((m) => !m.isError)
       .map((m) => ({
         role: m.role,
@@ -222,7 +238,7 @@ export default function ChatWidget() {
       }));
     const refs = workingSet.map((r) => r.id);
 
-    setMessages((prev) => [...prev, { role: 'user', content: trimmed }]);
+    setMessages([...baseMessages, { role: 'user', content: trimmed }]);
     setInput('');
     setPending({ text: '', steps: [] });
 
@@ -278,12 +294,58 @@ export default function ChatWidget() {
     ).catch(() => settle({ role: 'assistant', content: NETWORK_MESSAGE, isError: true }));
   }
 
+  /**
+   * Hỏi lại lượt gần nhất — dùng cho cả bong bóng lỗi lẫn lượt bị gián đoạn vì tải lại trang.
+   *
+   * Cắt luồng về TRƯỚC lượt hỏi đó rồi để `send()` tự đặt lại bong bóng câu hỏi, thay vì giữ
+   * bong bóng cũ. Bản trước chỉ lọc bỏ bong bóng lỗi rồi gọi `send()`, mà `send()` lại nối
+   * thêm một lượt user nữa ⇒ **câu hỏi hiện hai lần**. Lỗi đó ẩn được vì đường lỗi hiếm;
+   * lượt gián đoạn biến nó thành đường đi thường xuyên.
+   */
   function retryLast() {
-    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
-    if (!lastUser) return;
-    setMessages((prev) => prev.filter((m) => !m.isError));
-    send(lastUser.content);
+    let at = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'user') {
+        at = i;
+        break;
+      }
+    }
+    if (at === -1) return;
+    send(messages[at].content, messages.slice(0, at));
   }
+
+  /**
+   * Bắt đầu cuộc trò chuyện mới: xoá luồng, xoá working set, xoá dữ liệu đã lưu của tab.
+   *
+   * Vì sao cần: trước change này F5 chính là nút reset duy nhất. Khi luồng đã sống sót qua
+   * F5, một cuộc hội thoại dài/lạc đề không còn đường thoát — mà `history` vẫn được gửi lên
+   * mỗi lượt (tốn token, và cơ chế ghim của `chat-history-pinning` cứ bám vào chủ đề cũ).
+   *
+   * Huỷ luồng đang chảy trước khi xoá: `settle()` của luồng đó kiểm tra `signal.aborted`, nên
+   * không huỷ thì câu trả lời của cuộc hội thoại CŨ sẽ rơi vào cuộc hội thoại MỚI.
+   */
+  function startNewConversation() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setPending(null);
+    setMessages([]);
+    setWorkingSet([]);
+    clearSession();
+  }
+
+  /**
+   * Lượt hỏi bị GIÁN ĐOẠN: luồng kết thúc bằng một câu hỏi chưa có câu trả lời, và không có
+   * luồng nào đang chạy — tức là trang đã được tải lại giữa lúc câu trả lời đang sinh.
+   *
+   * Suy ra từ CẤU TRÚC của luồng, không từ một cờ lưu kèm. Một cờ được ghi ở chỗ này và đọc
+   * ở chỗ khác là một cơ hội để hai nguồn sự thật lệch nhau; còn "lượt cuối là của người
+   * dùng" thì tự nó đã là định nghĩa.
+   *
+   * Lúc gửi bình thường thì `setMessages` và `setPending` nằm cùng một batch nên `pending`
+   * đã khác `null` ngay ở render đầu tiên có lượt hỏi ⇒ không có nhấp nháy giả.
+   */
+  const interrupted =
+    !pending && messages.length > 0 && messages[messages.length - 1].role === 'user';
 
   if (!open) {
     return (
@@ -302,14 +364,27 @@ export default function ChatWidget() {
     <div className={styles.panel} role="dialog" aria-label="Trợ lý hỏi đáp">
       <div className={styles.header}>
         <span className={styles.title}>Trợ lý AI Radar</span>
-        <button
-          type="button"
-          className={styles.iconBtn}
-          onClick={() => setOpen(false)}
-          aria-label="Đóng"
-        >
-          ✕
-        </button>
+        <div className={styles.headerActions}>
+          {/* Đặt ở header, cạnh nút đóng — CỐ Ý xa ô nhập câu hỏi: đây là thao tác hiếm và
+              huỷ dữ liệu, để cạnh chỗ gõ là mời bấm nhầm. */}
+          <button
+            type="button"
+            className={styles.iconBtn}
+            onClick={startNewConversation}
+            aria-label="Bắt đầu cuộc trò chuyện mới"
+            title="Cuộc trò chuyện mới"
+          >
+            ✚
+          </button>
+          <button
+            type="button"
+            className={styles.iconBtn}
+            onClick={() => setOpen(false)}
+            aria-label="Đóng"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {/* Working set — các tin đang được đọc kỹ. Thay badge phạm vi một-lựa-chọn của
@@ -409,6 +484,17 @@ export default function ChatWidget() {
               )}
             </div>
           ),
+        )}
+
+        {/* Lượt hỏi bị gián đoạn vì tải lại trang. Giữ câu hỏi lại thay vì lặng lẽ vứt: người
+            dùng đã gõ nó, và server đã tính tiền lượt đó rồi (`chat-streaming-sse` D5). */}
+        {interrupted && (
+          <div className={styles.bubbleError}>
+            Câu trả lời bị gián đoạn vì trang được tải lại.
+            <button type="button" className={styles.retryBtn} onClick={retryLast}>
+              Thử lại
+            </button>
+          </div>
         )}
 
         {/* Bong bóng đang chảy. Có token thì hiện token; chưa có thì hiện MỐC TIẾN TRÌNH
