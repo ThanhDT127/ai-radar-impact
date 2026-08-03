@@ -13,15 +13,29 @@ MAX_REFERENCED = 20
 
 
 class TurnCitation(BaseModel):
-    """Marker đã dùng ở một lượt TRƯỚC, kèm nhãn đọc được của nguồn.
+    """Marker đã dùng ở một lượt TRƯỚC, kèm nhãn đọc được và định danh của nguồn.
 
-    Chỉ mang `n` + `title` — không mang `insight_id`/`source_url`: mục đích duy nhất là để
-    server dịch `[n]` trong history thành tên bài, và mọi thứ thừa hơn thế là bề mặt tấn
-    công cho client tự khai định danh.
+    `n` + `title` để server dịch `[n]` trong history thành tên bài (bảng ánh xạ dựng lại mỗi
+    lượt nên con số cũ trỏ tin khác). `insight_id` để server GHIM tin đó vào ngữ cảnh lượt
+    hiện tại — xem `chat-history-pinning`.
+
+    ⚠️ Bản trước của docstring này nói cố ý KHÔNG mang `insight_id` vì đó là "bề mặt tấn công
+    cho client tự khai định danh". Điều đó **đọc sai ranh giới tin cậy thật**:
+    `ChatRequest.referenced_insight_ids` đã nhận id thẳng từ client từ `chat-context-depth`,
+    nên khả năng "client khiến một insight đi vào ngữ cảnh" đã tồn tại và đã được chấp nhận.
+    Thêm trường này KHÔNG mở rộng ranh giới đó — id vẫn phải tra ra một insight `published` +
+    `is_primary` có thật, nên client vẫn không đưa được **văn bản tuỳ ý** vào prompt. Đó mới
+    là bất biến cần giữ, và nó không đổi.
+
+    Cách còn lại — server tra ngược theo `title` — bị loại: tiêu đề không bảo đảm duy nhất,
+    khớp chuỗi là phép mờ, và một lần tra nhầm sẽ ghim SAI tin trong im lặng.
     """
 
     n: int
     title: str
+    # `None` = client cũ không gửi ⇒ không có gì để ghim ⇒ hành vi như trước change. Suy
+    # giảm êm, không cần đồng bộ phiên bản FE/BE.
+    insight_id: uuid.UUID | None = None
 
 
 class ChatTurn(BaseModel):

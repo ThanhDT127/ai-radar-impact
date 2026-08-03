@@ -3,6 +3,16 @@ import { apiClient as api } from './client';
 export interface TurnCitation {
   n: number;
   title: string;
+  /**
+   * Định danh insight của nguồn này. Server dùng nó để GHIM tin đã bàn vào ngữ cảnh lượt
+   * hiện tại (`chat-history-pinning`): `_rank` chỉ nhìn câu hỏi của lượt này, nên tin vừa
+   * được trích ở lượt trước rơi khỏi top-K **52%** số lần khi người dùng đổi chủ đề (đo
+   * 29/07/2026) — và khi đó model đọc được cái *tên* trong history mà không có dòng dữ liệu
+   * nào của nó.
+   *
+   * Optional để client cũ không vỡ: thiếu ⇒ server không ghim gì, hành vi như trước.
+   */
+  insight_id?: string;
 }
 
 export interface ChatTurn {

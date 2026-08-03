@@ -135,6 +135,19 @@ class Settings(BaseSettings):
     # (Comparison Adequacy 2,00/2), nhưng KHÔNG đủ cho câu hỏi CHI TIẾT — sự thật loại
     # "gói npm nào bị chèn mã độc" chỉ nằm trong thân bài.
     chat_deep_include_content: bool = True
+    # Số chỗ trong index DÀNH SẴN cho tin đã được trích ở các lượt trước (chat-history-pinning).
+    # `0` = tắt hoàn toàn, index trùng khít bản chưa có cơ chế này — cũng là đường rollback.
+    #
+    # Chỗ ghim nằm TRONG `chat_index_top_k`, tức là đẩy N tin ở ĐUÔI bảng xếp hạng ra; ngân
+    # sách token vì thế không phình. Đo 29/07/2026 bằng RS harness (K hiệu dụng = 60 − N):
+    #   N=3 → recall@K 0,968 = baseline (biên 3 hạng)   N=5 → 0,968 (biên 1 hạng)
+    #   N=6 → 0,968 (biên 0, sát vách)                  N=7 → 0,954 ▼ GÃY
+    # Vách nằm ở hạng 54 — đúng một `must_have` đứng đó; hạng 21–53 rỗng. `recall@5` KHÔNG
+    # đổi ở mọi mức K xuống tận 10, tức ghim ở đuôi không chạm phần đầu bảng.
+    #
+    # ⚠️ LUẬT: đổi số này ⇒ BẮT BUỘC chạy lại `tests.eval.chat_rank_harness`. Vách hạng 54 là
+    # MỘT điểm dữ liệu trên corpus 179 tin, không phải hằng số của hệ thống.
+    chat_history_pin_slots: int = 3
 
     # Admin API
     admin_api_key: str = "changeme"

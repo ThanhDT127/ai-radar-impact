@@ -147,6 +147,7 @@ def build_context(
     index_limit: int,
     include_content: bool = True,
     best_chunk_match: uuid.UUID | None = None,
+    pinned: list[Insight] | None = None,
 ) -> ChatContext:
     """Dựng context: ô sâu lấp TẤT ĐỊNH (refs trước, xếp hạng sau), rồi index nén.
 
@@ -175,6 +176,25 @@ def build_context(
     là một sự kiện đo được: "đoạn khớp nhất toàn corpus nằm ở bài này", tức là bằng chứng
     trả lời gần như chắc chắn nằm trong thân bài đó. Và nó vẫn tôn trọng ranh giới của spec:
     nội dung vào câu trả lời **vẫn đi qua ô sâu**, chỉ khác ở chỗ tin nào được rót.
+
+    `pinned` — tin đã được trích ở các lượt TRƯỚC (`chat-history-pinning`, 29/07/2026), đã nạp
+    sẵn, xếp theo thứ tự nhắc gần nhất. Chúng vào **index nén ở CUỐI danh sách**, KHÔNG vào ô
+    sâu: ô sâu là chỗ của working set do người dùng chủ động chọn, còn tin trong lịch sử cần
+    **có mặt** chứ chưa chắc cần **đọc kỹ**.
+
+    Vì sao cần: `_rank` chỉ nhìn câu hỏi của lượt hiện tại, không nhìn lịch sử. Đo 29/07 trên
+    ma trận 6×6 chủ đề, **47/90 = 52%** cặp (tin đã bàn, chủ đề mới) rơi khỏi top-60 — tệ nhất
+    hạng 118/179 — trong khi `_history_block` vẫn nhắc *tên* tin đó. Model đọc được cái tên mà
+    không có dòng dữ liệu nào của nó.
+
+    Chỗ ghim nằm **trong** `index_limit`, tức đẩy đuôi bảng xếp hạng ra. Đo bằng RS harness:
+    ghim 3 → recall@K 0,968 và recall@5 0,900, **trùng baseline**; vách gãy ở 7 chỗ ghim
+    (K hiệu dụng 53). `recall@5` không đổi ở mọi mức K xuống tận 10 — ghim ở đuôi không chạm
+    phần đầu bảng.
+
+    Đặt ở CUỐI là có chủ đích: `CHAT_SYSTEM_PROMPT` dặn model "tin ở đầu danh sách đáng chọn
+    hơn", mà tin ghim theo định nghĩa **không** liên quan tới câu hỏi lượt này — nó có mặt để
+    làm chỗ dựa cho tham chiếu trong lịch sử, không phải để làm câu trả lời.
     """
     # Ô sâu KHÔNG được vượt trần tổng: `index_limit` đếm cả ô sâu, nên `k_deep=3` với
     # `index_limit=1` phải cho đúng 1 tin, không phải 3. Bỏ dòng này thì trần top-K trở
@@ -208,6 +228,21 @@ def build_context(
     room = max(index_limit - len(deep), 0) if index_limit > 0 else len(rest)
     candidates = rest[:room]
 
+    # Ghim vì lịch sử. Khử trùng TRƯỚC (design D5): tin đang ở ô sâu, hoặc đã tự lọt vào
+    # index theo thứ hạng, thì không ghim lại — cấp cho một insight hai số `[n]` là dựng lại
+    # đúng cái bẫy "hai hệ quy chiếu" mà `chat-citation-integrity` đã phải sửa. Hệ quả tốt:
+    # số tin thật sự bị đẩy khỏi đuôi thường ÍT HƠN số chỗ ghim.
+    in_index = {i.id for i in candidates}
+    to_pin = [i for i in (pinned or []) if i.id not in seen and i.id not in in_index]
+    if to_pin:
+        if index_limit > 0:
+            # Ghim nằm TRONG trần: cắt đuôi `candidates` đúng bằng số tin ghim thêm vào, để
+            # tổng số tin trong prompt không đổi. `to_pin` cũng phải chịu trần — cấu hình
+            # bệnh hoạn (ghim nhiều hơn cả trần) không được phép làm phình prompt.
+            to_pin = to_pin[:room]
+            candidates = candidates[: max(room - len(to_pin), 0)]
+        candidates = candidates + to_pin
+
     deep_blocks = {
         n: build_insight_block(
             insight,
@@ -220,9 +255,13 @@ def build_context(
     for n, insight in enumerate(deep, start=1):
         mapping[n] = insight
 
-    # Tin bị cắt = phần đuôi của `ranked` không được rót ở bất kỳ độ sâu nào. Refs đến từ
-    # ngoài `ranked` (ví dụ ngoài cửa sổ thời gian) không tính vào đây.
-    surfaced = sum(1 for i in ranked if i.id in seen) + len(candidates)
+    # Tin bị cắt = phần đuôi của `ranked` không được rót ở bất kỳ độ sâu nào. Refs và tin
+    # ghim đến từ ngoài `ranked` (ví dụ ngoài cửa sổ thời gian) không tính vào đây — nên đếm
+    # theo TẬP id đã lên mặt rồi giao với `ranked`, chứ không cộng `len(candidates)`: từ khi
+    # có `pinned`, `candidates` có thể chứa tin không thuộc `ranked` và phép cộng cũ sẽ thổi
+    # phồng `surfaced`, làm con số "còn N tin khác" trong prompt bị thiếu.
+    surfaced_ids = seen | {i.id for i in candidates}
+    surfaced = sum(1 for i in ranked if i.id in surfaced_ids)
     return ChatContext(
         deep_block="\n\n".join(deep_blocks[n] for n in sorted(deep_blocks)),
         deep_blocks=deep_blocks,

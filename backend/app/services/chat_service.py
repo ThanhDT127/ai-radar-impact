@@ -231,6 +231,72 @@ def _history_block(history: list) -> str:
     return "\n".join(lines)
 
 
+def _history_pin_ids(history: list, limit: int) -> list[uuid.UUID]:
+    """Định danh insight cần GHIM, lấy từ citations của các lượt trước.
+
+    Quét theo **LỚP**, không phải cạn từng lượt: vòng đầu lấy nguồn thứ nhất của mỗi lượt
+    (lượt mới trước lượt cũ), vòng sau lấy nguồn thứ hai của mỗi lượt, cứ thế tới `limit`.
+    Hàm THUẦN, tất định — cùng history cho cùng kết quả, KHÔNG phụ thuộc câu hỏi hiện tại.
+
+    ⚠️ **Vì sao theo lớp — bản "cạn từng lượt" đã ĐO ĐƯỢC là hỏng** (29/07/2026). Một lượt
+    trả lời toàn cục trích tới **5 nguồn**, mà chỉ có 3 chỗ ghim. Duyệt cạn lượt gần nhất
+    trước ⇒ **đúng một lượt chen giữa là đủ để đẩy sạch mọi thứ trước nó ra ngoài**. Đo thật:
+    bàn tin X ở lượt 1, hỏi một câu khác chủ đề ở lượt 2 (trích 5 nguồn), thì tới lượt 3 tập
+    ghim là 3 nguồn của **riêng lượt 2** — X đứng thứ **6** trong danh sách, văng khỏi trần.
+    Nghĩa là cơ chế chỉ phủ được đúng lượt liền trước, không phải "3 tin gần nhất của cuộc
+    hội thoại" như spec tuyên bố.
+
+    Quét theo lớp sửa đúng chỗ đó mà **không** đổi hành vi ca phổ biến nhất: history chỉ có
+    một lượt có nguồn thì vòng 1/2/3 lần lượt lấy nguồn 1, 2, 3 của chính lượt đó ⇒ kết quả
+    trùng khít bản cũ. Chỉ khi có nhiều lượt thì nó mới trải ra — và đó đúng là lúc bản cũ sai.
+
+    Cái cần nhớ là **3 CHỦ ĐỀ gần nhất**, không phải 3 dòng trích gần nhất.
+
+    Vì sao "gần nhất" chứ không phải "liên quan nhất": chấm điểm liên quan ở đây là một
+    heuristic đoán ý định, đúng loại lỗi repo này đã trả giá nhiều lần (`_roles_in_question`
+    khớp chuỗi con, `_CAPABILITY_PHRASES` code chết). Luật một dòng thì kiểm chứng được.
+
+    ⚠️ Đây là bất biến **đã thu hẹp** so với câu chữ của `chat-context-depth` ("MỌI tin được
+    nhắc trong history đều còn mặt trong ngữ cảnh"). Bản nguyên văn không thực thi được:
+    history đầy có thể nhắc tới ~25 tin, mà RS harness cho thấy ghim quá 6 chỗ là recall@K
+    tụt khỏi baseline (0,968 → 0,954 ở 7 chỗ). Giữ recall, thu hẹp lời hứa — và nói rõ ra.
+    """
+    if limit <= 0:
+        return []
+    # Nguồn của từng lượt, lượt MỚI trước. Lượt không có nguồn nào (câu người dùng, hoặc
+    # client cũ không gửi định danh) biến mất khỏi đây luôn — nó không chiếm một lớp.
+    theo_luot: list[list[uuid.UUID]] = []
+    for turn in reversed(history):
+        ids = [
+            c.insight_id
+            for c in (getattr(turn, "citations", None) or [])
+            if getattr(c, "insight_id", None) is not None
+        ]
+        if ids:
+            theo_luot.append(ids)
+
+    out: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
+    lop = 0
+    while len(out) < limit:
+        con_nguon = False
+        for ids in theo_luot:
+            if lop >= len(ids):
+                continue
+            con_nguon = True
+            insight_id = ids[lop]
+            if insight_id in seen:
+                continue
+            seen.add(insight_id)
+            out.append(insight_id)
+            if len(out) >= limit:
+                return out
+        if not con_nguon:  # mọi lượt đã cạn nguồn
+            break
+        lop += 1
+    return out
+
+
 def _roles_in_question(question: str) -> list[str]:
     """Vai trò được nhắc tên trong câu hỏi — dùng để chọn trục xếp hạng.
 
@@ -515,19 +581,26 @@ class ChatService:
                     thinking_tokens=self._thinking_tokens,
                 )
 
-    async def _load_refs(self, ids: list[uuid.UUID] | None) -> list[Insight]:
-        """Nạp working set theo `referenced_insight_ids`, GIỮ thứ tự client gửi.
+    async def _load_refs(
+        self, ids: list[uuid.UUID] | None, limit: int | None = None
+    ) -> list[Insight]:
+        """Nạp insight theo danh sách id, GIỮ thứ tự client gửi.
 
         Suy giảm êm (design D7) — ref chết bị bỏ **lặng lẽ**, không 404: người dùng có thể
         ghim một tin rồi tin đó bị unpublish giữa chừng, và làm hỏng cả câu hỏi vì một chip
         cũ là đổi sai. Thứ tự client gửi quyết định thứ tự ô sâu, nên phải sắp lại sau khi
         SQL trả về (`IN` không bảo toàn thứ tự).
 
-        Cắt ở `chat_deep_slots`: gửi thừa thì lấy phần đầu, không báo lỗi.
+        Cắt ở `limit` (mặc định `chat_deep_slots`): gửi thừa thì lấy phần đầu, không báo lỗi.
+
+        Dùng chung cho **hai** nguồn id: working set (`referenced_insight_ids`) và tin ghim vì
+        lịch sử (`chat-history-pinning`). Cố ý một đường nạp duy nhất — hai đường với hai bộ
+        lọc hơi khác nhau là cách chắc chắn để một hôm nào đó ghim được thứ mà working set
+        không nạp nổi, hoặc ngược lại, mà không có gì báo lỗi.
         """
         if not ids:
             return []
-        wanted = ids[: settings.chat_deep_slots]
+        wanted = ids[: settings.chat_deep_slots if limit is None else limit]
         result = await self.session.execute(
             select(Insight)
             .where(Insight.id.in_(wanted))
@@ -630,6 +703,18 @@ class ChatService:
         )
         matched = self._rank(matched, question, query_vector, chunk_ranks)
 
+        # Tin ghim vì lịch sử nạp NỐI TIẾP, cố ý KHÔNG nhét vào cụm `gather` trên.
+        # `AsyncSession` không an toàn khi hai truy vấn chạy đồng thời; cụm trên chỉ sống
+        # được vì nhánh vector phải chờ `_embed_question` (~0,37s) xong mới chạm DB, tức là
+        # `list_for_chat` gần như luôn xong trước. Thêm một truy vấn khởi động NGAY vào đó là
+        # đua thẳng với `list_for_chat` — hỏng ngẫu nhiên dưới tải, đúng loại lỗi không tái
+        # hiện được. Giá phải trả là một truy vấn theo khoá chính (~vài ms), so với 85% TTFT
+        # nằm ở lượt gọi model thì không đáng để đánh đổi.
+        pinned = await self._load_refs(
+            _history_pin_ids(history, settings.chat_history_pin_slots),
+            limit=settings.chat_history_pin_slots,
+        )
+
         # ⚠️ Tính "vai trò không có tin" trên TOÀN BỘ tập khớp, TRƯỚC khi cắt top-K.
         # Nếu tính sau khi cắt, một vai trò có tin nhưng xếp hạng dưới ngưỡng sẽ bị
         # báo nhầm là "chưa có tin nào" — sai nghiêm trọng hơn nhiều so với việc
@@ -660,6 +745,10 @@ class ChatService:
             # đang xem (design D5 giữ đường cũ nguyên xi), chen tin khác vào đó sẽ đẩy chính
             # bài người dùng đang đọc ra ngoài.
             best_chunk_match=None if focus is not None else _best_chunk_match(chunk_ranks),
+            # Áp cho CẢ ba ca (toàn cục · working set · mở rộng) — một đường code, không rẽ
+            # nhánh theo mode. Lịch sử hội thoại là một luồng duy nhất từ `chat-context-depth`,
+            # nên tin đã bàn cần có mặt bất kể lượt này đang ở phạm vi nào.
+            pinned=pinned,
         )
         index_block, mapping = ctx.index_block, ctx.mapping
 
@@ -849,6 +938,7 @@ class ChatService:
             if rank_vector is None:
                 rank_vector = rank_lexical
             score = 1.0 / (RRF_K + rank_lexical) + 1.0 / (RRF_K + rank_vector)
+
             if not chunk_ranks:
                 # ⚠️ Cả lượt không có tín hiệu đoạn (truy vấn chunk lỗi, chưa backfill, câu
                 # rỗng từ khoá) thì BỎ HẲN số hạng thứ ba — không phải cho nó mượn
@@ -912,6 +1002,7 @@ class ChatService:
         **Suy giảm êm là bất biến, không phải nỗ lực** (cùng luật với tầng vector): truy vấn
         lỗi → `{}` → `_rank` bỏ hẳn số hạng thứ ba → thứ tự **trùng khít** bản hai tín hiệu.
         Chat không bao giờ 500 vì bảng đoạn.
+
         """
         if query_vector is None or not settings.chat_embedding_enabled:
             return {}

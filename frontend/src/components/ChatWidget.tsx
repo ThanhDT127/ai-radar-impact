@@ -142,12 +142,20 @@ export default function ChatWidget() {
 
     // History mang theo citations của TỪNG lượt: server cần chúng để dịch `[n]` thành tên
     // bài, vì bảng ánh xạ được dựng lại mỗi lượt nên con số cũ trỏ tin khác.
+    //
+    // `insight_id` đi kèm để server GHIM tin đã bàn vào ngữ cảnh lượt sau
+    // (`chat-history-pinning`). Dữ liệu vốn đã có sẵn trong `Citation`, trước đây bị lược
+    // đi ở đúng chỗ này.
     const history: ChatTurn[] = messages
       .filter((m) => !m.isError)
       .map((m) => ({
         role: m.role,
         content: m.content,
-        citations: m.citations?.map((c) => ({ n: c.n, title: c.title })),
+        citations: m.citations?.map((c) => ({
+          n: c.n,
+          title: c.title,
+          insight_id: c.insight_id,
+        })),
       }));
     const refs = workingSet.map((r) => r.id);
 

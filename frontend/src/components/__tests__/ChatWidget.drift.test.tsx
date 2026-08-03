@@ -218,6 +218,39 @@ describe('ChatWidget — một luồng + working set (chống drift bằng ngữ
     await ask(user, 'câu đầu', 1);
     await ask(user, 'câu sau', 2);
 
-    expect(payload(2).history[1].citations).toEqual([{ n: 7, title: 'Kubernetes CVE' }]);
+    expect(payload(2).history[1].citations).toEqual([
+      { n: 7, title: 'Kubernetes CVE', insight_id: 'X' },
+    ]);
+  });
+
+  it('citations trong history mang ĐỊNH DANH insight, không chỉ tiêu đề', async () => {
+    // Server cần id để GHIM tin đã bàn vào ngữ cảnh lượt sau (`chat-history-pinning`).
+    // Chỉ có tiêu đề thì server phải khớp ngược theo chuỗi — phép mờ, và một lần tra nhầm
+    // sẽ ghim SAI tin trong im lặng. Test này khoá ranh giới đó ở phía client.
+    const user = userEvent.setup();
+    renderWidget();
+    await openWidget(user);
+
+    streamChatMock.mockImplementationOnce(async (_p, handlers) => {
+      answerCount += 1;
+      handlers.onCommit?.({
+        // Marker phải đứng NGAY sau "trả lời 1": `renderAnswer` cắt câu thành từng span
+        // theo marker, nên helper `ask()` chỉ khớp được khi span đầu đúng bằng chuỗi đó.
+        answer: 'trả lời 1 [3] và [9]',
+        citations: [
+          { n: 3, insight_id: 'id-cisa', title: 'CISA vá khẩn', source_url: 'https://a' },
+          { n: 9, insight_id: 'id-npm', title: 'npm supply chain', source_url: 'https://b' },
+        ],
+        mode: 'global',
+      });
+    });
+    await ask(user, 'tin bảo mật tuần này?', 1);
+    // Đổi hẳn chủ đề — đúng ca mà `_rank` đánh rơi tin cũ khỏi top-K.
+    await ask(user, 'còn Kubernetes thì sao?', 2);
+
+    const sent = payload(2).history[1].citations;
+    expect(sent?.map((c) => c.insight_id)).toEqual(['id-cisa', 'id-npm']);
+    // Số marker vẫn giữ nguyên: server KHÔNG đánh số lại giữa các lượt.
+    expect(sent?.map((c) => c.n)).toEqual([3, 9]);
   });
 });
