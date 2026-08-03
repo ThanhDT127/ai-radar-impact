@@ -77,6 +77,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.schemas.chat import ChatTurn, TurnCitation
 from tests.eval.chat_fixture import (
     SCENARIO_MODES,
     FIXTURE_DIR,
@@ -96,8 +97,8 @@ BASELINE_PATH = FIXTURE_DIR / "chat_answer_baseline.json"
 # LUẬT BASELINE: chốt lại là hành động CÓ CHỦ ĐÍCH, kèm lý do ghi vào change/commit. Chốt
 # lại để test chuyển xanh là tự tháo lưới: lần hồi quy sau sẽ nằm dưới mức mới mà vẫn "pass".
 BASELINE_META = {
-    "measured_at": "2026-07-28",
-    "commit": "(chat-chunk-retrieval, chưa commit)",
+    "measured_at": "2026-07-29",
+    "commit": "(chat-history-pinning, chưa commit)",
     "model": "gemini-2.5-flash",
     "corpus": "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary",
     "note": (
@@ -108,6 +109,53 @@ BASELINE_META = {
         "sự có nhắc Ethereum/IPFS — model trả lời đúng, nhãn mới là cái sai."
     ),
     "revisions": [
+        {
+            "date": "2026-07-31",
+            "reason": (
+                "`chat-followup-rewrite` thêm 14 kịch bản nhóm `followup_new_topic` — "
+                "**lần đầu bộ đo này chạy với `history` thật**. Trước đó `_run_one` truyền "
+                "`history=[]` cho MỌI kịch bản, nên khoảng trống '0/98 kịch bản mang history' "
+                "ghi ở revision 29/07 vừa là hạn chế của bộ kịch bản VỪA là hạn chế của chính "
+                "runner. Nay `_history_for()` dựng lượt hỏi–đáp trước từ `turn1_question` + "
+                "`turn1_cited`, kèm `citations` đủ `n`/`title`/`insight_id` để đường ghim của "
+                "`chat-history-pinning` thật sự chạy. "
+                "\n\n"
+                "Nhóm mới: Faith **0,99** · AnsRel **0,89** · CitPrec **1,00** · must_have "
+                "14/15. Hai ngưỡng cứng giữ nguyên. "
+                "\n\n"
+                "⚠️ AnsRel 0,89 của nhóm này THẤP hơn tổng thể và đó là **đúng như thiết kế**: "
+                "nhóm đo câu nối tiếp cần tin CHƯA từng bàn, tức là chế độ hỏng mà "
+                "`chat-followup-rewrite` nhắm tới và **đã dừng vì kết quả âm** (xem "
+                "`measurement.md` §11). Hai ca kéo điểm xuống — `fub-supply-prevent` (AnsRel "
+                "0,00) và `fub-cypress-agent` (0,50) — là MỐC ĐO, không phải hồi quy. Đừng "
+                "'chữa' bằng cách sửa câu hỏi cho gần chữ trong tin."
+            ),
+        },
+        {
+            "date": "2026-07-29",
+            "reason": (
+                "`chat-history-pinning` — ghim **3 tin được trích gần nhất** trong history "
+                "vào CUỐI index, nằm TRONG `chat_index_top_k` (đẩy đuôi bảng xếp hạng ra). "
+                "TỔNG: Faith **0,99 → 0,98** (≥0,95 ✅) · AnsRel **0,94 → 0,96** · CitPrec "
+                "**1,00** (=1,00 ✅) · từ chối đúng 5/5 · lệch mode 0/98 · `must_have` "
+                "112 → 115/123. Cả hai ngưỡng cứng giữ nguyên. "
+                "\n\n"
+                "⚠️ LƯU Ý QUAN TRỌNG VỀ PHẠM VI CỦA CHÍNH BỘ ĐO NÀY: "
+                "`chat_scenarios.jsonl` có **0/98 kịch bản mang `history`**, nên lượt "
+                "`--live` **không bao giờ đi qua đường ghim**. Con số ở trên chứng minh "
+                "*không hồi quy trên các đường cũ* (cần thiết — change sửa `build_context` "
+                "và `_load_refs`), nó **KHÔNG** chứng minh *ghim vô hại*. "
+                "Rủi ro thật (3 dòng tin cũ kéo model lạc đề khi hỏi chủ đề mới) phải đo "
+                "bằng hội thoại HAI LƯỢT qua endpoint thật: đo 29/07 được **0/4** lạc đề và "
+                "**2/2** câu quay lại tin đã bàn trả lời được (trước change: không với tới). "
+                "Bộ đo đó hiện là script rời, CHƯA thường trực — xem "
+                "`openspec/changes/chat-history-pinning/design.md` Open Question #4. "
+                "\n\n"
+                "Chênh lệch Faith 0,99 → 0,98 nằm trong nhiễu của LLM-judge: đo 29/07 trên "
+                "pipeline CHƯA sửa gì cũng cho 0,99 với hai kịch bản lệch tới ±0,25 ở mức "
+                "từng ca. Chỉ số TỔNG mới có nghĩa; đừng truy một kịch bản lẻ tụt điểm."
+            ),
+        },
         {
             "date": "2026-07-28",
             "reason": (
@@ -435,6 +483,42 @@ def _install_spy(capture: list[_Capture]):
     return restore
 
 
+def _history_for(scenario: dict, by_id: dict) -> list[ChatTurn]:
+    """Lịch sử hội thoại của kịch bản. `[]` nếu kịch bản không khai báo.
+
+    Kịch bản khai `turn1_question` + `turn1_cited` (nhóm `followup_new_topic`,
+    `chat-followup-rewrite`) mô tả một lượt hỏi–đáp ĐÃ xảy ra. Truyền `history=[]` cho chúng
+    là đo một câu hỏi khác hẳn câu người dùng thật gõ: *"Thế lúc triển khai thì cần chuẩn bị
+    gì?"* không có chủ thể nào nếu tách khỏi lượt trước.
+
+    Lượt trợ lý mang `citations` đầy đủ (`n` + `title` + `insight_id`) vì đó là thứ kích hoạt
+    cả `_history_block` (giải marker thành tiêu đề) lẫn `_history_pin_ids` (ghim tin đã trích).
+    Thiếu `insight_id` thì đường ghim của `chat-history-pinning` im lặng không chạy, và bộ đo
+    lại tuyên bố đã phủ hội thoại đa lượt trong khi không phủ.
+
+    Nội dung lượt trợ lý là marker `[n]` thuần chứ không phải câu trả lời thật: bộ đo cần
+    **cấu trúc** tham chiếu (marker + nguồn), không cần văn bản, và bịa ra một câu trả lời
+    trông-như-thật sẽ đưa chữ của chính người viết fixture vào ngữ cảnh model đọc.
+    """
+    turn1 = (scenario.get("turn1_question") or "").strip()
+    cited = scenario.get("turn1_cited") or []
+    if not turn1:
+        return []
+    citations = [
+        TurnCitation(n=n, title=by_id[i].title, insight_id=uuid.UUID(i))
+        for n, i in enumerate(cited, start=1)
+        if i in by_id
+    ]
+    return [
+        ChatTurn(role="user", content=turn1),
+        ChatTurn(
+            role="assistant",
+            content=" ".join(f"[{c.n}]" for c in citations) or "(không có nguồn)",
+            citations=citations,
+        ),
+    ]
+
+
 async def _run_one(scenario: dict, corpus_insights: list, by_id: dict) -> dict:
     capture: list[_Capture] = []
     restore = _install_spy(capture)
@@ -447,7 +531,7 @@ async def _run_one(scenario: dict, corpus_insights: list, by_id: dict) -> dict:
         refs = [uuid.UUID(i) for i in scenario.get("referenced_insight_ids", [])]
         result = await service.answer(
             question=scenario["question"],
-            history=[],
+            history=_history_for(scenario, by_id),
             insight_id=uuid.UUID(anchor) if anchor else None,
             referenced_insight_ids=refs,
         )

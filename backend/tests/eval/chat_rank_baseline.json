@@ -3,8 +3,14 @@
   "measured_at": "2026-07-28",
   "commit": "(chat-chunk-retrieval, chưa commit)",
   "corpus": "chat_corpus.jsonl @ 27/07/2026 — 179 insight published+is_primary; vector từ chat_embeddings.jsonl + chat_query_vectors.jsonl (chat-hybrid-retrieval)",
-  "note": "Nhóm `comparison_anaphora` cố ý đỏ — nó là mốc đo cho working set, không phải mục tiêu của `_rank`. Đừng 'chữa' nó bằng cách sửa câu hỏi cho gần chữ trong tin.",
+  "note": "Nhóm `comparison_anaphora` cố ý đỏ — nó là mốc đo cho working set, không phải mục tiêu của `_rank`. Đừng 'chữa' nó bằng cách sửa câu hỏi cho gần chữ trong tin. Nhóm `followup_new_topic` đo NĂNG LỰC TRUY HỒI THUẦN của câu nối tiếp: theo định nghĩa nhóm, `must_have ∩ turn1_cited = ∅`, nên cơ chế ghim của `chat-history-pinning` CỐ Ý không che nó. Điểm dưới 1,00 ở đó là mốc đo cho `chat-followup-rewrite`, KHÔNG phải hồi quy.",
   "revisions": [
+   {
+    "date": "2026-07-31",
+    "recall_at_k": "0,968 → 0,974",
+    "recall_at_answer": "0,900 → 0,881",
+    "reason": "`chat-followup-rewrite` thêm nhóm `followup_new_topic` (14 kịch bản, lần đầu bộ kịch bản mang `history`). Xếp hạng KHÔNG đổi — `_rank` không bị chạm một dòng nào ở lần chốt này; hai con số tổng đổi vì MẪU SỐ đổi (71 → 85 câu có nhãn). ⚠️ HAI SỐ TỔNG KHÔNG SO ĐƯỢC với dòng dưới. So sánh đúng là theo NHÓM: mọi nhóm cũ giữ nguyên từng con số, nhóm mới vào ở recall@60 **1,000** · recall@5 **0,786** · hạng xấu nhất **29**. Vì sao nhóm mới kéo tổng xuống mà vẫn chốt: nó đo một chế độ hỏng CHƯA được chữa (câu nối tiếp cần tin chưa từng bàn), và trước change này **0/98** kịch bản mang `history` nên không lưới nào canh đường hội thoại đa lượt — kể cả đường ghim của `chat-history-pinning`. Baseline phải mô tả hệ thống THẬT, kể cả phần nó chưa làm được."
+   },
    {
     "date": "2026-07-28",
     "recall_at_k": "0,968 → 0,968 (không đổi)",
@@ -1726,9 +1732,264 @@
     "khiển"
    ],
    "roles": []
+  },
+  {
+   "scenario_id": "fub-eu-reg",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Còn quy định nào khác mình phải theo không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "quy",
+    "định",
+    "theo"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-k8s-deploy",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Thế lúc triển khai thì cần chuẩn bị gì?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "lúc",
+    "triển",
+    "khai",
+    "chuẩn"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-lambda-isolation",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Có cách nào cô lập mạnh hơn không?",
+   "recall": 1.0,
+   "recall_at_answer": 0.0,
+   "worst_rank": 29,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "cách",
+    "cô",
+    "lập",
+    "mạnh",
+    "hơn"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-pq-gov",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Chính phủ Mỹ có động thái gì chưa?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "chính",
+    "phủ",
+    "mỹ",
+    "động",
+    "thái",
+    "chưa"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-windows-other",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Còn lỗ hổng nào khác đang bị khai thác không?",
+   "recall": 1.0,
+   "recall_at_answer": 0.0,
+   "worst_rank": 11,
+   "must_total": 2,
+   "misses": [],
+   "terms": [
+    "lỗ",
+    "hổng",
+    "khai",
+    "thác"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-gemma-speed",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Có bản nào sinh văn bản nhanh hơn không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 3,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "bản",
+    "sinh",
+    "văn",
+    "bản",
+    "nhanh",
+    "hơn"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-supply-prevent",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Làm sao phòng ngừa việc đó?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 4,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "phòng",
+    "ngừa",
+    "việc"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-bedrock-privacy",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Dữ liệu của mình có bị giữ lại không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "dữ",
+    "liệu",
+    "giữ",
+    "lại"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-copilot-sdk",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Có SDK nào để tự dựng không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 4,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "sdk",
+    "để",
+    "tự",
+    "dựng"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-cypress-agent",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Nó có ảnh hưởng gì tới context của agent không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 2,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "ảnh",
+    "hưởng",
+    "context",
+    "agent"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-deepseek-strategy",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Chiến lược dài hạn của họ là gì?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "chiến",
+    "lược",
+    "dài",
+    "hạn"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-s3-modernize",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Còn cách nào hiện đại hoá workload cũ không?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "cách",
+    "hiện",
+    "đại",
+    "hoá",
+    "workload",
+    "cũ"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-sql-paging",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Còn phân trang thì sao?",
+   "recall": 1.0,
+   "recall_at_answer": 1.0,
+   "worst_rank": 1,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "phân",
+    "trang"
+   ],
+   "roles": []
+  },
+  {
+   "scenario_id": "fub-robot-oss",
+   "group": "followup_new_topic",
+   "mode": "global",
+   "question": "Còn bên mã nguồn mở thì sao?",
+   "recall": 1.0,
+   "recall_at_answer": 0.0,
+   "worst_rank": 21,
+   "must_total": 1,
+   "misses": [],
+   "terms": [
+    "bên",
+    "mã",
+    "nguồn",
+    "mở"
+   ],
+   "roles": []
   }
  ],
- "overall": 0.9683098591549296,
- "overall_at_answer": 0.9002347417840375,
- "questions_scored": 71
+ "overall": 0.9735294117647059,
+ "overall_at_answer": 0.8813725490196079,
+ "questions_scored": 85
 }

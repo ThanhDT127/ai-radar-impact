@@ -234,7 +234,58 @@ def load_scenarios(path: Path = SCENARIOS_PATH) -> list[dict]:
                 "thì pipeline đi đường global và nhãn mode sai một cách im lặng."
             )
 
+        _check_history(row, sid, corpus_ids)
+
     return rows
+
+
+# Nhóm kịch bản mà tin đích PHẢI chưa từng được trích ở lượt trước.
+FOLLOWUP_NEW_TOPIC = "followup_new_topic"
+
+
+def _check_history(row: dict, sid: str, corpus_ids: set[str]) -> None:
+    """Kiểm phần lịch sử hội thoại của một kịch bản (`chat-followup-rewrite`).
+
+    Hai trường tuỳ chọn, thuần bổ sung: `turn1_question` (câu hỏi lượt trước) và
+    `turn1_cited` (định danh nguồn đã trích ở lượt đó). Kịch bản không khai báo chúng đi
+    đúng đường cũ — đó là lý do 98 kịch bản có sẵn không đổi một chữ số.
+
+    ⚠️ Với nhóm `followup_new_topic`, `must_have ∩ turn1_cited = ∅` là **định nghĩa của
+    nhóm**, không phải một chi tiết. Nếu tin đích từng được trích thì `chat-history-pinning`
+    đã ghim nó vào index rồi, và kịch bản sẽ đo một việc mà `_rank` không được nhờ làm —
+    cho điểm cao giả trong khi chế độ hỏng thật (câu nối tiếp cần tin CHƯA bàn) vẫn nguyên.
+    Vi phạm phải NỔ ở đây chứ không được lặng lẽ chấm điểm.
+    """
+    cited = row.get("turn1_cited", [])
+    has_turn1 = bool(row.get("turn1_question", "").strip())
+
+    if bool(cited) != has_turn1:
+        raise ValueError(
+            f"{sid}: `turn1_question` và `turn1_cited` phải đi cùng nhau — có một nửa thì "
+            "lịch sử dựng ra không đầy đủ và số đo lệch một cách im lặng."
+        )
+
+    unknown = [i for i in cited if i not in corpus_ids]
+    if unknown:
+        raise ValueError(f"{sid}: turn1_cited trỏ insight không có trong corpus: {unknown}")
+
+    if row.get("group") != FOLLOWUP_NEW_TOPIC:
+        return
+
+    if not has_turn1:
+        raise ValueError(
+            f"{sid}: nhóm {FOLLOWUP_NEW_TOPIC} phải có `turn1_question` + `turn1_cited` — "
+            "không có lịch sử thì đây không phải câu nối tiếp."
+        )
+
+    overlap = sorted(set(row.get("must_have", [])) & set(cited))
+    if overlap:
+        raise ValueError(
+            f"{sid}: nhóm {FOLLOWUP_NEW_TOPIC} đòi `must_have ∩ turn1_cited = ∅`, nhưng "
+            f"trùng {overlap}. Tin đã trích ở lượt trước được `chat-history-pinning` ghim "
+            "sẵn vào index, nên chấm recall xếp hạng cho nó là chấm một phép tính không "
+            "tồn tại — điểm sẽ cao giả trong khi chế độ hỏng thật vẫn nguyên."
+        )
 
 
 def _parse_dt(value) -> datetime | None:

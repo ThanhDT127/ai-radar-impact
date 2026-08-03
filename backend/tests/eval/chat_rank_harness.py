@@ -82,9 +82,32 @@ BASELINE_META = {
     ),
     "note": (
         "Nhóm `comparison_anaphora` cố ý đỏ — nó là mốc đo cho working set, không phải "
-        "mục tiêu của `_rank`. Đừng 'chữa' nó bằng cách sửa câu hỏi cho gần chữ trong tin."
+        "mục tiêu của `_rank`. Đừng 'chữa' nó bằng cách sửa câu hỏi cho gần chữ trong tin. "
+        "Nhóm `followup_new_topic` đo NĂNG LỰC TRUY HỒI THUẦN của câu nối tiếp: theo định "
+        "nghĩa nhóm, `must_have ∩ turn1_cited = ∅`, nên cơ chế ghim của "
+        "`chat-history-pinning` CỐ Ý không che nó. Điểm dưới 1,00 ở đó là mốc đo cho "
+        "`chat-followup-rewrite`, KHÔNG phải hồi quy."
     ),
     "revisions": [
+        {
+            "date": "2026-07-31",
+            "recall_at_k": "0,968 → 0,974",
+            "recall_at_answer": "0,900 → 0,881",
+            "reason": (
+                "`chat-followup-rewrite` thêm nhóm `followup_new_topic` (14 kịch bản, lần "
+                "đầu bộ kịch bản mang `history`). Xếp hạng KHÔNG đổi — `_rank` không bị "
+                "chạm một dòng nào ở lần chốt này; hai con số tổng đổi vì MẪU SỐ đổi "
+                "(71 → 85 câu có nhãn). "
+                "⚠️ HAI SỐ TỔNG KHÔNG SO ĐƯỢC với dòng dưới. So sánh đúng là theo NHÓM: "
+                "mọi nhóm cũ giữ nguyên từng con số, nhóm mới vào ở recall@60 **1,000** · "
+                "recall@5 **0,786** · hạng xấu nhất **29**. "
+                "Vì sao nhóm mới kéo tổng xuống mà vẫn chốt: nó đo một chế độ hỏng CHƯA "
+                "được chữa (câu nối tiếp cần tin chưa từng bàn), và trước change này "
+                "**0/98** kịch bản mang `history` nên không lưới nào canh đường hội thoại "
+                "đa lượt — kể cả đường ghim của `chat-history-pinning`. "
+                "Baseline phải mô tả hệ thống THẬT, kể cả phần nó chưa làm được."
+            ),
+        },
         {
             "date": "2026-07-28",
             "recall_at_k": "0,968 → 0,968 (không đổi)",
@@ -293,6 +316,7 @@ def measure(
 
     `use_vectors=False` tắt tầng vector ở CẢ HAI phía (corpus và câu hỏi) để tái hiện
     pipeline trước `chat-hybrid-retrieval` — chỉ dùng cho bảng so sánh trước/sau.
+
     """
     scenarios = scenarios if scenarios is not None else load_scenarios()
     # Mode B không đi qua `_rank` (context là đúng 1 bài) — đo nó ở đây là đo cái không tồn tại.
