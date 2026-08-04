@@ -72,14 +72,26 @@ over-extension của "duyệt mạnh trụ ④" — để dành cho change sau n
 
 ## Dùng lại benchmark (chống hồi quy tiêu chí gate)
 
-Bộ **54 doc + nhãn tay** (`gate_eval.csv` cột `human_label`) + `sample_ids.txt` là mini-benchmark. Không
-có unit test nào bảo vệ *tiêu chí* gate, nên **mỗi lần sửa `GATE_PROMPT` về sau nên chạy lại nó**:
+> **⚠️ Cập nhật 22/07/2026 — hướng dẫn cũ ở mục này đã SAI và đã được thay.**
+>
+> Bản gốc bảo *"lấy lại `eval_gate.py` từ git history"*. **Không lấy được**: script bị xoá ở task 5.1
+> trước khi có commit nào chứa nó — `git log --all -- backend/app/scripts/eval_gate.py` trả về rỗng.
+> Cộng thêm hai vấn đề: `gate_eval.jsonl` chỉ lưu `content_preview` ~300 ký tự (gate đọc 2000), và 54
+> doc trong DB sẽ bị `purge_expired` xoá `normalized_content` sau `retention_months` (~17/01/2027).
+> Benchmark khi đó vừa **không chạy được** vừa **sắp hết hạn**.
+>
+> Change `gate-benchmark-durability` (22/07/2026) đã dựng lại: fixture **tự chứa** (đủ 2000 ký tự,
+> không cần DB) + harness **được commit**, đặt ở `backend/tests/eval/`.
+
+Bộ **54 doc + nhãn tay** vẫn là mini-benchmark. Không có unit test nào bảo vệ *tiêu chí* gate, nên
+**mỗi lần sửa `GATE_PROMPT` về sau phải chạy lại nó**:
 
 ```bash
-# eval_gate.py đã bị xoá (task 5.1) — lấy lại từ git history của change này nếu cần:
-#   git log --oneline -- backend/app/scripts/eval_gate.py
-cp openspec/changes/w4-gate-accuracy/eval/sample_ids.txt backend/_ids.txt
-docker compose exec -T backend python -m app.scripts.eval_gate --doc-ids-file /app/_ids.txt --out /app/rerun.jsonl
-# rồi join verdict (JSONL) với human_label (gate_eval.csv) theo doc_id → confusion matrix.
-# Kỳ vọng khi KHÔNG đổi prompt: khớp bảng trên (temp=0.0 tất định).
+docker compose exec backend python -m tests.eval.harness          # offline, 0 đồng
+docker compose exec backend python -m tests.eval.harness --live    # đo lại thật, ~$0,10
 ```
+
+Docstring đầu `backend/tests/eval/harness.py` nêu cách đọc kết quả, chi phí `--live`, giới hạn diễn
+giải của mẫu và cách sinh lại fixture.
+Nhãn tay gốc (`gate_eval.csv`), rubric và `sample_ids.txt` giữ nguyên trong thư mục này làm bằng
+chứng xuất xứ; fixture đã sinh từ chúng nên không cần copy đi đâu nữa.

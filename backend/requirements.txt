@@ -6,6 +6,9 @@ uvicorn[standard]==0.30.6
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 alembic==1.14.0
+# pgvector — kiểu cột `vector` cho ORM (chat-hybrid-retrieval). Cần kèm image Postgres có
+# extension pgvector (`pgvector/pgvector:pg16`); package Python một mình không đủ.
+pgvector==0.4.1
 
 # Scheduler (embedded auto-operation)
 apscheduler==3.10.4
@@ -20,7 +23,16 @@ beautifulsoup4==4.12.3
 lxml==5.3.0
 
 # AI
-google-genai==0.8.0
+# 0.8.0 → 1.75.0 (27/07/2026, change `chat-latency-thinking-budget`). Bản 0.8.0 vừa THIẾU
+# `thinking_budget` (chỉ có `ThinkingConfig(include_thoughts)`) vừa GIẤU `thoughts_token_count`
+# (luôn trả rỗng) — nên chi phí thinking, thứ chiếm ~90% độ trễ chat, không ghìm được mà cũng
+# không nhìn thấy được. Đây là API surface dùng chung của gate/analyze/chat/stream/intent/embed.
+#
+# ⚠️ DỪNG Ở 1.75.0, KHÔNG lên 2.x: từ 2.0 trở đi SDK đòi `pydantic>=2.12.5`, đá nhau với
+# `pydantic==2.9.2` đang pin (pip báo ResolutionImpossible). 1.75.0 là bản CUỐI của nhánh 1.x,
+# chỉ đòi `pydantic>=2.9.0`, và đã có đủ `ThinkingConfig(thinking_budget=...)` — tức là lên 2.x
+# không mua thêm được gì cho mục tiêu này mà kéo theo nâng cả pydantic/FastAPI.
+google-genai==1.75.0
 
 # HTTP client & web extraction
 httpx==0.28.1

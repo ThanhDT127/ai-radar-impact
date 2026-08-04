@@ -1,6 +1,10 @@
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16 — KHÔNG phải `postgres:16` trần: image chính thức không có
+    # extension `vector`, nên `CREATE EXTENSION vector` của migration 012 sẽ đỏ. Cùng
+    # PGDATA layout với postgres:16 nên volume `pgdata` cũ dùng tiếp được, không phải
+    # dump/restore (đổi 27/07/2026, change `chat-hybrid-retrieval`).
+    image: pgvector/pgvector:pg16
     container_name: ai_radar_db
     ports:
       - "5433:5432"

@@ -3,12 +3,17 @@
 import uuid
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import ARRAY, Boolean, ForeignKey, JSON, String, Text, Float
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.database import Base
+
+# Chiều của `text-multilingual-embedding-002` (chat-hybrid-retrieval, D1). Chốt cứng vào
+# schema — đổi số này là đổi cột, phải kèm migration + backfill lại toàn bộ.
+EMBEDDING_DIM = 768
 
 
 class Insight(Base):
@@ -55,6 +60,11 @@ class Insight(Base):
     so_what: Mapped[str | None] = mapped_column(Text, nullable=True)
     adoption_ring: Mapped[str | None] = mapped_column(String(20), nullable=True)
     practical_indicators: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Hybrid retrieval — NULL là trạng thái HỢP LỆ, không phải dữ liệu hỏng: tin chưa
+    # backfill (hoặc embed lỗi lúc publish) vẫn xếp hạng được qua tầng lexical (design D6).
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(EMBEDDING_DIM), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=func.now(), onupdate=func.now()
@@ -63,4 +73,10 @@ class Insight(Base):
     # Relationships
     raw_document: Mapped["RawDocument"] = relationship(  # noqa: F821
         "RawDocument", back_populates="insight"
+    )
+    # Đoạn thân bài — tín hiệu XẾP HẠNG, không phải nguồn trích dẫn (chat-chunk-retrieval).
+    # `lazy="raise"` cố ý: đường phục vụ chat nạp hàng trăm insight một lượt, và một lazy-load
+    # lọt vào đó là N+1 im lặng trên đúng đường nóng. Cần đoạn thì `selectinload` tường minh.
+    chunks: Mapped[list["DocumentChunk"]] = relationship(  # noqa: F821
+        "DocumentChunk", back_populates="insight", lazy="raise", passive_deletes=True
     )

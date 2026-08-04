@@ -50,3 +50,12 @@ class RawDocument(Base):
     # Relationships
     source: Mapped["Source"] = relationship("Source", back_populates="raw_documents")  # noqa: F821
     insight: Mapped["Insight | None"] = relationship("Insight", back_populates="raw_document")  # noqa: F821
+    # `passive_deletes=True` để việc xoá đi bằng `ON DELETE CASCADE` của DB thay vì kéo cả
+    # collection lên rồi xoá từng hàng — `purge_expired` xoá theo lô, không nên nạp thân bài.
+    chunks: Mapped[list["DocumentChunk"]] = relationship(  # noqa: F821
+        "DocumentChunk",
+        back_populates="raw_document",
+        lazy="raise",
+        passive_deletes=True,
+        order_by="DocumentChunk.ordinal",
+    )

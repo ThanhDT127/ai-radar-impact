@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routes.admin import router as admin_router
+from app.routes.chat import router as chat_router
 from app.routes.health import router as health_router
 from app.routes.insights import router as insights_router
 from app.routes.insights_stats import router as insights_stats_router
@@ -71,3 +72,4 @@ app.include_router(sources_router)
 app.include_router(admin_router)
 app.include_router(subscribers_router)
 app.include_router(unsubscribe_router)
+app.include_router(chat_router)

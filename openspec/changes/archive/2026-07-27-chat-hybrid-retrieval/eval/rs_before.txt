@@ -1,0 +1,82 @@
+/usr/local/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:547: UserWarning: <built-in function any> is not a Python type (it may be an instance of an object), Pydantic will allow any object with no validation since we cannot even enforce that the input is an instance of the given type. To get rid of this error wrap the type with `pydantic.SkipValidation`.
+  warn(
+Corpus 179 tin · K = 60 (settings.chat_index_top_k) · 40 câu có nhãn must_have
+
+kịch bản                    nhóm            r@60        r@5      hạng xấu nhất  trục vai trò      từ khoá
+----------------------------------------------------------------------------------------------------------------------
+exp-npm-to-layoff           absent           —          —                   —  (không có)        sa, thải, nhân, sự
+glo-absent-bitcoin          absent           —          —                   —  (không có)        giá, bitcoin
+glo-absent-layoff           absent           —          —                   —  (không có)        sa, thải, nhân, sự
+glo-absent-vn-decree        absent           —          —                   —  (không có)        nghị, định, 13, việt
+exp-entra-to-gemma          ai_model       1.00    =  1.00    =             1  (không có)        gemma, 12b, chạy, trên
+glo-gemini-agent            ai_platform    1.00    =  1.00    =             3  (không có)        gemini, api, cập, nhật
+rank-ascii-ai-blind         ascii_short    1.00    =  0.00    =            20  (không có)        (rỗng — mọi từ là stopword)
+rank-ascii-ml               ascii_short    1.00    =  0.00    =            54  (không có)        ml
+exp-kasa-to-lambda          cloud          1.00    =  1.00    =             1  (không có)        lambda, microvms
+glo-bedrock                 cloud          1.00    =  1.00    =             3  (không có)        amazon, bedrock, mô, hình
+glo-k8s-cve                 cloud          1.00    =  1.00    =             4  (không có)        kubernetes, vấn, đề, bảo
+glo-lambda-coldstart        cloud          1.00    =  1.00    =             1  (không có)        cách, giảm, cold, start
+exp-kasa-to-postquantum     crypto         1.00    =  1.00    =             1  (không có)        chuyển, sang, mã, hoá
+glo-postquantum             crypto         1.00    =  1.00    =             1  (không có)        chuyển, đổi, mã, hoá
+exp-gemma-to-eol            deprecation    0.50    =  0.50    =            76  (không có)        sản, phẩm, sắp, hết
+    ❌ cắt mất «The Electron browser is being deprecated in Cypress» — hạng thật 76/179
+exp-cypress-to-copilot      devex          1.00    =  1.00    =             1  (không có)        cách, đo, mức, dùng
+glo-copilot-metrics         devex          1.00    =  1.00    =             1  (không có)        đo, mức, dùng, copilot
+glo-secret-scanning         devex          1.00    =  1.00    =             1  (không có)        github, cải, tiến, secret
+glo-typescript              devtools       1.00    =  1.00    =             1  (không có)        bài, typescript
+rank-generic                generic        1.00    =  1.00    =             2  (không có)        (rỗng — mọi từ là stopword)
+glo-iot-security            iot            1.00    =  1.00    =             4  (không có)        thiết, iot, sự, cố
+glo-robotics                iot            1.00    =  1.00    =             3  (không có)        robotics
+glo-deepseek                open_model     1.00    =  1.00    =             2  (không có)        deepseek
+glo-open-model-analysis     open_model     1.00    =  1.00    =             5  (không có)        bài, phân, tích, sinh
+rank-open-source-models     open_model     1.00    =  0.00    =            54  (không có)        mô, hình, mã, nguồn
+glo-summary-week            overview         —          —                   —  (không có)        tóm, tắt, giúp, trọng
+exp-nettacker-to-euaiact    regulation     1.00    =  1.00    =             1  (không có)        eu, act, yêu, cầu
+glo-cra                     regulation     1.00    =  1.00    =             1  (không có)        eu, cyber, resilience, act
+glo-euaiact                 regulation     1.00    =  1.00    =             1  (không có)        eu, act, đội
+glo-role-data-engineer      role             —          —                   —  Data Engineer     data, engineer
+glo-role-security           role           1.00    =  1.00    =             4  Security          bên, security
+glo-role-empty              role_empty       —          —                   —  Data Analyst      ảnh, hưởng, data, analyst
+rank-device-trap            role_trap      1.00    =  0.50    =             6  (không có)        device, iot
+rank-devops-trap            role_trap      1.00    =  0.00    =            47  (không có)        devops
+exp-lerobot-to-secureboot   security       1.00    =  1.00    =             1  (không có)        secure, boot, microsoft, vấn
+exp-nettacker-to-zeroday    security       1.00    =  1.00    =             4  (không có)        lỗ, hổng, zero, day
+exp-rag-to-botnet           security       1.00    =  1.00    =             1  (không có)        botnet, popa
+exp-winsrv-to-k8s           security       1.00    =  1.00    =             1  (không có)        kubernetes, cve, chưa, vá
+glo-critical-security       security       1.00    =  0.50    =             9  (không có)        gần, đây, lỗ, hổng
+glo-fortinet                security       1.00    =  1.00    =             1  (không có)        cisa, cảnh, báo, fortinet
+glo-patch-tuesday           security       1.00    =  0.50    =            37  (không có)        patch, tuesday, gần, đây
+glo-secure-boot             security       1.00    =  1.00    =             1  (không có)        secure, boot, hỏng, như
+exp-euaiact-to-npm          supply_chain   1.00    =  1.00    =             1  (không có)        gần, đây, vụ, tấn
+glo-sbom                    supply_chain   1.00    =  1.00    =             1  (không có)        sbom, thể, ship, thiếu
+glo-supply-chain            supply_chain   1.00    =  0.00    =             7  (không có)        tấn, chuỗi, cung, ứng
+exp-nettacker-to-vnpost     vietnamese     1.00    =  0.50    =             9  (không có)        bài, tiếng, việt, hướng
+glo-vn-sql                  vietnamese     1.00    =  1.00    =             5  (không có)        bài, tiếng, việt, kỹ
+
+Theo nhóm:
+  absent         n=4   r@60=  —  r@5=  — 
+  ai_model       n=1   r@60=1.00 r@5=1.00   (n=1, chỉ là tín hiệu)
+  ai_platform    n=1   r@60=1.00 r@5=1.00   (n=1, chỉ là tín hiệu)
+  ascii_short    n=2   r@60=1.00 r@5=0.00
+  cloud          n=4   r@60=1.00 r@5=1.00
+  crypto         n=2   r@60=1.00 r@5=1.00
+  deprecation    n=1   r@60=0.50 r@5=0.50   (n=1, chỉ là tín hiệu)
+  devex          n=3   r@60=1.00 r@5=1.00
+  devtools       n=1   r@60=1.00 r@5=1.00   (n=1, chỉ là tín hiệu)
+  generic        n=1   r@60=1.00 r@5=1.00   (n=1, chỉ là tín hiệu)
+  iot            n=2   r@60=1.00 r@5=1.00
+  open_model     n=3   r@60=1.00 r@5=0.67
+  overview       n=1   r@60=  —  r@5=  —    (n=1, chỉ là tín hiệu)
+  regulation     n=3   r@60=1.00 r@5=1.00
+  role           n=2   r@60=1.00 r@5=1.00
+  role_empty     n=1   r@60=  —  r@5=  —    (n=1, chỉ là tín hiệu)
+  role_trap      n=2   r@60=1.00 r@5=0.25
+  security       n=8   r@60=1.00 r@5=0.88
+  supply_chain   n=3   r@60=1.00 r@5=0.67
+  vietnamese     n=2   r@60=1.00 r@5=0.75
+
+TỔNG recall@60  = 0.988   (baseline 0.988)
+TỔNG recall@5   = 0.812   (baseline 0.812)
+      recall@60 bão hoà là BÌNH THƯỜNG trên corpus 179 tin — phần nhạy là recall@5 và cột hạng xấu nhất.
+
+VERDICT: PASS ✅

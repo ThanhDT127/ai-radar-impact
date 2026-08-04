@@ -20,6 +20,34 @@ class Settings(BaseSettings):
     google_cloud_location: str = "us-central1"
     google_genai_use_vertexai: str = "True"
     gemini_model_id: str = "gemini-2.5-flash"
+    # Model nhẹ CHỈ để phân loại ý định chat khi luật lưỡng lự (~3,5% câu). Phải là model
+    # KHÔNG bật thinking mặc định: đo 25/07/2026, `gemini-2.5-flash` với
+    # `max_output_tokens=8` trả text RỖNG vì thinking ăn sạch ngân sách, còn
+    # `gemini-2.5-flash-lite` trả đúng nhãn. Đây cũng là model lite duy nhất khả dụng
+    # trong us-central1 của project này (2.0-flash-lite → 404).
+    intent_classifier_model_id: str = "gemini-2.5-flash-lite"
+    # Đặt "" để tắt tầng 2 → chỉ dùng luật tất định (lưỡng lự thì đi pipeline).
+    intent_classifier_enabled: bool = True
+    # Embedding cho retrieval lai (chat-hybrid-retrieval). Multilingual, KHÔNG phải
+    # `text-embedding-004` thiên tiếng Anh: corpus trộn Việt–Anh kỹ thuật. Chiều 768 chốt
+    # cứng trong schema (`Insight.EMBEDDING_DIM`) — đổi model ở đây mà khác chiều thì phải
+    # đổi cột + backfill lại, không phải đổi một dòng env.
+    embedding_model_id: str = "text-multilingual-embedding-002"
+    # Tắt tầng vector (retrieval rơi hoàn toàn về lexical). Van xả khi Vertex embedding sự
+    # cố kéo dài — chat vẫn chạy, chỉ kém ngữ nghĩa (design D6).
+    chat_embedding_enabled: bool = True
+    # Trần token SUY LUẬN cho lượt sinh câu trả lời chat (change `chat-latency-thinking-budget`).
+    # Đây là núm đánh đổi TỐC ĐỘ ↔ CHẤT LƯỢNG, và nó chi phối độ trễ mạnh hơn mọi thứ khác:
+    # đo 27/07/2026 trên đúng prompt chat thật, không ghìm → 8,2s/1.023 token suy luận;
+    # 1024 → 7,8s; **256 → 3,7s**; 0 → 1,8s. Trong khi câu trả lời nhìn thấy được chỉ 233–282
+    # token — model nghĩ gấp ~10 lần lượng chữ nó viết ra.
+    #
+    # Chọn 256 chứ không 0: giữ một biên suy luận cho câu tổng hợp nhiều tin, đổi lấy ~1,9s.
+    #
+    # ⚠️ LUẬT CHỈNH: chỉ nâng, không bao giờ hạ ngưỡng eval. `chat_answer_harness --live` cho
+    # Faithfulness < 0,95 hoặc Citation Precision < 1,00 ⇒ nâng 256 → 512 → 1024 tới khi xanh.
+    # 0 = tắt hẳn suy luận; -1 = để model tự quyết (hành vi trước change này).
+    chat_thinking_budget: int = 256
 
     # Server
     backend_port: int = 8000
@@ -27,6 +55,11 @@ class Settings(BaseSettings):
 
     # Cost controls
     min_content_length: int = 200
+    # ⚠️ ĐƠN VỊ ĐO KHÁC NHAU giữa hai budget dưới đây:
+    #   max_daily_analysis  đếm TÀI LIỆU — 1 tài liệu = gate call + analyze call = 2 lượt
+    #                       gọi model, nên 500 "đơn vị" thực chất tới ~1000 lượt gọi.
+    #   max_daily_chat_calls đếm LƯỢT GỌI model.
+    # Đừng so trực tiếp hai con số này với nhau.
     max_daily_analysis: int = 500
 
     # Document lifecycle (W1 quota guard)
@@ -75,6 +108,70 @@ class Settings(BaseSettings):
     email_from: str = ""
     email_from_name: str = "AI Radar"
     email_reply_to: str = ""
+
+    # Chat Q&A (M8) — consumer Gemini thứ hai, budget TÁCH BIỆT khỏi analysis.
+    # Đơn vị: LƯỢT GỌI model (xem ghi chú ở max_daily_analysis).
+    # Dashboard không có auth nên quota là hàng rào duy nhất → để khiêm tốn.
+    max_daily_chat_calls: int = 200
+    # Cửa sổ thời gian dựng index cho chế độ toàn cục. 0 = không giới hạn (cả corpus).
+    # Van xả PHỤ: hạ dần 0 → 90 → 30 nếu cần lọc theo độ mới.
+    chat_window_days: int = 0
+    # Trần số tin đưa vào index sau khi xếp hạng — van xả CHÍNH.
+    # Câu trả lời chỉ trích tối đa 5 tin, nên gửi cả kho để chọn ra 5 là lãng phí.
+    # Đo 22/07/2026 cùng một câu hỏi: 179 tin → 19.126 input + 3.930 thinking, 23,0s,
+    # $0,0160; 60 tin → 6.670 input + 2.534 thinking, 15,0s, $0,0090 (−44% chi phí,
+    # −35% thời gian). Cắt theo THỨ HẠNG nên chi phí phẳng khi corpus phình, khác
+    # `chat_window_days` cắt theo thời gian. 0 = không giới hạn.
+    chat_index_top_k: int = 60
+    # Số Ô SÂU trong context (chat-context-depth D1). Ô sâu mang đủ 7 field phân tích +
+    # bài gốc; phần còn lại vẫn là index nén ~115 token/tin. Lấp TẤT ĐỊNH: insight người
+    # dùng tham chiếu trước, còn chỗ thì lấp bằng tin xếp hạng cao nhất.
+    # Ngân sách xấu nhất đo trên fixture 179 tin: 3 × 3.466 + 57 × 115 ≈ 16,9k token,
+    # dưới mức ~19k production đã chạy. ⚠️ ĐỪNG hạ để tìm tốc độ — cắt ngữ cảnh 76% chỉ
+    # giảm độ trễ 33% (`chat-latency-thinking-budget`), còn 2 ô sâu chỉ tốn thêm 50ms.
+    chat_deep_slots: int = 3
+    # Ô sâu có kèm `raw_documents.normalized_content` không. Tắt → chỉ 7 field phân tích
+    # (641–838 token thay vì 1.527–3.466). Đo 28/07: chỉ 7 field đã đủ cho câu SO SÁNH
+    # (Comparison Adequacy 2,00/2), nhưng KHÔNG đủ cho câu hỏi CHI TIẾT — sự thật loại
+    # "gói npm nào bị chèn mã độc" chỉ nằm trong thân bài.
+    chat_deep_include_content: bool = True
+    # Số chỗ trong index DÀNH SẴN cho tin đã được trích ở các lượt trước (chat-history-pinning).
+    # `0` = tắt hoàn toàn, index trùng khít bản chưa có cơ chế này — cũng là đường rollback.
+    #
+    # Chỗ ghim nằm TRONG `chat_index_top_k`, tức là đẩy N tin ở ĐUÔI bảng xếp hạng ra; ngân
+    # sách token vì thế không phình. Đo 29/07/2026 bằng RS harness (K hiệu dụng = 60 − N):
+    #   N=3 → recall@K 0,968 = baseline (biên 3 hạng)   N=5 → 0,968 (biên 1 hạng)
+    #   N=6 → 0,968 (biên 0, sát vách)                  N=7 → 0,954 ▼ GÃY
+    # Vách nằm ở hạng 54 — đúng một `must_have` đứng đó; hạng 21–53 rỗng. `recall@5` KHÔNG
+    # đổi ở mọi mức K xuống tận 10, tức ghim ở đuôi không chạm phần đầu bảng.
+    #
+    # ⚠️ LUẬT: đổi số này ⇒ BẮT BUỘC chạy lại `tests.eval.chat_rank_harness`. Vách hạng 54 là
+    # MỘT điểm dữ liệu trên corpus 179 tin, không phải hằng số của hệ thống.
+    chat_history_pin_slots: int = 3
+
+    # --- Tra cứu ngoài khi corpus thiếu dữ kiện (chat-web-fallback) --------------------
+    # Mặc định TẮT: đây là đường duy nhất trong chat tiêu tiền theo một đơn giá khác hẳn, và
+    # nó mở nội dung web lạ vào prompt. Bật lên chỉ sau khi có số tỉ lệ sentinel giả (task 9.2).
+    # Tắt ⇒ prompt không mang luật sentinel web, pipeline y hệt trước change.
+    chat_web_fallback_enabled: bool = False
+    # Đơn vị: TRUY VẤN tra cứu. Cố ý TÁCH khỏi `max_daily_chat_calls` (đơn vị: lượt gọi model)
+    # — cùng lập luận đã dùng cho lượt embed và bộ phân loại ý định tầng 2: hai thứ có đơn giá
+    # cách nhau bậc thì trộn chung bộ đếm là để loại rẻ bào mòn budget của loại đắt.
+    # Đo 03/08/2026: grounding $35/1.000 truy vấn (Gemini 2.x) so với ~$0,006 cho cả một câu
+    # trả lời ⇒ một lần tra cứu ≈ 6× toàn bộ câu trả lời.
+    max_daily_web_searches: int = 50
+    # Số nguồn web tối đa rót vào context một lượt. Đây là CẮT BẮT BUỘC, không phải phòng xa:
+    # đo 03/08, grounding trả về 9–10 `grounding_chunks` cho một truy vấn kỹ thuật thường.
+    chat_web_max_sources: int = 3
+    # Model cho BƯỚC TRA CỨU (bước 2). Spike 0.2 xác nhận flash-lite lái được `google_search`
+    # và cho `grounding_chunks` + `search_entry_point` không kém flash — mà bước đó chỉ cần
+    # tìm nguồn, không cần viết văn. Giá grounding tính theo TRUY VẤN nên không đổi; phần
+    # token thì rẻ hơn một bậc.
+    chat_web_search_model_id: str = "gemini-2.5-flash-lite"
+    # Trần thời gian cho MỘT uri (giải chuyển hướng + tải + trích xuất). Đo 03/08: giải
+    # chuyển hướng 0,5–2,1s, tải + trích xuất thêm 0,2–1,6s. Chạy song song nên trần này là
+    # cho từng nguồn, không phải cho cả cụm.
+    chat_web_fetch_timeout_seconds: float = 8.0
 
     # Admin API
     admin_api_key: str = "changeme"

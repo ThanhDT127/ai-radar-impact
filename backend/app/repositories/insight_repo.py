@@ -217,6 +217,41 @@ class InsightRepository:
         result = await self.session.execute(query.order_by(Insight.created_at.asc()))
         return list(result.scalars().all())
 
+    async def list_for_chat(
+        self, published_since: datetime | None = None
+    ) -> list[Insight]:
+        """Ứng viên dựng index cho chat chế độ toàn cục (chatbot-qa D3/D7).
+
+        Method RIÊNG, không nhồi tham số vào `list_paginated` — hàm đó phục vụ UI, thêm
+        param là thêm bề mặt hồi quy cho dashboard.
+
+        Trả ORM entities (không serialize) vì tầng trên còn phải xếp hạng bằng
+        `delivery_engine.score_for_role()`, hàm đó đọc `recommendations` JSONB thô.
+
+        `status="published" AND is_primary` là BẮT BUỘC: bỏ `is_primary` thì index chứa
+        cả bản trùng của cụm dedup, chat sẽ trích dẫn tin mà dashboard không hiển thị.
+
+        Ba tham số lọc `topics`/`roles`/`keyword` **đã bị bỏ** (27/07/2026): chúng sinh ra
+        theo yêu cầu của task 1.7 `chatbot-qa`, rồi D3 chốt nhét cả index nên không caller
+        nào từng truyền vào — ~15 dòng SQL chết mang dáng vẻ của một tính năng đang chạy.
+        Cần lại thì `git` còn đó.
+        """
+        query = (
+            select(Insight)
+            .join(RawDocument, Insight.raw_document_id == RawDocument.id)
+            .where(Insight.status == "published")
+            .where(Insight.is_primary == True)  # noqa: E712
+            .options(selectinload(Insight.raw_document).selectinload(RawDocument.source))
+        )
+
+        if published_since is not None:
+            query = query.where(Insight.published_at >= published_since)
+
+        result = await self.session.execute(
+            query.order_by(Insight.published_at.desc().nulls_last())
+        )
+        return list(result.scalars().unique().all())
+
     async def get_by_id(self, insight_id: uuid.UUID) -> dict | None:
         """Return a single insight by UUID with references, or None."""
         result = await self.session.execute(

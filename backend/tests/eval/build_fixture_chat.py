@@ -1,0 +1,392 @@
+"""Sinh phần corpus của fixture chat từ DB — bằng chứng xuất xứ, giữ lại đừng dọn.
+
+    docker compose exec backend python -m tests.eval.build_fixture_chat
+
+Ghi bốn file (xem `chat_fixture.py` để biết vì sao tách):
+
+    tests/eval/chat_corpus.jsonl        mọi insight `published` + `is_primary`
+    tests/eval/chat_anchors.jsonl       `normalized_content` của các bài mà kịch bản neo vào
+    tests/eval/chat_embeddings.jsonl    vector của từng insight (đọc thẳng từ cột DB)
+    tests/eval/chat_query_vectors.jsonl vector của từng câu hỏi trong bộ kịch bản
+
+⚠️ Chỉ phần **query vector** gọi Vertex (~50 lượt embed, vài xu) — corpus lấy vector có sẵn
+trong DB nên không tốn gì. Tin nào `embedding IS NULL` thì chạy
+`python -m app.scripts.embed_insights` TRƯỚC, không thì fixture thiếu vector và bộ đo xếp
+hạng sẽ đo một `_rank` rơi về lexical mà không báo gì.
+
+Anchor lấy từ `chat_scenarios.jsonl` (nếu đã có): script đọc `anchor_insight_id` của các
+kịch bản mode `insight`/`expanded` rồi chỉ xuất content của đúng những bài đó. Lần chạy
+đầu tiên — lúc chưa soạn kịch bản — file kịch bản chưa tồn tại là chuyện bình thường,
+script bỏ qua phần anchor và báo rõ. Soạn kịch bản xong thì chạy lại để lấy content.
+
+⚠️ `normalized_content` bị `purge_expired` xoá sau `retention_months`. Sau mốc đó script
+này không dựng lại được anchor cũ nữa — đúng lý do fixture phải tự chứa thay vì trỏ id
+vào DB (bài học `gate-benchmark-durability`).
+
+Change change fixture (thêm kịch bản, mở rộng corpus) thì baseline trong
+`chat_answer_harness.py` KHÔNG còn so sánh được — chốt lại baseline kèm lý do.
+"""
+
+import argparse
+import asyncio
+import json
+import uuid
+from pathlib import Path
+
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+from app.ai.gemini_client import EMBED_TASK_QUERY, GeminiClient
+from app.database import async_session_maker
+from app.models.insight import Insight
+from app.ai.chunking import MAX_CHARS, OVERLAP_CHARS, TARGET_CHARS
+from app.config import settings
+from app.repositories.document_chunk_repo import DocumentChunkRepository
+from tests.eval.chat_fixture import (
+    ANCHORS_PATH,
+    CHUNK_RANKS_PATH,
+    CORPUS_FIELDS,
+    CORPUS_PATH,
+    EMBEDDINGS_PATH,
+    QUERY_VECTORS_PATH,
+    SCENARIOS_PATH,
+)
+
+# Số chữ số thập phân giữ lại của mỗi thành phần vector. Nguyên bản ~17 chữ số làm file
+# phình gấp đôi mà không đổi được thứ hạng nào: thành phần embedding cỡ 1e-2 nên 6 chữ số
+# đã dư bốn chữ số có nghĩa, và cosine là tổng của 768 tích — sai số làm tròn triệt tiêu
+# lẫn nhau chứ không cộng dồn.
+VECTOR_PRECISION = 6
+
+
+def _serialize(insight: Insight) -> dict:
+    row = {}
+    for field in CORPUS_FIELDS:
+        value = getattr(insight, field)
+        if field in ("id",):
+            value = str(value)
+        elif hasattr(value, "isoformat"):
+            value = value.isoformat()
+        row[field] = value
+    return row
+
+
+def _wanted_anchor_ids(scenarios_path: Path) -> set[str]:
+    """Bài nào cần `normalized_content` trong fixture.
+
+    Hai nguồn, và nguồn thứ hai là thứ dễ quên:
+      · `anchor_insight_id` — bài mà mode B/expanded neo vào;
+      · `must_have` của nhóm **`detail_discovery`** — câu hỏi bằng định danh chỉ có trong
+        THÂN BÀI. Chúng đi đường `global`, không có anchor, nhưng từ `chat-context-depth`
+        thì ô sâu rót cả `normalized_content` cho vài tin xếp hạng cao nhất của BẤT KỲ câu
+        toàn cục nào.
+
+    ⚠️ Thiếu nguồn thứ hai thì bộ đo nói dối theo hướng bi quan: đo 28/07, ba kịch bản
+    `detail_discovery` xếp **hạng 1** (tức là đã nằm trong ô sâu) vẫn bị chấm "từ chối", chỉ
+    vì fixture không có thân bài để rót — production thì có. Nhóm bị chấm AnsRel 0,57 trong
+    khi pipeline thật không hề hỏng như vậy.
+    """
+    if not scenarios_path.exists():
+        print(f"(chưa có {scenarios_path.name} — bỏ qua phần anchor, chạy lại sau khi soạn kịch bản)")
+        return set()
+    ids = set()
+    for line in scenarios_path.open(encoding="utf-8"):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row.get("anchor_insight_id"):
+            ids.add(row["anchor_insight_id"])
+        if row.get("group") == "detail_discovery":
+            ids.update(row.get("must_have") or [])
+    return ids
+
+
+def _round(vector) -> list[float]:
+    return [round(float(v), VECTOR_PRECISION) for v in vector]
+
+
+def _write_embeddings(insights: list[Insight], path: Path) -> None:
+    """Vector của corpus — đọc thẳng từ cột DB, KHÔNG gọi Vertex lại.
+
+    Embed lại ở đây sẽ tạo ra một tập vector thứ hai khác tập đang phục vụ production, và
+    bộ đo sẽ đo một corpus mà chat thật không bao giờ thấy.
+    """
+    missing = [str(i.id) for i in insights if i.embedding is None]
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} insight chưa có embedding — chạy "
+            "`python -m app.scripts.embed_insights` trước, không thì bộ đo xếp hạng sẽ "
+            f"lặng lẽ đo lối lexical.\nVí dụ: {missing[:3]}"
+        )
+    with path.open("w", encoding="utf-8") as fh:
+        for insight in insights:
+            fh.write(
+                json.dumps(
+                    {"insight_id": str(insight.id), "embedding": _round(insight.embedding)},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    print(f"Đã ghi {len(insights)} vector insight vào {path}")
+
+
+def _write_query_vectors(scenarios_path: Path, path: Path) -> None:
+    """Vector của từng CÂU HỎI — chỗ duy nhất trong script này gọi Vertex.
+
+    `RETRIEVAL_QUERY` chứ không `RETRIEVAL_DOCUMENT`: phải khớp đúng task_type mà
+    `ChatService._embed_question` dùng, không thì fixture đo một cặp query↔doc lệch với
+    production.
+    """
+    if not scenarios_path.exists():
+        print(f"(chưa có {scenarios_path.name} — bỏ qua query vector)")
+        return
+
+    rows = [json.loads(line) for line in scenarios_path.open(encoding="utf-8") if line.strip()]
+    questions = [(row["id"], row["question"]) for row in rows]
+    vectors = GeminiClient().embed([q for _, q in questions], EMBED_TASK_QUERY)
+
+    failed = [sid for (sid, _), v in zip(questions, vectors) if v is None]
+    if failed:
+        raise SystemExit(f"Embed câu hỏi lỗi cho {len(failed)} kịch bản: {failed[:5]}")
+
+    with path.open("w", encoding="utf-8") as fh:
+        for (scenario_id, _), vector in zip(questions, vectors):
+            fh.write(
+                json.dumps(
+                    {"scenario_id": scenario_id, "embedding": _round(vector)},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    print(f"Đã ghi {len(questions)} vector câu hỏi vào {path}")
+
+
+async def _write_chunk_ranks(session, scenarios_path: Path, path: Path) -> None:
+    """Đông lạnh **KẾT QUẢ** truy vấn đoạn cho từng kịch bản (design D4, phương án C).
+
+    Đông lạnh thứ hạng chứ KHÔNG đông lạnh vector đoạn. Hai lý do, lý do thứ hai mới là lý
+    do thật:
+
+    1. dung lượng — 535 vector đoạn là 4,3MB, gấp ba `chat_embeddings.jsonl`;
+    2. ⚠️ đông lạnh vector buộc harness phải **tự tính lại** thứ hạng đoạn trong Python, tức
+       là dựng lại phép `ORDER BY embedding <=>` + gộp `min` của SQL bằng một đoạn code thứ
+       hai. Đó đúng là chế độ hỏng "hai đường tính khác nhau, không có gì báo lỗi" mà phương
+       án A bị loại vì nó. Đông lạnh đầu ra thì harness đo `_rank` với **chính con số
+       production đưa vào**.
+
+    Cái giá: đổi hằng số chunk / đổi model embedding / thêm kịch bản ⇒ phải chạy lại.
+    """
+    if not scenarios_path.exists():
+        print(f"(chưa có {scenarios_path.name} — bỏ qua chunk ranks)")
+        return
+    if not QUERY_VECTORS_PATH.exists():
+        raise SystemExit("Cần query vector trước khi đông lạnh chunk ranks.")
+
+    vectors = {
+        json.loads(l)["scenario_id"]: json.loads(l)["embedding"]
+        for l in QUERY_VECTORS_PATH.open(encoding="utf-8")
+        if l.strip()
+    }
+    rows = [json.loads(l) for l in scenarios_path.open(encoding="utf-8") if l.strip()]
+    repo = DocumentChunkRepository(session)
+
+    if await repo.count() == 0:
+        raise SystemExit(
+            "Bảng document_chunks rỗng — chạy `python -m app.scripts.chunk_documents` "
+            "trước, không thì fixture đông lạnh một pipeline KHÔNG có tầng đoạn và bộ đo "
+            "sẽ im lặng chấm sai."
+        )
+
+    # Dòng META đầu file: dấu vân tay của LÔ CHUNK đã sinh ra bảng thứ hạng này. Không có
+    # nó thì fixture mốc một cách IM LẶNG — đổi hằng số chunk rồi `chunk_documents --redo`
+    # tạo ra một lô đoạn khác hẳn, trong khi thứ hạng đông lạnh vẫn là của lô cũ, và RS
+    # harness tiếp tục cho ra những con số trông hoàn toàn bình thường. Cùng họ với hai lỗi
+    # "bộ đo nói dối" đã phải sửa ở change này.
+    meta = {
+        "meta": True,
+        "chunk_count": await repo.count(),
+        "chunk_constants": [TARGET_CHARS, MAX_CHARS, OVERLAP_CHARS],
+        "embedding_model": settings.embedding_model_id,
+    }
+    with path.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps(meta, ensure_ascii=False) + "\n")
+        for row in rows:
+            vector = vectors.get(row["id"])
+            ranks = await repo.retrieve_chunk_ranks(vector) if vector else {}
+            fh.write(
+                json.dumps(
+                    {"scenario_id": row["id"],
+                     "ranks": {str(k): v for k, v in ranks.items()}},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    print(f"Đã ghi chunk ranks của {len(rows)} kịch bản vào {path}")
+
+
+async def build(corpus_path: Path, anchors_path: Path, scenarios_path: Path) -> None:
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Insight)
+            .where(Insight.status == "published")
+            .where(Insight.is_primary == True)  # noqa: E712
+            .options(selectinload(Insight.raw_document))
+            .order_by(Insight.published_at.desc().nullslast(), Insight.created_at.desc())
+        )
+        insights = list(result.scalars().all())
+
+        with corpus_path.open("w", encoding="utf-8") as fh:
+            for insight in insights:
+                fh.write(json.dumps(_serialize(insight), ensure_ascii=False) + "\n")
+        print(f"Đã ghi {len(insights)} insight vào {corpus_path}")
+
+        _write_embeddings(insights, EMBEDDINGS_PATH)
+        _write_query_vectors(scenarios_path, QUERY_VECTORS_PATH)
+        await _write_chunk_ranks(session, scenarios_path, CHUNK_RANKS_PATH)
+
+        wanted = _wanted_anchor_ids(scenarios_path)
+        if not wanted:
+            return
+
+        by_id = {str(i.id): i for i in insights}
+        missing = sorted(wanted - set(by_id))
+        if missing:
+            raise SystemExit(
+                f"{len(missing)} anchor không còn là insight published+is_primary:\n"
+                + "\n".join(missing)
+            )
+
+        written = 0
+        with anchors_path.open("w", encoding="utf-8") as fh:
+            for insight_id in sorted(wanted):
+                doc = by_id[insight_id].raw_document
+                content = (doc.normalized_content or "").strip() if doc else ""
+                if not content:
+                    raise SystemExit(
+                        f"{insight_id}: normalized_content rỗng (đã purge?) — "
+                        "chọn anchor khác cho kịch bản mode B."
+                    )
+                fh.write(
+                    json.dumps(
+                        {
+                            "insight_id": insight_id,
+                            "title": by_id[insight_id].title,
+                            "normalized_content": content,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+                written += 1
+        print(f"Đã ghi nội dung bài gốc của {written} anchor vào {anchors_path}")
+
+
+async def top_up(anchors_path: Path, scenarios_path: Path) -> None:
+    """Bổ sung anchor + query vector cho các kịch bản MỚI, KHÔNG đụng corpus/embeddings.
+
+    Vì sao cần đường riêng: `build()` ghi đè `chat_corpus.jsonl` bằng nội dung DB **hiện
+    tại**. Thêm vài kịch bản mà chạy `build()` là vô tình đổi luôn corpus, và mọi baseline
+    (RS lẫn answer-eval) mất tính so sánh được — điểm tụt vì corpus đổi sẽ bị đọc nhầm
+    thành hồi quy. Fixture phải đo *hồi quy so với chính nó*, nên phần ảnh chụp chỉ được
+    sinh lại một cách CÓ CHỦ ĐÍCH, không phải như tác dụng phụ của việc thêm kịch bản.
+    """
+    have_vectors = set()
+    if QUERY_VECTORS_PATH.exists():
+        have_vectors = {
+            json.loads(line)["scenario_id"]
+            for line in QUERY_VECTORS_PATH.open(encoding="utf-8")
+            if line.strip()
+        }
+    rows = [json.loads(l) for l in scenarios_path.open(encoding="utf-8") if l.strip()]
+    new = [r for r in rows if r["id"] not in have_vectors]
+
+    if new:
+        vectors = GeminiClient().embed([r["question"] for r in new], EMBED_TASK_QUERY)
+        failed = [r["id"] for r, v in zip(new, vectors) if v is None]
+        if failed:
+            raise SystemExit(f"Embed câu hỏi lỗi cho {len(failed)} kịch bản: {failed[:5]}")
+        with QUERY_VECTORS_PATH.open("a", encoding="utf-8") as fh:
+            for row, vector in zip(new, vectors):
+                fh.write(
+                    json.dumps(
+                        {"scenario_id": row["id"], "embedding": _round(vector)},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        print(f"Đã thêm {len(new)} vector câu hỏi vào {QUERY_VECTORS_PATH.name}")
+    else:
+        print("Mọi kịch bản đã có vector câu hỏi")
+
+    # Chunk ranks sinh lại TOÀN BỘ, không chỉ phần mới: nó là truy vấn DB thuần, miễn phí
+    # và tất định, nên không có lý do gì để nó lệch pha với bộ kịch bản. (Khác query vector —
+    # cái đó tốn tiền embed nên chỉ bù phần thiếu.)
+    async with async_session_maker() as session:
+        await _write_chunk_ranks(session, scenarios_path, CHUNK_RANKS_PATH)
+
+    have_anchors = set()
+    if anchors_path.exists():
+        have_anchors = {
+            json.loads(line)["insight_id"]
+            for line in anchors_path.open(encoding="utf-8")
+            if line.strip()
+        }
+    wanted = _wanted_anchor_ids(scenarios_path) - have_anchors
+    if not wanted:
+        print("Mọi anchor đã có nội dung bài gốc")
+        return
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Insight)
+            .where(Insight.id.in_([uuid.UUID(i) for i in wanted]))
+            .options(selectinload(Insight.raw_document))
+        )
+        by_id = {str(i.id): i for i in result.scalars().all()}
+
+    missing = sorted(wanted - set(by_id))
+    if missing:
+        raise SystemExit(f"{len(missing)} anchor không có trong DB:\n" + "\n".join(missing))
+
+    with anchors_path.open("a", encoding="utf-8") as fh:
+        for insight_id in sorted(wanted):
+            doc = by_id[insight_id].raw_document
+            content = (doc.normalized_content or "").strip() if doc else ""
+            if not content:
+                raise SystemExit(
+                    f"{insight_id}: normalized_content rỗng (đã purge?) — chọn anchor khác."
+                )
+            fh.write(
+                json.dumps(
+                    {
+                        "insight_id": insight_id,
+                        "title": by_id[insight_id].title,
+                        "normalized_content": content,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    print(f"Đã thêm nội dung bài gốc của {len(wanted)} anchor vào {anchors_path.name}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--corpus", type=Path, default=CORPUS_PATH)
+    parser.add_argument("--anchors", type=Path, default=ANCHORS_PATH)
+    parser.add_argument("--scenarios", type=Path, default=SCENARIOS_PATH)
+    parser.add_argument(
+        "--top-up",
+        action="store_true",
+        help="CHỈ bổ sung anchor + query vector cho kịch bản mới; KHÔNG sinh lại corpus "
+        "(sinh lại corpus làm mọi baseline mất tính so sánh được)",
+    )
+    args = parser.parse_args()
+    if args.top_up:
+        asyncio.run(top_up(args.anchors, args.scenarios))
+    else:
+        asyncio.run(build(args.corpus, args.anchors, args.scenarios))
+
+
+if __name__ == "__main__":
+    main()

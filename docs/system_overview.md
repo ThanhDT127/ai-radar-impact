@@ -306,6 +306,27 @@ Frontend hiển thị:
 docker-compose up -d
 ```
 
+> ⚠️ **Image Postgres phải có pgvector** — `pgvector/pgvector:pg16`, không phải `postgres:16`
+> trần. Migration `012` chạy `CREATE EXTENSION vector` cho cột `insights.embedding` (chat
+> hybrid retrieval); image không có extension thì `alembic upgrade head` đỏ ngay ở bước đó.
+>
+> Nếu đang nâng cấp một volume `pgdata` cũ tạo bằng `postgres:16-alpine`: alpine dùng musl,
+> image pgvector dùng glibc, hai libc sắp xếp `en_US.utf8` khác nhau ⇒ chạy
+> `docker compose exec db psql -U radar -d ai_radar -c "REINDEX DATABASE ai_radar;"` một lần
+> sau khi đổi. Dữ liệu giữ nguyên, không phải dump/restore.
+
+### Backfill embedding (sau migration 012, hoặc sau khi ingest hàng loạt)
+
+Migration chỉ tạo **cột rỗng** — nó cố ý không gọi Vertex để `alembic upgrade head` chạy được
+offline. Tin mới tự có embedding lúc phân tích; tin cũ vá bằng:
+
+```powershell
+docker-compose exec backend python -m app.scripts.embed_insights
+```
+
+Chạy lại được nhiều lần (chỉ đụng tin đang thiếu). Thiếu embedding **không** làm chat gãy —
+tin đó vẫn tìm được bằng từ khoá, chỉ kém phần ngữ nghĩa.
+
 ### Seed source
 
 ```powershell
@@ -397,11 +418,47 @@ hai tiêu đề khác nhau ở hai nơi. Dòng digest cắt ở 110 ký tự cho
 Lưu ý tên chủ đề (`📌 DevTools & Frameworks`, `AI/ML Ứng dụng`…) vẫn hiển thị nguyên giá trị taxonomy
 v3, giống hệt dashboard. Muốn Việt hoá thì phải làm bảng nhãn dùng chung cho cả hai nơi.
 
+### Chat Q&A (M8 — thêm 22/07/2026)
+
+Widget 💬 ở góc phải dưới mọi trang dashboard. Hai chế độ trên cùng một endpoint:
+
+- **Đang mở một tin** (`/insights/:id`) → câu hỏi chạy trên **tin đó + toàn bộ bài gốc**. Badge
+  "Phạm vi" trên đầu widget chuyển được **hai chiều** giữa *Bài đang xem* và *Toàn hệ thống*.
+  Hỏi câu vượt ra ngoài bài thì server **tự mở rộng** sang toàn kho và nói rõ điều đó ở đầu câu
+  trả lời — không cần bấm gì.
+- **Không mở tin nào** → hỏi toàn bộ kho tin. Server tự lọc, **xếp hạng theo hai tầng** (độ liên
+  quan tới câu hỏi trước, độ quan trọng sau), **cắt lấy 60 tin đầu** (`CHAT_INDEX_TOP_K`) rồi nén
+  thành danh sách đánh số đưa vào một lần gọi Gemini — không có "tìm kiếm" riêng, model đọc thẳng
+  danh sách đã xếp sẵn. Nhờ cắt top-K nên kho tin lớn lên không làm câu hỏi đắt thêm.
+
+  Từ 27/07/2026 tầng "độ liên quan" là **lai**: trộn khớp từ khoá với **tương đồng ngữ nghĩa**
+  (embedding). Nhờ vậy câu hỏi diễn đạt khác chữ trong tin vẫn tìm ra — hỏi "DevOps cần chú ý gì"
+  thì checklist Kubernetes (không hề chứa chữ "DevOps") vẫn lên đầu. **Không có ngưỡng loại tin**:
+  hệ thống luôn trả về 60 tin tốt nhất chứ không bao giờ báo "không đủ giống".
+
+Câu trả lời luôn kèm marker `[n]` bấm được, dẫn tới đúng tin nguồn. Không có dữ liệu thì bot nói
+"không tìm thấy trong hệ thống" thay vì đoán bừa.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"Tuần này có lỗ hổng nào cần vá gấp không?"}'
+```
+
+Giới hạn: `MAX_DAILY_CHAT_CALLS` (mặc định 200 lượt gọi model/ngày, tính theo giờ UTC, **tách riêng**
+khỏi hạn mức phân tích). Hết lượt thì API trả 429 và widget báo bằng tiếng Việt.
+
+**Tốc độ trả lời** (đo 27/07/2026 trên 62 câu thật): trung vị **4,7s** cho câu thường, **6,9s** cho
+câu phải tự mở rộng phạm vi (tốn 2 lượt gọi model). Trước 27/07 con số này là 15-30s — phần lớn thời
+gian đó là model "suy nghĩ" nội bộ; nay ngân sách suy nghĩ đã được ghìm bằng `CHAT_THINKING_BUDGET`.
+Câu tóm tắt tổng hợp nhiều tin vẫn có thể tới ~9s. Chi phí khoảng $0,002-0,004/câu.
+
 ### Xem kết quả
 
 - UI: `http://localhost:5173`
 - Health: `http://localhost:8000/api/v1/health`
 - API list: `http://localhost:8000/api/v1/insights`
+- Chat: `POST http://localhost:8000/api/v1/chat`
 - Admin API: `http://localhost:8000/api/v1/admin/` (Bearer token required)
 
 

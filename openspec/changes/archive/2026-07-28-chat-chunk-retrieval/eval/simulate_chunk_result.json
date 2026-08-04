@@ -1,0 +1,437 @@
+{
+ "chunks": 535,
+ "detail": [
+  {
+   "id": "det-squashfs",
+   "probe": "SquashFS",
+   "before": 7,
+   "after": 4
+  },
+  {
+   "id": "det-gpai-annex",
+   "probe": "GPAI / Annex",
+   "before": 1,
+   "after": 1
+  },
+  {
+   "id": "det-ipfs-c2",
+   "probe": "IPFS",
+   "before": 2,
+   "after": 1
+  },
+  {
+   "id": "det-servfail",
+   "probe": "SERVFAIL / DNSKEY",
+   "before": 1,
+   "after": 1
+  },
+  {
+   "id": "det-arnnotequals",
+   "probe": "ArnNotEquals / PrincipalArn",
+   "before": 1,
+   "after": 1
+  },
+  {
+   "id": "det-ssrf-assumerole",
+   "probe": "SSRF / AssumeRole",
+   "before": 6,
+   "after": 3
+  },
+  {
+   "id": "det-spdx-cyclonedx",
+   "probe": "SPDX / CycloneDX",
+   "before": 29,
+   "after": 4
+  },
+  {
+   "id": "det-firecracker",
+   "probe": "Firecracker / microVM",
+   "before": 2,
+   "after": 1
+  },
+  {
+   "id": "det-eytzinger",
+   "probe": "Eytzinger",
+   "before": 1,
+   "after": 1
+  },
+  {
+   "id": "det-chunking-strategy",
+   "probe": "ChunkingStrategy",
+   "before": 15,
+   "after": 2
+  },
+  {
+   "id": "det-jubair",
+   "probe": "Jubair / Thalha",
+   "before": 1,
+   "after": 1
+  },
+  {
+   "id": "det-qurium",
+   "probe": "Qurium / Synthient",
+   "before": 1,
+   "after": 1
+  },
+  {
+   "id": "det-hmac-agent",
+   "probe": "HMAC-SHA256 / AgentAuthz",
+   "before": 20,
+   "after": 3
+  },
+  {
+   "id": "det-cypress-defaultbrowser",
+   "probe": "defaultBrowser / defineConfig",
+   "before": 1,
+   "after": 1
+  },
+  {
+   "id": "det-rabbitmq-c2",
+   "probe": "RabbitMQ / Redis",
+   "before": 1,
+   "after": 1
+  }
+ ],
+ "regression": [
+  {
+   "id": "exp-nettacker-to-zeroday",
+   "group": "security",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "exp-nettacker-to-euaiact",
+   "group": "regulation",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "exp-kasa-to-postquantum",
+   "group": "crypto",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "exp-kasa-to-lambda",
+   "group": "cloud",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "exp-euaiact-to-npm",
+   "group": "supply_chain",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "exp-winsrv-to-k8s",
+   "group": "security",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "exp-cypress-to-copilot",
+   "group": "devex",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "exp-rag-to-botnet",
+   "group": "security",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "exp-gemma-to-eol",
+   "group": "deprecation",
+   "before": 0.5,
+   "after": 0.5
+  },
+  {
+   "id": "exp-entra-to-gemma",
+   "group": "ai_model",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "exp-lerobot-to-secureboot",
+   "group": "security",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "exp-nettacker-to-vnpost",
+   "group": "vietnamese",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-critical-security",
+   "group": "security",
+   "before": 0.5,
+   "after": 0.5
+  },
+  {
+   "id": "glo-fortinet",
+   "group": "security",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-patch-tuesday",
+   "group": "security",
+   "before": 0.5,
+   "after": 1.0
+  },
+  {
+   "id": "glo-secure-boot",
+   "group": "security",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-supply-chain",
+   "group": "supply_chain",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-sbom",
+   "group": "supply_chain",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-postquantum",
+   "group": "crypto",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-euaiact",
+   "group": "regulation",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-cra",
+   "group": "regulation",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-open-model-analysis",
+   "group": "open_model",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-deepseek",
+   "group": "open_model",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-gemini-agent",
+   "group": "ai_platform",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-bedrock",
+   "group": "cloud",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-lambda-coldstart",
+   "group": "cloud",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-k8s-cve",
+   "group": "cloud",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-secret-scanning",
+   "group": "devex",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-copilot-metrics",
+   "group": "devex",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-robotics",
+   "group": "iot",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-iot-security",
+   "group": "iot",
+   "before": 1.0,
+   "after": 0.5
+  },
+  {
+   "id": "glo-vn-sql",
+   "group": "vietnamese",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-typescript",
+   "group": "devtools",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "glo-role-security",
+   "group": "role",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "rank-open-source-models",
+   "group": "open_model",
+   "before": 0.3333333333333333,
+   "after": 0.6666666666666666
+  },
+  {
+   "id": "rank-ascii-ml",
+   "group": "ascii_short",
+   "before": 0.0,
+   "after": 0.0
+  },
+  {
+   "id": "rank-ascii-ai-blind",
+   "group": "ascii_short",
+   "before": 0.0,
+   "after": 0.0
+  },
+  {
+   "id": "rank-device-trap",
+   "group": "role_trap",
+   "before": 1.0,
+   "after": 0.5
+  },
+  {
+   "id": "rank-devops-trap",
+   "group": "role_trap",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "rank-generic",
+   "group": "generic",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "rank-eol-khai-tu",
+   "group": "semantic",
+   "before": 0.0,
+   "after": 0.0
+  },
+  {
+   "id": "rank-vram-semantic",
+   "group": "semantic",
+   "before": 0.25,
+   "after": 0.25
+  },
+  {
+   "id": "cmp-pq-explicit",
+   "group": "comparison",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-eu-explicit",
+   "group": "comparison",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-gemma-explicit",
+   "group": "comparison",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-lambda-explicit",
+   "group": "comparison",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-supply-explicit",
+   "group": "comparison",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-0day-explicit",
+   "group": "comparison",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-k8s-explicit",
+   "group": "comparison",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-openmodel-explicit",
+   "group": "comparison",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-pq-partial",
+   "group": "comparison_partial",
+   "before": 1.0,
+   "after": 0.5
+  },
+  {
+   "id": "cmp-eu-partial",
+   "group": "comparison_partial",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-supply-partial",
+   "group": "comparison_partial",
+   "before": 0.0,
+   "after": 0.5
+  },
+  {
+   "id": "cmp-pq-expanded",
+   "group": "comparison_in_article",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-eu-expanded",
+   "group": "comparison_in_article",
+   "before": 1.0,
+   "after": 1.0
+  },
+  {
+   "id": "cmp-lambda-expanded",
+   "group": "comparison_in_article",
+   "before": 1.0,
+   "after": 1.0
+  }
+ ],
+ "detail_recall5_before": 0.6666666666666666,
+ "detail_recall5_after": 1.0,
+ "rs_recall5_before": 0.8764880952380952,
+ "rs_recall5_after": 0.8735119047619048
+}

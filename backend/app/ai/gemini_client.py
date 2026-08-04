@@ -4,14 +4,21 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 
 from google import genai
 from google.genai import types
 
-from app.ai.prompts import ALLOWED_CONTENT_TYPES, build_gate_prompt, build_prompt
+from app.ai.prompts import (
+    ALLOWED_CONTENT_TYPES,
+    WEB_SEARCH_PROMPT,
+    build_gate_prompt,
+    build_prompt,
+)
 from app.ai.schemas import build_gate_schema
 from app.config import settings
+from app.models.insight import EMBEDDING_DIM
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +28,256 @@ MODEL_ID = settings.gemini_model_id
 # chạm tới nguyên nhân. Chỉ log dài ở nhánh exception nên không phình log lúc chạy
 # bình thường (design D5).
 RAW_LOG_CHARS = 2000
+
+# Trần output cho chat. 2048 KHÔNG đủ: Gemini 2.5 tính thinking tokens vào cùng ngân
+# sách này, và câu hỏi kiểu "liệt kê tin bảo mật tuần này" sinh ~1150 token nhìn thấy
+# được cộng thinking là chạm trần rồi bị cắt giữa từ (đo 22/07/2026).
+#
+# Nâng 4096 → 8192 (25/07/2026): chỉ bị tính tiền theo token THỰC SINH, nên trần cao hơn
+# không đắt hơn cho câu ngắn — nó chỉ ngừng cắt oan câu dài. Đây là tuyến phòng thủ 1;
+# tuyến 2 là hỏi lại kèm ràng buộc độ dài (xem `_CONCISE_RETRY_DIRECTIVE`).
+CHAT_MAX_OUTPUT_TOKENS = 8192
+
+# Chỉ dẫn dán thêm khi lượt đầu bị cắt. KHÔNG cắt bớt phạm vi câu trả lời — yêu cầu model
+# gộp ý để vẫn đủ ý mà vừa ngân sách. Trả về nửa câu kèm lời xin lỗi (cách làm cũ) là không
+# chấp nhận được: người dùng nhận một câu trả lời sai lệch vì thiếu vế sau.
+_CONCISE_RETRY_DIRECTIVE = (
+    "\n\n### RÀNG BUỘC ĐỘ DÀI (bắt buộc)\n"
+    "Câu trả lời lần trước đã bị cắt giữa chừng vì quá dài. Lần này hãy trả lời "
+    "NGẮN GỌN NHƯNG TRỌN VẸN, phủ ĐỦ Ý đã hỏi:\n"
+    "- Tối đa 5 gạch đầu dòng, mỗi gạch 1–2 câu.\n"
+    "- Gộp các tin tương tự vào một gạch thay vì liệt kê từng tin.\n"
+    "- Bỏ phần dẫn nhập và phần kết luận dài dòng.\n"
+    "- BẮT BUỘC kết thúc hoàn chỉnh, tuyệt đối không bỏ dở câu."
+)
+
+# --- Bộ phân loại ý định tầng 2 (model nhẹ) ------------------------------------------
+# Nhãn MỘT KÝ TỰ để output đúng 1 token — độ trễ ở đây là TTFT, mọi token thêm đều đắt.
+INTENT_LABELS: dict[str, str | None] = {
+    "S": "salutation",
+    "T": "thanks",
+    "C": "capability",
+    "Q": None,  # câu tra cứu thật
+}
+
+# Phần "QUY TẮC" không phải trang trí: đo 25/07/2026, flash-lite gạt nhầm
+# "cảm ơn vì tin về mã nguồn mở" → T và "mô hình này có khả năng gì" → C khi thiếu chúng.
+# Luật tất định đã chặn phần lớn ca đó trước khi tới đây, nhưng prompt vẫn phải tự đứng
+# vững vì tập "lưỡng lự" sẽ đổi khi ta mở rộng luật.
+INTENT_CLASSIFIER_PROMPT = """Bạn phân loại câu người dùng gửi cho AI Radar — trợ lý tra cứu tin công nghệ/bảo mật.
+Trả về DUY NHẤT một chữ cái in hoa, không giải thích, không dấu câu:
+
+S = câu CHỈ là lời chào, không hỏi gì thêm
+T = câu CHỈ là lời cảm ơn, không hỏi gì thêm
+C = hỏi về năng lực hoặc danh tính của CHÍNH trợ lý này
+Q = mọi câu còn lại — cần tra cứu tin tức
+
+QUY TẮC:
+- Chỉ chọn C khi chủ ngữ là chính trợ lý (bạn / bot / trợ lý). Câu hỏi về một sản phẩm,
+  công cụ, mô hình hay nhân vật nói trong bài luôn là Q — kể cả khi dùng đúng những chữ
+  như "hoạt động thế nào", "hỗ trợ gì", "là ai", "dùng để làm gì".
+- Chào hoặc cảm ơn mà KÈM một câu hỏi thật thì là Q, không phải S/T.
+- Phân vân thì trả Q."""
+
+# --- Embedding cho retrieval lai (chat-hybrid-retrieval) -----------------------------
+# `task_type` KHÔNG phải trang trí: model sinh vector khác nhau cho câu hỏi và cho tài
+# liệu, và ghép đúng cặp QUERY↔DOCUMENT là cách dùng chuẩn của họ embedding này. Embed
+# cả hai bên bằng cùng một task_type vẫn chạy, chỉ kém — đúng loại lỗi im lặng.
+EMBED_TASK_QUERY = "RETRIEVAL_QUERY"
+EMBED_TASK_DOCUMENT = "RETRIEVAL_DOCUMENT"
+
+# Trần số chuỗi trong MỘT lượt gọi embed. Vertex giới hạn theo cả số instance lẫn tổng
+# token; 32 là mức an toàn cho text cô đọng của insight và vẫn cắt được ~179 tin xuống
+# 6 lượt gọi khi backfill.
+EMBED_BATCH_SIZE = 32
+
+# Ranh giới câu tiếng Việt cho lưới an toàn cuối cùng.
+_SENTENCE_END = ".!?…"
+
+
+def _trim_to_last_sentence(text: str) -> str:
+    """Cắt về câu hoàn chỉnh cuối cùng — lưới an toàn khi hỏi lại vẫn bị cắt.
+
+    Thà mất ý cuối còn hơn hiển thị một câu đứt giữa từ. Nếu không tìm thấy ranh giới
+    câu nào (đoạn văn một câu rất dài) thì trả nguyên văn — cắt bừa còn tệ hơn.
+    """
+    stripped = text.rstrip()
+    cut = max(stripped.rfind(c) for c in _SENTENCE_END)
+    if cut <= 0:
+        return text
+    # Giữ cả dòng cuối nếu nó là một gạch đầu dòng đã hoàn chỉnh.
+    return stripped[: cut + 1]
+
+
+def _chat_generation_config(system_prompt: str) -> types.GenerateContentConfig:
+    """Cấu hình lượt sinh câu trả lời chat — MỘT chỗ cho cả `chat()` lẫn `chat_stream()`.
+
+    Vì sao phải dùng chung (design D3): hai lối ra chạy chung một pipeline là bất biến đã ghi
+    của `chat-streaming-sse`. Nếu chỉ đặt `thinking_config` cho `chat()` thì bản blocking và
+    bản streaming trả lời KHÁC NHAU một cách im lặng — và tệ hơn: `chat_answer_harness` đi lối
+    blocking, nên cổng chất lượng sẽ gác một cấu hình mà người dùng thật không hề chạy.
+
+    **`thinking_budget` là thứ chi phối độ trễ chat**, không phải kích thước prompt. Đo
+    27/07/2026: prompt tầm thường (534 token vào, 10 token ra) vẫn mất 10,3s vì model nghĩ
+    1.416 token; còn cắt ngữ cảnh 6.537 → 1.540 token chỉ đưa 17,4s xuống 11,6s. Xem
+    `settings.chat_thinking_budget` để biết luật chỉnh.
+
+    `-1` = không đặt gì, để model tự quyết (hành vi trước `chat-latency-thinking-budget`).
+    """
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        temperature=0.2,
+        max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
+    )
+    if settings.chat_thinking_budget >= 0:
+        config.thinking_config = types.ThinkingConfig(
+            thinking_budget=settings.chat_thinking_budget
+        )
+    return config
+
+
+# Sàn `thinking_budget` của model bước tra cứu. KHÔNG phải con số tuỳ chọn: Vertex từ chối
+# thẳng (400) mọi giá trị dưới 512 cho `gemini-2.5-flash-lite`. Xem `_web_search_generation_config`.
+WEB_SEARCH_MIN_THINKING = 512
+
+
+def _web_search_generation_config() -> types.GenerateContentConfig:
+    """Cấu hình BƯỚC TRA CỨU (`chat-web-fallback` bước 2) — dựng cạnh `_chat_generation_config`.
+
+    Đặt ở đây, ngay cạnh cấu hình chat, là có chủ đích: hai lượt gọi cùng thuộc đường phục vụ
+    người dùng và cùng chịu luật ghìm `thinking_budget`. Để cấu hình này lạc sang module khác
+    là cách chắc chắn để một hôm nào đó chỉ một trong hai được chỉnh.
+
+    KHÁC `_chat_generation_config` đúng hai điểm, cả hai đều bắt buộc:
+    - có `tools=[google_search]` — không có nó thì không có grounding, và đó là toàn bộ lý do
+      bước này tồn tại;
+    - **không** `system_instruction` — bước này KHÔNG trả lời người dùng, nên nó không được
+      mang luật trích dẫn/độ dài của trợ lý. Output của nó chỉ là tư liệu nội bộ.
+
+    Vẫn KHÔNG `response_schema` (bài học `gemini-structured-output`).
+
+    ⚠️ **SÀN 512 — `chat_thinking_budget` KHÔNG chuyển thẳng sang được.** Đo 03/08/2026:
+    `gemini-2.5-flash-lite` chỉ nhận `thinking_budget` trong khoảng **512–24576**, nên mức ghìm
+    256 của đường chat làm Vertex trả `400 INVALID_ARGUMENT`. Mà `search_web()` nuốt lỗi (đúng
+    thiết kế — tra cứu là tính năng bổ trợ), nên hậu quả là tính năng **chết hoàn toàn trong
+    im lặng**: mọi câu đều "không tra cứu được", không có gì đỏ ở đâu cả.
+
+    Đừng đọc bài học này thành "bỏ ghìm cho xong": luật ghìm vẫn áp (bước này nằm trên đường
+    phục vụ người dùng), chỉ là **ngưỡng hợp lệ của mỗi họ model là khác nhau** và không được
+    giả định nó chuyển được.
+    """
+    config = types.GenerateContentConfig(
+        tools=[types.Tool(google_search=types.GoogleSearch())],
+        temperature=0.2,
+        max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
+    )
+    if settings.chat_thinking_budget >= 0:
+        config.thinking_config = types.ThinkingConfig(
+            thinking_budget=max(settings.chat_thinking_budget, WEB_SEARCH_MIN_THINKING)
+        )
+    return config
+
+
+@dataclass
+class WebSearchResult:
+    """Kết quả THÔ của bước tra cứu — chưa phải nguồn dùng được.
+
+    `uris` là link CHUYỂN HƯỚNG của Vertex, chưa giải; `summary` là bản model tự viết, chỉ
+    dùng làm phương án chót khi mọi trang đều tải hỏng (design D5). Việc biến những thứ này
+    thành `WebSource` là của tầng service — ở đó mới có `trafilatura`.
+    """
+
+    uris: list[str]
+    summary: str = ""
+    search_entry_point: str | None = None
+    queries: list[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.queries is None:
+            self.queries = []
+
+
+def _thinking_tokens(response) -> int | None:
+    """Số token SUY LUẬN của một lượt gọi. `None` khi nhà cung cấp không báo cáo.
+
+    Chi phí này ẩn được suốt từ 22/07 tới 27/07/2026 chỉ vì `google-genai==0.8.0` luôn trả
+    trường này rỗng — nhìn vào `usage_metadata` thì tưởng thinking = 0, trong khi thực tế nó
+    ăn 1.877–2.752 token/câu và chiếm ~90% độ trễ. Phải suy ra từ chỗ lệch của
+    `total_token_count`. Từ SDK 1.75.0 trường này có giá trị thật (đã đối chiếu: khớp đúng
+    hiệu `total − prompt − candidates`).
+
+    Thinking bị tính tiền **như output** ($2,50/1M) nên đây vừa là số liệu độ trễ vừa là
+    số liệu chi phí — lý do nó được ghi vào `chat_logs` chứ không chỉ log ra màn hình.
+    """
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None:
+        return None
+    return getattr(usage, "thoughts_token_count", None)
+
+
+def _is_truncated(response) -> bool:
+    """Response có bị cắt vì chạm `max_output_tokens` không?
+
+    ⚠️ `types.FinishReason` là enum CHUỖI: `.value` trả `'MAX_TOKENS'`, KHÔNG phải `2`.
+    So sánh `== 2` (cách viết cũ ở `analyze()`) không bao giờ đúng, nên cảnh báo cắt
+    chưa từng bắn — kể cả trong đợt điều tra runaway generation ngày 20/07/2026.
+    """
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return False
+    reason = candidates[0].finish_reason
+    return getattr(reason, "value", reason) == "MAX_TOKENS"
+
+
+@dataclass
+class ChatStreamState:
+    """Sổ ghi của MỘT lượt `chat_stream` — caller đọc sau khi luồng kết thúc *hoặc bị bỏ dở*.
+
+    Vì sao là object truyền vào chứ không phải giá trị trả về: generator bị bỏ dở (client
+    ngắt kết nối) không bao giờ chạy tới `return`, mà đó lại đúng lúc ta cần biết **đã tốn
+    bao nhiêu tiền**. `calls` được cộng NGAY khi chunk đầu tiên về — thời điểm tiền đã tiêu —
+    nên dù caller vứt generator giữa chừng, budget vẫn đọc được (design D5).
+
+    `text` là toàn văn đã ráp; `truncated` để caller quyết có phải hỏi lại không.
+    """
+
+    text: str = ""
+    calls: int = 0
+    truncated: bool = False
+    # Bản cuối KHÁC phần đã stream (do hỏi lại hoặc cắt về ranh giới câu) → caller phải
+    # thay text đã hiện, không được nối thêm.
+    replaced: bool = False
+    # Tổng token SUY LUẬN của lượt này (cộng dồn qua cả lượt hỏi lại chống-cắt). `None` =
+    # nhà cung cấp không báo cáo — xem `_thinking_tokens`. Dùng chung cho CẢ hai lối ra:
+    # `chat()` cũng nhận `state` để bản blocking và bản streaming ghi cùng một loại sổ.
+    thinking_tokens: int | None = None
+    # Gọi NGAY TRƯỚC lượt hỏi lại chống-cắt, để caller kịp báo cho người dùng biết vì sao
+    # phải chờ thêm một lượt gọi model nữa. Đồng bộ và phải KHÔNG NÉM: nó chạy giữa đường
+    # sinh câu trả lời, một lỗi ở kênh thông báo không được phép làm hỏng câu trả lời.
+    # `None` = không ai quan tâm (chế độ blocking, test cũ) ⇒ không gọi.
+    on_retry: Callable[[], None] | None = None
+
+    def add_thinking(self, tokens: int | None) -> None:
+        """Cộng dồn, giữ `None` nếu chưa từng có số nào — `None` và `0` KHÁC nhau ở đây:
+        `None` là "không đo được", `0` là "đã ghìm về 0 và model tuân thủ"."""
+        if tokens is None:
+            return
+        self.thinking_tokens = (self.thinking_tokens or 0) + tokens
+
+
+def _notify_retry(state: "ChatStreamState | None") -> None:
+    """Báo caller rằng sắp có một lượt hỏi lại. Nuốt mọi lỗi — có chủ đích.
+
+    Kênh này chỉ để thắp một dòng chữ trên giao diện. Nếu nó hỏng (event loop đã đóng vì
+    client ngắt, callback lỗi lập trình) thì việc đúng là ghi log rồi đi tiếp: người dùng
+    thà mất một mốc tiến trình còn hơn mất câu trả lời đã trả tiền để sinh ra.
+    """
+    if state is None or state.on_retry is None:
+        return
+    try:
+        state.on_retry()
+    except Exception as e:  # noqa: BLE001 — xem docstring
+        logger.debug("Không báo được mốc hỏi lại: %s", e)
 
 
 @dataclass
@@ -172,11 +429,8 @@ class GeminiClient:
                     ),
                 )
 
-                candidates = response.candidates or []
-                if candidates:
-                    finish_reason = candidates[0].finish_reason
-                    if hasattr(finish_reason, "value") and finish_reason.value == 2:
-                        logger.warning("Gemini response truncated (MAX_TOKENS) for '%s'", title[:50])
+                if _is_truncated(response):
+                    logger.warning("Gemini response truncated (MAX_TOKENS) for '%s'", title[:50])
 
                 raw_text = response.text or ""
                 return self._parse_response(raw_text)
@@ -191,6 +445,350 @@ class GeminiClient:
                 return AnalysisResult(error=err_str)
 
         return AnalysisResult(error="Gemini 429 RESOURCE_EXHAUSTED after 3 retries")
+
+    def chat(
+        self, system_prompt: str, user_prompt: str, state: ChatStreamState | None = None
+    ) -> tuple[str, int]:
+        """Một lượt hỏi đáp cho chat Q&A. Trả `(text, model_calls_used)`.
+
+        `state` là sổ ghi tuỳ chọn — cùng loại `chat_stream()` dùng — để caller đọc được số
+        token suy luận đã tiêu. Không truyền cũng chạy y như cũ.
+
+        KHÁC `analyze()`/`gate_analyze()` ở hai điểm cố ý:
+
+        1. **Không** `response_mime_type`/`response_schema`. Đo 20/07/2026: bật schema cho
+           lần gọi có output dài làm model sinh lan man tới chạm `max_output_tokens` rồi bị
+           cắt giữa chuỗi → 16/16 doc lỗi `Unterminated string`; `max_length` trong schema
+           Vertex KHÔNG được thực thi. Câu trả lời chat đúng hình dạng đó. Trả text thuần
+           thì không có JSON để vỡ — citation đi đường riêng qua marker `[n]` (design D4).
+        2. Trả kèm số lượt gọi ĐÃ TỐN TIỀN để service tính budget. Retry 429 không có
+           response nên không tính; lượt trả về rồi vỡ ở bước sau vẫn tính.
+
+        Hàm này SYNC như phần còn lại của client — caller phải bọc `asyncio.to_thread`
+        vì chat nằm trên request path (design D6).
+
+        **Không bao giờ trả về câu trả lời dở dang** (đổi 25/07/2026). Gemini 2.5 tiêu
+        thinking tokens trong CÙNG ngân sách output nên câu hỏi kiểu liệt kê vẫn có thể
+        chạm trần. Cách cũ — dán "_(Câu trả lời bị cắt…)_" vào cuối đoạn đứt — là hỏng:
+        người dùng đọc một câu trả lời THIẾU VẾ SAU, mà phần thiếu thường là phần quan
+        trọng nhất (khuyến nghị, rủi ro). Nay: cắt → HỎI LẠI kèm ràng buộc gộp ý cho
+        ngắn gọn nhưng đủ ý. Lượt hỏi lại được tính vào `calls` trả về nên budget vẫn khớp.
+        """
+        text, truncated, calls = self._chat_once(system_prompt, user_prompt, state)
+        if not truncated:
+            return text, calls
+
+        logger.warning("Chat response truncated (MAX_TOKENS) — hỏi lại với ràng buộc độ dài")
+        _notify_retry(state)
+        retry_text, retry_truncated, retry_calls = self._chat_once(
+            system_prompt + _CONCISE_RETRY_DIRECTIVE, user_prompt, state
+        )
+        calls += retry_calls
+
+        # Lượt hỏi lại rỗng (hiếm — thinking ăn hết ngân sách) thì bản đầu vẫn hơn không.
+        if not retry_text:
+            return _trim_to_last_sentence(text), calls
+
+        if retry_truncated:
+            # Vẫn cắt sau khi đã ép ngắn: cắt về câu hoàn chỉnh cuối. Không dán lời xin
+            # lỗi — câu trả lời phải đọc như một câu trả lời, không phải một lỗi.
+            logger.warning("Chat vẫn bị cắt sau khi hỏi lại — cắt về ranh giới câu")
+            return _trim_to_last_sentence(retry_text), calls
+
+        return retry_text, calls
+
+    def search_web(self, query: str) -> WebSearchResult:
+        """Bước TRA CỨU: chạy Google Search qua grounding, lấy về **định danh nguồn**.
+
+        Trả `uris` (link chuyển hướng, chưa giải) + `summary` (bản model tự viết) +
+        `search_entry_point` (HTML bắt buộc hiển thị theo điều khoản Google).
+
+        ⚠️ Hàm này CỐ Ý không trả nội dung trang: `grounding_chunks[].web` chỉ có
+        `domain`/`title`/`uri`, **không có snippet** (xác minh trên SDK 1.75.0, spike 0.3).
+        Dùng `summary` làm nội dung là để citation trỏ tới một trang mà văn bản cạnh nó do
+        model viết — đúng chế độ hỏng "lời bịa có kèm nguồn" mà cả hệ thống này chống. Nội
+        dung thật do tầng service tải bằng trafilatura (design D1).
+
+        Lỗi Vertex KHÔNG nổ ra ngoài: tra cứu là tính năng bổ trợ, hỏng thì câu hỏi vẫn phải
+        được trả lời từ corpus. Trả kết quả rỗng để caller bỏ qua bước này.
+
+        SYNC như phần còn lại của client — caller phải bọc `asyncio.to_thread`.
+        """
+        try:
+            response = self._client.models.generate_content(
+                model=settings.chat_web_search_model_id,
+                contents=WEB_SEARCH_PROMPT.format(query=query),
+                config=_web_search_generation_config(),
+            )
+        except Exception as e:
+            logger.warning("Tra cứu ngoài lỗi, bỏ qua bước này: %s", e)
+            return WebSearchResult(uris=[])
+
+        candidates = getattr(response, "candidates", None) or []
+        meta = getattr(candidates[0], "grounding_metadata", None) if candidates else None
+        if meta is None:
+            # Model quyết định không cần tìm. Đo 03/08 (spike 0.1): không có lượt tìm nào
+            # chạy ⇒ nhiều khả năng cũng không bị tính tiền grounding.
+            logger.info("Model không chạy lượt tìm kiếm nào cho: %r", query[:80])
+            return WebSearchResult(uris=[], summary=(response.text or "").strip())
+
+        uris = [
+            c.web.uri
+            for c in (meta.grounding_chunks or [])
+            if getattr(c, "web", None) and c.web.uri
+        ]
+        entry = getattr(meta, "search_entry_point", None)
+        return WebSearchResult(
+            uris=uris,
+            summary=(response.text or "").strip(),
+            search_entry_point=getattr(entry, "rendered_content", None) if entry else None,
+            queries=list(meta.web_search_queries or []),
+        )
+
+    def chat_stream(
+        self, system_prompt: str, user_prompt: str, state: ChatStreamState
+    ) -> Iterator[str]:
+        """Bản **sinh dần** của `chat()` — yield từng chunk text khi model sinh.
+
+        Cùng model, cùng system+user prompt, cùng cấu hình (vẫn KHÔNG structured output —
+        bài học `gemini-structured-output` không đổi vì đường truyền đổi). `chat()` một‑phát
+        giữ nguyên: route blocking, eval harness và test cũ vẫn đi lối đó.
+
+        Kế toán đi qua `state` chứ không qua giá trị trả về — xem `ChatStreamState`.
+
+        **Chống‑cắt dưới streaming.** `chat()` gặp `MAX_TOKENS` thì hỏi lại cho ngắn gọn mà
+        đủ ý; ở đây chữ đã hiện lên màn hình rồi nên không "rút lại" được từng token. Cách
+        xử lý: hỏi lại bằng lượt **một‑phát** (không stream — người dùng đã có chữ để đọc,
+        stream lần hai chỉ làm nhấp nháy) rồi bật `state.replaced` để caller THAY toàn bộ
+        text ở sự kiện chốt. Đây chính là kênh provisional→commit mà fail‑closed đang dùng,
+        không phải cơ chế thứ hai. Bất biến "không bao giờ trả câu trả lời dở dang" giữ
+        nguyên, và trạng thái chốt vẫn trùng bản blocking.
+        """
+        yield from self._chat_stream_once(system_prompt, user_prompt, state)
+        state.text = state.text.strip()
+        if not state.truncated:
+            return
+
+        logger.warning("Chat stream bị cắt (MAX_TOKENS) — hỏi lại với ràng buộc độ dài")
+        _notify_retry(state)
+        retry_text, retry_truncated, retry_calls = self._chat_once(
+            system_prompt + _CONCISE_RETRY_DIRECTIVE, user_prompt, state
+        )
+        state.calls += retry_calls
+        state.replaced = True
+
+        if not retry_text:
+            # Lượt hỏi lại rỗng (thinking ăn hết ngân sách) — bản đầu vẫn hơn không.
+            state.text = _trim_to_last_sentence(state.text)
+            return
+        state.text = _trim_to_last_sentence(retry_text) if retry_truncated else retry_text
+
+    def _chat_stream_once(
+        self, system_prompt: str, user_prompt: str, state: ChatStreamState
+    ) -> Iterator[str]:
+        """Một lượt gọi streaming + retry 429. Cập nhật `state` tại chỗ.
+
+        Chỉ retry khi **chưa** phát chunk nào: một khi chữ đã ra tới người dùng thì gọi lại
+        là sinh ra hai câu trả lời chồng nhau trên cùng một bong bóng.
+        """
+        _retry_delays = [3, 10]
+
+        for attempt, delay in enumerate([0] + _retry_delays):
+            if delay:
+                logger.info("Retrying chat stream after %ds (attempt %d/2)", delay, attempt)
+                time.sleep(delay)
+
+            started = False
+            try:
+                stream = self._client.models.generate_content_stream(
+                    model=MODEL_ID,
+                    contents=user_prompt,
+                    # CÙNG cấu hình với `chat()` — hai lối ra không được trôi khỏi nhau
+                    # (design D3). Cổng chất lượng đi lối blocking, nên khác nhau ở đây là
+                    # để cổng gác một cấu hình mà người dùng thật không chạy.
+                    config=_chat_generation_config(system_prompt),
+                )
+                last = None
+                for response in stream:
+                    if not started:
+                        # Tiền đã tiêu ngay từ chunk đầu — cộng ở đây chứ không ở cuối,
+                        # vì cuối có thể không bao giờ tới (client ngắt).
+                        state.calls += 1
+                        started = True
+                    last = response
+                    piece = response.text or ""
+                    if piece:
+                        state.text += piece
+                        yield piece
+
+                if not started:
+                    state.calls += 1  # gọi thành công nhưng model không sinh gì
+                state.truncated = _is_truncated(last) if last is not None else False
+                # Chunk CUỐI mang `usage_metadata` của cả lượt — cộng ở đây, không phải mỗi chunk.
+                state.add_thinking(_thinking_tokens(last) if last is not None else None)
+                return
+
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    if not started and attempt < len(_retry_delays):
+                        logger.warning("Chat stream 429 rate-limit, will retry")
+                        continue
+                logger.error("Chat stream Vertex AI error: %s", e)
+                raise
+
+        raise RuntimeError("Chat stream 429 RESOURCE_EXHAUSTED after retries")
+
+    def embed(
+        self, texts: list[str], task_type: str = EMBED_TASK_DOCUMENT
+    ) -> list[list[float] | None]:
+        """Sinh embedding cho một lô text. Trả list CÙNG ĐỘ DÀI với `texts`.
+
+        Phần tử `None` = lô đó embed lỗi. **Không ném exception**: embedding là phụ trợ
+        xếp hạng, không phải đường sống (design D6). Cả `AnalyzerService` lẫn chat đều
+        phải chạy tiếp được khi Vertex embedding sự cố — nơi này trả `None`, nơi gọi log
+        WARNING rồi đi tiếp bằng đường lexical.
+
+        **KHÔNG đếm vào `model_calls`** — nghĩa là không tiêu `max_daily_chat_calls`.
+        Cùng lý do với bộ phân loại ý định tầng 2: bộ đếm đó canh budget của lượt sinh
+        văn bản đắt (~19k token trên `gemini-2.5-flash`). Một lượt embed là ~30–200 token
+        trên model embedding, rẻ hơn vài bậc; trộn chung là để lượt gọi rẻ bào mòn budget
+        đắt (đúng bẫy "đơn vị budget khác nhau" của repo).
+
+        SYNC như phần còn lại của client — caller trên request path phải bọc `to_thread`.
+        """
+        if not texts:
+            return []
+
+        out: list[list[float] | None] = []
+        for start in range(0, len(texts), EMBED_BATCH_SIZE):
+            batch = texts[start : start + EMBED_BATCH_SIZE]
+            out.extend(self._embed_batch(batch, task_type))
+        return out
+
+    def embed_one(
+        self, text: str, task_type: str = EMBED_TASK_DOCUMENT
+    ) -> list[float] | None:
+        """`embed()` cho đúng một chuỗi. `None` = lỗi hoặc text rỗng."""
+        if not text or not text.strip():
+            return None
+        return self.embed([text], task_type)[0]
+
+    def _embed_batch(
+        self, batch: list[str], task_type: str
+    ) -> list[list[float] | None]:
+        """Một lượt gọi embed + retry 429. Lỗi → trả `[None] * len(batch)`."""
+        _retry_delays = [3, 10]
+
+        for attempt, delay in enumerate([0] + _retry_delays):
+            if delay:
+                logger.info("Retrying embed after %ds (attempt %d/2)", delay, attempt)
+                time.sleep(delay)
+            try:
+                response = self._client.models.embed_content(
+                    model=settings.embedding_model_id,
+                    contents=batch,
+                    config=types.EmbedContentConfig(
+                        task_type=task_type,
+                        output_dimensionality=EMBEDDING_DIM,
+                        # Text dài hơn trần của model thì CẮT thay vì ném lỗi: một insight
+                        # dài bất thường không đáng để mất embedding của cả lô.
+                        auto_truncate=True,
+                    ),
+                )
+            except Exception as e:
+                err_str = str(e)
+                if ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str) and attempt < len(
+                    _retry_delays
+                ):
+                    logger.warning("Embed 429 rate-limit, will retry")
+                    continue
+                logger.warning("Embed lỗi (%d text): %s", len(batch), e)
+                return [None] * len(batch)
+
+            embeddings = list(response.embeddings or [])
+            if len(embeddings) != len(batch):
+                # Ghép sai vị trí còn tệ hơn không có embedding: nó gán vector của tin này
+                # cho tin khác và làm hỏng xếp hạng một cách im lặng.
+                logger.warning(
+                    "Embed trả %d vector cho %d text — bỏ cả lô", len(embeddings), len(batch)
+                )
+                return [None] * len(batch)
+            return [list(e.values) if e.values else None for e in embeddings]
+
+        return [None] * len(batch)
+
+    def classify_intent(self, question: str) -> str | None:
+        """Tầng 2 của bộ lọc ý định: model NHẸ phán ca luật lưỡng lự (~3,5% câu hỏi).
+
+        Trả nhóm ý định (`salutation`/`thanks`/`capability`) hoặc `None` = câu tra cứu.
+
+        Ba lựa chọn ép độ trễ xuống sàn, vì hàm này nằm chắn trước câu trả lời:
+        - model lite (`intent_classifier_model_id`) — 2.5‑flash không dùng được ở đây,
+          thinking ăn hết ngân sách output và trả text rỗng (đo 25/07/2026);
+        - nhãn MỘT KÝ TỰ → đúng 1 token output, phần tốn thời gian duy nhất còn lại là
+          TTFT (đo: sàn 1.433 ms với prompt rỗng, nên prompt dài thêm gần như miễn phí);
+        - `max_output_tokens=4`, `temperature=0` → tất định, không lan man.
+
+        **Fail‑safe về phía pipeline**: mọi lỗi/nhãn lạ đều trả `None`. Câu chào lọt lưới
+        chỉ tốn thêm một lượt gọi; gạt nhầm câu hỏi thật thành preset mới là hỏng thật.
+        KHÔNG retry — retry ở đây là cộng thẳng vài giây vào thời gian chờ của người dùng
+        để cứu một phân loại mà fallback đã xử lý đúng rồi.
+        """
+        try:
+            response = self._client.models.generate_content(
+                model=settings.intent_classifier_model_id,
+                contents=question,
+                config=types.GenerateContentConfig(
+                    system_instruction=INTENT_CLASSIFIER_PROMPT,
+                    temperature=0.0,
+                    max_output_tokens=4,
+                ),
+            )
+        except Exception as e:
+            logger.warning("Intent classifier lỗi, rơi về pipeline: %s", e)
+            return None
+
+        label = (response.text or "").strip().upper()[:1]
+        intent = INTENT_LABELS.get(label)
+        if label not in INTENT_LABELS:
+            logger.warning("Intent classifier trả nhãn lạ %r → rơi về pipeline", label)
+        return intent
+
+    def _chat_once(
+        self, system_prompt: str, user_prompt: str, state: ChatStreamState | None = None
+    ) -> tuple[str, bool, int]:
+        """Một lượt gọi chat + retry 429. Trả `(text, bị_cắt, số_lượt_tính_tiền)`."""
+        _retry_delays = [3, 10]
+        calls = 0
+
+        for attempt, delay in enumerate([0] + _retry_delays):
+            if delay:
+                logger.info("Retrying chat after %ds (attempt %d/2)", delay, attempt)
+                time.sleep(delay)
+            try:
+                response = self._client.models.generate_content(
+                    model=MODEL_ID,
+                    contents=user_prompt,
+                    config=_chat_generation_config(system_prompt),
+                )
+                calls += 1
+                if state is not None:
+                    state.add_thinking(_thinking_tokens(response))
+                return (response.text or "").strip(), _is_truncated(response), calls
+
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    if attempt < len(_retry_delays):
+                        logger.warning("Chat 429 rate-limit, will retry")
+                        continue
+                logger.error("Chat Vertex AI error: %s", e)
+                raise
+
+        return "", False, calls
+
+        raise RuntimeError("Chat 429 RESOURCE_EXHAUSTED after retries")
 
     def _parse_response(self, raw_text: str) -> AnalysisResult:
         """Parse Gemini JSON response into AnalysisResult."""
@@ -267,3 +865,22 @@ class GeminiClient:
             adoption_ring=adoption_ring,
             practical_indicators=practical_indicators,
         )
+
+
+_chat_client: GeminiClient | None = None
+
+
+def get_chat_client() -> GeminiClient:
+    """Singleton `GeminiClient` cho request path (design D6).
+
+    `AnalyzerService.__init__` tạo client mới mỗi lần khởi tạo service — vô hại với
+    script chạy một lần. Nhưng route dùng `Depends(...)` chạy MỖI REQUEST; bắt chước
+    pattern đó sẽ dựng `genai.Client` mới cho từng câu hỏi = connection pool mới +
+    re-auth Vertex mỗi lần.
+
+    Khởi tạo lười: import module này không được đòi credentials (test/CI không có key).
+    """
+    global _chat_client
+    if _chat_client is None:
+        _chat_client = GeminiClient()
+    return _chat_client

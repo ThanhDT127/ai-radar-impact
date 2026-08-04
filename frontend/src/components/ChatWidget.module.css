@@ -1,0 +1,356 @@
+.launcher {
+  position: fixed;
+  bottom: 32px;
+  right: 88px; /* chừa chỗ cho nút ScrollToTop ở right: 32px */
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  box-shadow: var(--shadow-3);
+  transition: background var(--transition), color var(--transition);
+}
+
+.launcher:hover {
+  background: var(--color-accent-light);
+  color: var(--color-accent-strong);
+}
+
+.panel {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  /* Rộng hơn 380px cũ: câu trả lời chế độ toàn cục thường là danh sách 5 tin, ở 380px
+     thì mỗi dòng gãy 3-4 lần và tiêu đề nguồn tràn ra ngoài. */
+  width: min(520px, calc(100vw - 48px));
+  /* Chiều cao CỐ ĐỊNH, không co giãn theo số tin nhắn — panel nhảy kích thước mỗi lần
+     có câu trả lời mới làm người đọc mất điểm nhìn. */
+  height: 600px;
+  max-height: calc(100vh - 64px);
+  border-radius: var(--radius-lg, 12px);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Nhóm nút điều khiển panel. "Cuộc trò chuyện mới" đứng cạnh nút đóng — cùng cỡ, cùng kiểu:
+   nó là một thao tác điều khiển panel, không phải một hành động trong luồng hội thoại. */
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.iconBtn {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px;
+}
+
+.iconBtn:hover {
+  color: var(--color-text-primary);
+}
+
+/* Badge phạm vi — thay context chip một chiều cũ. Luôn hiện khi ở trang chi tiết để
+   người dùng thấy mình đang hỏi ở đâu VÀ chuyển được cả hai chiều tại chỗ. */
+/* Hàng WORKING SET — các tin đang được đọc kỹ trong ngữ cảnh hội thoại
+   (change `chat-context-depth`). Thay `scopeBar` một-lựa-chọn của scope-routing:
+   ngữ cảnh nay là một TẬP tin sửa được, không phải một chế độ để bật/tắt. */
+.refBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 14px 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.refLabel {
+  flex-shrink: 0;
+}
+.refChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 6px 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent-light);
+  color: var(--color-accent-strong);
+}
+.refTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.refRemove {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: var(--text-xs);
+  line-height: 1;
+  opacity: 0.7;
+}
+.refRemove:hover {
+  opacity: 1;
+}
+
+.expandedTag {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.messages {
+  flex: 1;
+  min-height: 0; /* cho phép co lại trong flex column, nếu không sẽ đẩy panel phình ra */
+  overflow-y: auto;
+  overflow-x: hidden; /* chốt chặn: không bao giờ sinh thanh cuộn ngang */
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.empty {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.bubbleUser,
+.bubbleBot {
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  /* `anywhere` chứ không phải `break-word`: tiêu đề nguồn và URL dài phải bẻ được ở
+     giữa từ, nếu không chúng đẩy rộng cả panel. */
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.bubbleUser {
+  align-self: flex-end;
+  max-width: 85%;
+  background: var(--color-accent-light);
+  color: var(--color-accent-strong);
+}
+
+.bubbleBot {
+  align-self: stretch;
+  background: var(--color-bg-accent);
+  color: var(--color-text-primary);
+}
+
+.bubbleError {
+  composes: bubbleBot;
+  border: 1px solid var(--color-danger-muted, var(--color-border));
+}
+
+/* Mốc tiến trình trong lúc chờ. Mờ hơn và nghiêng để đọc ra ngay là "server đang làm gì",
+   không phải một phần câu trả lời — nó sẽ bị token thật thay chỗ ngay khi có. */
+.status {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* Danh sách mốc TÍCH LUỸ (change `chat-status-milestones`). Mốc đã qua ở lại dạng mờ để
+   người dùng thấy chuỗi việc đã làm — trước đây một dòng bị ghi đè nên chuỗi đó vô hình. */
+.statusList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.statusList li {
+  font-style: italic;
+  font-size: 0.92em;
+  /* Dòng dài hơn bề ngang panel là chuyện thường (mốc mang tên tin). Cho xuống dòng thay vì
+     tràn ngang — cùng lý do với `.citations`. */
+  overflow-wrap: anywhere;
+}
+
+.statusDone {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+}
+
+.statusCurrent {
+  color: var(--color-text-secondary);
+}
+
+.citations {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Tiêu đề nguồn dài hơn bề ngang panel là chuyện thường. Cho xuống dòng và cắt ở 2
+   dòng — KHÔNG dùng `white-space: nowrap`: flex item mặc định `min-width: auto` nên
+   nowrap không bị cắt mà đẩy rộng cả panel, sinh thanh cuộn ngang (lỗi thấy 22/07). */
+.citationLink {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-accent-strong);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.citationLink:hover {
+  text-decoration: underline;
+}
+
+/* Marker [n] nằm GIỮA câu — phải là inline thuần, không kế thừa clamp/overflow của
+   danh sách nguồn phía trên. */
+.marker {
+  color: var(--color-accent-strong);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.marker:hover {
+  text-decoration: underline;
+}
+
+.retryBtn {
+  margin-top: 8px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-full);
+  padding: 3px 10px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.form {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.input {
+  flex: 1;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-accent);
+  color: var(--color-text-primary);
+  padding: 8px 12px;
+  font-size: var(--text-sm);
+  font-family: inherit;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.sendBtn {
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  color: #fff;
+  padding: 0 14px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.sendBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Màn hình hẹp: panel chiếm toàn bộ chiều cao, không đè lệch nội dung */
+@media (max-width: 560px) {
+  .panel {
+    inset: 0;
+    width: 100%;
+    /* Ghi đè chiều cao cố định của desktop — trên mobile panel chiếm trọn màn hình. */
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    border: none;
+  }
+
+  .launcher {
+    right: 88px;
+    bottom: 24px;
+  }
+}
+
+/* Nguồn TRA CỨU NGOÀI (change `chat-web-fallback`). Cố ý khác hẳn `.citationLink`: tin trong
+   hệ thống đã qua phân tích và chấm tin cậy, trang web thì chưa — trộn chung một kiểu hiển
+   thị là để người dùng gán nhầm mức tin cậy cho nó. */
+.citationWeb {
+  composes: citationLink;
+  border-left: 2px dashed var(--color-border);
+  padding-left: 6px;
+}
+
+.citationDomain {
+  margin-left: 6px;
+  opacity: 0.65;
+  font-size: 0.85em;
+}
+
+/* Khối Search Suggestions do Google cấp — BẮT BUỘC hiển thị theo điều khoản Grounding with
+   Google Search. HTML đến từ Google, không tự soạn lại. */
+.searchSuggestions {
+  margin-top: 10px;
+  overflow-x: auto;
+}
